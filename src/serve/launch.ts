@@ -1,0 +1,141 @@
+import { type ExecutorSettings } from '../config/executor.ts'
+import { and, count, eq } from 'drizzle-orm'
+import { type WorklingDatabase } from '../db/index.ts'
+import { issues as issueStates, repos, runs } from '../db/schema.ts'
+import { createExecutor, type Executor } from '../executor/index.ts'
+import { ghEnv } from '../platform/github.ts'
+import { parseIssueRef } from '../issue/reference.ts'
+import { createTaskDir } from '../task/dir.ts'
+import { type PiSettings } from '../config/pi.ts'
+import type { Command } from '../runtime/types.ts'
+import type { Settings } from '../config/env.ts'
+
+import { errorMessage } from '../runtime/errors.ts'
+type Log = (message: string) => void
+
+export async function launchQueued({
+  db,
+  command,
+  log,
+  settings,
+  pi,
+  executorSettings,
+  now = () => new Date(),
+  executor = createExecutor(executorSettings, command, log),
+}: {
+  db: WorklingDatabase
+  command: Command
+  log: Log
+  settings: Settings
+  pi: PiSettings
+  executorSettings: ExecutorSettings
+  now?: () => Date
+  executor?: Executor
+}): Promise<void> {
+  let slots =
+    executorSettings.concurrency -
+    db.select({ count: count() }).from(issueStates).where(eq(issueStates.status, 'running')).get()!
+      .count
+  const rows = db
+    .select({ issue: issueStates, repo: repos })
+    .from(issueStates)
+    .innerJoin(repos, eq(issueStates.repoId, repos.id))
+    .where(
+      and(eq(issueStates.status, 'queued'), eq(repos.enabled, true), eq(repos.platform, 'github')),
+    )
+    .orderBy(issueStates.number, repos.id)
+    .all()
+  if (executorSettings.sandbox === 'docker' && !pi.llmBaseUrl) {
+    if (rows.length > 0) log('docker 沙箱需要在设置页配置 LLM 接入地址，暂不拉起任务')
+    return
+  }
+  if (slots <= 0) return
+  for (const { issue, repo } of rows) {
+    if (slots <= 0) break
+    if (repo.host !== 'github.com') {
+      log(`${repo.ref} #${issue.number} 跳过：M1 只支持 github.com`)
+      continue
+    }
+    slots--
+    let record: typeof runs.$inferSelect | undefined
+    try {
+      const startedAt = now()
+      const ref = parseIssueRef(`github:${repo.path}#${issue.number}`)
+      const taskDir = await createTaskDir(settings.workspace, ref, startedAt)
+      record = db
+        .insert(runs)
+        .values({ issueId: issue.id, worker: settings.worker, taskDir, startedAt })
+        .returning()
+        .get()
+      const inherited = ghEnv(repo.token, repo.host)
+      // 清空可选配置后，不能让旧环境变量重新进入 task。
+      for (const name of [
+        'WORKLING_PI_MODEL',
+        'WORKLING_LLM_BASE_URL',
+        'WORKLING_LLM_API_KEY',
+        'WORKLING_LLM_API',
+      ])
+        delete inherited[name]
+      const env = {
+        ...inherited,
+        WORKLING_WORKSPACE: settings.workspace,
+        WORKLING_MODEL: pi.model,
+        WORKLING_EFFORT: pi.effort,
+        WORKLING_GIT_NAME: pi.gitName,
+        WORKLING_GIT_EMAIL: pi.gitEmail,
+        ...(pi.piModel !== null ? { WORKLING_PI_MODEL: pi.piModel } : {}),
+        ...(pi.llmBaseUrl !== null
+          ? {
+              WORKLING_LLM_BASE_URL: pi.llmBaseUrl,
+              WORKLING_LLM_API_KEY: pi.llmApiKey!,
+              WORKLING_LLM_API: pi.llmApi,
+            }
+          : {}),
+      }
+      const handle = await executor.start({
+        runId: record.id,
+        ref: `github:${repo.path}#${issue.number}`,
+        taskDir,
+        env,
+      })
+      const runId = record.id
+      db.transaction((tx) => {
+        tx.update(runs)
+          .set({ pid: handle.pid, container: handle.container })
+          .where(eq(runs.id, runId))
+          .run()
+        tx.update(issueStates)
+          .set({ status: 'running', lastRunId: runId, updatedAt: now() })
+          .where(eq(issueStates.id, issue.id))
+          .run()
+      })
+    } catch (error) {
+      if (record)
+        db.update(runs)
+          .set({ endedAt: now(), error: `拉起失败：${errorMessage(error)}` })
+          .where(eq(runs.id, record.id))
+          .run()
+      log(`${repo.ref} #${issue.number} 拉起失败：${errorMessage(error)}`)
+      continue
+    }
+    try {
+      await command(
+        [
+          'gh',
+          'issue',
+          'edit',
+          String(issue.number),
+          '-R',
+          repo.path,
+          '--remove-label',
+          'workling:queued',
+          '--add-label',
+          'workling:running',
+        ],
+        { env: ghEnv(repo.token, repo.host) },
+      )
+    } catch (error) {
+      log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
+    }
+  }
+}

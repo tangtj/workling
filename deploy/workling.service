@@ -1,0 +1,16 @@
+[Unit]
+Description=workling watch
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+User=workling
+WorkingDirectory=/opt/workling
+EnvironmentFile=/etc/workling/workling.env
+ExecStart=/usr/local/bin/bun src/cli.ts serve
+Restart=always
+# 停止 watch 时不结束它拉起的任务（none 模式下的 task 进程）
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

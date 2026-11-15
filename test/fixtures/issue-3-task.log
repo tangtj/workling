@@ -1,0 +1,10 @@
+[workling 22:00:44] 克隆 octo/workling-test
+正克隆到 '/home/dev/workling/.runtime/tasks/octo-workling-test-3-20261114T140044Z/repo'...
+[workling 22:00:48] 配置 git 凭证与提交身份
+[workling 22:00:48] 拉起 Pi
+No API key found for the selected model.
+
+Use /login to log into a provider via OAuth or API key. See:
+  /home/dev/workling/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+  /home/dev/workling/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+[workling 22:00:49] Pi 结束：退出码 1，用时 1 秒

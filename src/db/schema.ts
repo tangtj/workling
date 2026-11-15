@@ -1,0 +1,93 @@
+import { integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+
+export const upgradeSteps = sqliteTable('upgrade_steps', {
+  id: text('id').primaryKey(),
+  description: text('description').notNull(),
+  appliedAt: integer('applied_at', { mode: 'timestamp' }).notNull(),
+})
+
+export const repos = sqliteTable('repos', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ref: text('ref').notNull().unique(),
+  platform: text('platform', { enum: ['github', 'gitlab'] }).notNull(),
+  host: text('host').notNull(),
+  path: text('path').notNull(),
+  token: text('token').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+})
+
+export const admin = sqliteTable('admin', {
+  id: integer('id').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+})
+
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+})
+
+export const issues = sqliteTable(
+  'issues',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    title: text('title'),
+    status: text('status', { enum: ['queued', 'running', 'done', 'failed', 'canceled'] }).notNull(),
+    prUrl: text('pr_url'),
+    // 不设外键，避免 issues 与 runs 循环引用。
+    lastRunId: integer('last_run_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [uniqueIndex('issues_repo_number_unique').on(table.repoId, table.number)],
+)
+
+export const runs = sqliteTable('runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  issueId: integer('issue_id')
+    .notNull()
+    .references(() => issues.id, { onDelete: 'cascade' }),
+  worker: text('worker').notNull(),
+  taskDir: text('task_dir'),
+  pid: integer('pid'),
+  container: text('container'),
+  startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
+  endedAt: integer('ended_at', { mode: 'timestamp' }),
+  exitCode: integer('exit_code'),
+  error: text('error'),
+  summary: text('summary'),
+  reportResult: text('report_result'),
+  logTail: text('log_tail'),
+})
+
+export const piSettings = sqliteTable('pi_settings', {
+  id: integer('id').primaryKey(),
+  model: text('model').notNull(),
+  effort: text('effort', { enum: ['low', 'medium', 'high', 'xhigh'] }).notNull(),
+  piModel: text('pi_model'),
+  llmBaseUrl: text('llm_base_url'),
+  llmApiKey: text('llm_api_key'),
+  llmApi: text('llm_api', { enum: ['openai-responses', 'openai-completions'] }).notNull(),
+  gitName: text('git_name').notNull(),
+  gitEmail: text('git_email').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+})
+
+export const executorSettings = sqliteTable('executor_settings', {
+  id: integer('id').primaryKey(),
+  sandbox: text('sandbox', { enum: ['none', 'docker'] }).notNull(),
+  taskImage: text('task_image').notNull(),
+  taskCpus: real('task_cpus').notNull(),
+  taskMemory: text('task_memory').notNull(),
+  taskPids: integer('task_pids').notNull(),
+  taskNetwork: text('task_network'),
+  concurrency: integer('concurrency').notNull().default(3),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+})

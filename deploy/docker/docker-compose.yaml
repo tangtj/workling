@@ -1,0 +1,16 @@
+# 服务器使用已发布镜像：下载到服务器的部署目录后 docker compose up -d；本地从源码构建请用 docker-compose.build.yaml。
+services:
+  workling:
+    image: ${WORKLING_IMAGE:?请在 .env 设置 WORKLING_IMAGE}:${WORKLING_VERSION:-latest}
+    init: true # 回收 Pi / codex 遗留的孤儿进程，避免僵尸进程干扰存活判断
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WORKLING_WORKER: ${WORKLING_WORKER:-workling-docker}
+    ports:
+      - '127.0.0.1:7420:7420' # 管理接口只暴露给宿主机本机
+    volumes:
+      # 默认用命名卷；设置 WORKLING_DATA_DIR 为宿主机目录则改为挂载该目录（需对 uid 1000 可写）。
+      - ${WORKLING_DATA_DIR:-workling-data}:/data
+volumes:
+  workling-data:

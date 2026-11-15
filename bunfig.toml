@@ -1,0 +1,11 @@
+[run]
+# 自有入口显式使用 Bun，不替换外部工具与业务项目的 node。
+bun = false
+
+[install]
+exact = true
+registry = "https://registry.npmmirror.com"
+
+[test]
+root = "./test"
+preload = ["./test/setup.ts"]
