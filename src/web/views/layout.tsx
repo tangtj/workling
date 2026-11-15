@@ -26,17 +26,34 @@ export function Layout({
         <title>{title} · workling</title>
         <link rel="stylesheet" href="/style.css" />
         <script src="/app.js" defer></script>
+        <script src="/version.js" defer></script>
       </head>
       <body data-page={active} data-autorefresh={refresh ? '15' : undefined}>
         <div class="shell">
           <aside class="sidebar">
-            <a class="brand" href="/">
-              <span class="brand-mark">W</span>
+            <div class="brand">
+              <a class="brand-mark" href="/" aria-label="workling 首页">
+                W
+              </a>
               <div>
-                <b>workling</b>
-                <span>本机管理</span>
+                <a href="/">
+                  <b>workling</b>
+                </a>
+                <button
+                  id="version-pill"
+                  class="version-pill"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                  aria-controls="version-popover"
+                  data-current={readVersion()}
+                >
+                  <span id="version-label">{readVersion()}</span>
+                  <span class="dot" hidden></span>
+                </button>
               </div>
-            </a>
+              <VersionPopover />
+            </div>
             <nav class="nav">
               {(['overview', 'issues', 'repos', 'settings'] as const).map((key, index) => (
                 <a
@@ -134,7 +151,6 @@ export function Layout({
                   </div>
                 )}
               </div>
-              <div class="small muted">版本 {readVersion()}</div>
               <button id="logout" class="button button--wide" type="button">
                 退出登录
               </button>
@@ -144,5 +160,123 @@ export function Layout({
         </div>
       </body>
     </html>
+  )
+}
+
+function VersionIcon({ name }: { name: string }) {
+  const paths: Record<string, string> = {
+    refresh: 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2',
+    check: 'm6 12 4 4 8-8',
+    arrow: 'M12 19V5m-6 6 6-6 6 6',
+    info: 'M12 8h.01M12 11v5',
+    warning: 'M12 6v8m0 3h.01',
+    github:
+      'M9 19c-4 1-4-2-6-2m12 5v-4a3 3 0 0 0-1-2c3 0 6-2 6-5a5 5 0 0 0-1-3 5 5 0 0 0 0-4s-1 0-3 2a12 12 0 0 0-8 0C6 4 5 4 5 4a5 5 0 0 0 0 4 5 5 0 0 0-1 3c0 3 3 5 6 5a3 3 0 0 0-1 2v4',
+  }
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d={paths[name]} />
+    </svg>
+  )
+}
+
+function VersionPopover() {
+  return (
+    <div
+      id="version-popover"
+      class="version-popover"
+      role="dialog"
+      aria-label="版本与更新"
+      tabindex={-1}
+      hidden
+    >
+      <header class="version-head">
+        <b>当前版本</b>
+        <button id="version-check" class="version-icon-button" type="button" aria-label="检查更新">
+          <VersionIcon name="refresh" />
+        </button>
+      </header>
+      <div class="version-body" aria-live="polite">
+        <div class="version-number">
+          <strong id="version-current">{readVersion()}</strong>
+          <span id="version-badge" class="version-badge">
+            {['check', 'arrow', 'info', 'warning'].map((name) => (
+              <span data-version-icon={name} hidden={name !== 'info'}>
+                <VersionIcon name={name} />
+              </span>
+            ))}
+          </span>
+        </div>
+        <p id="version-description" class="muted">
+          正在读取版本信息…
+        </p>
+        <p id="version-detail" class="small muted" hidden></p>
+        <div id="version-release" hidden>
+          <p id="version-notes" class="version-notes"></p>
+          <button
+            id="version-more"
+            class="version-text-button"
+            type="button"
+            aria-expanded="false"
+            hidden
+          >
+            更多
+          </button>
+        </div>
+        <button id="version-update" class="button button--primary" type="button" hidden></button>
+        <a id="version-link" class="version-link" target="_blank" rel="noopener noreferrer" hidden>
+          <VersionIcon name="github" />
+          查看发布
+        </a>
+      </div>
+      <section id="version-confirmation" class="version-section" hidden>
+        <b id="version-confirm-title"></b>
+        <p id="version-confirm-description" class="small"></p>
+        <fieldset id="version-modes" hidden>
+          <legend>执行方式</legend>
+          <label>
+            <input type="radio" name="version-mode" value="drain" checked />
+            <span id="version-drain-label"></span>
+          </label>
+          <label>
+            <input type="radio" name="version-mode" value="now" />
+            立即更新，中断运行中的任务
+          </label>
+        </fieldset>
+        <div class="actions">
+          <button id="version-confirm" class="button button--primary" type="button">
+            确认更新
+          </button>
+          <button id="version-dismiss" class="button" type="button">
+            取消
+          </button>
+        </div>
+      </section>
+      <section id="version-progress" class="version-section" aria-live="polite" hidden>
+        <p id="version-status"></p>
+        <pre id="version-logs"></pre>
+        <button id="version-cancel" class="button" type="button" hidden>
+          取消更新
+        </button>
+        <button id="version-back" class="button" type="button" hidden>
+          返回
+        </button>
+      </section>
+      <p id="version-error" class="version-error" role="alert" hidden></p>
+      <footer class="version-footer">
+        <p id="version-last-success" class="small muted" hidden></p>
+        <p id="version-last-error" class="small version-warning" hidden></p>
+      </footer>
+    </div>
   )
 }

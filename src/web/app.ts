@@ -11,6 +11,7 @@ import { NotFoundPage } from './views/not-found.tsx'
 import { pageData } from './data.ts'
 import { sessionRoutes } from './routes/session.ts'
 import { pagesRoutes } from './routes/pages.ts'
+import { systemRoutes } from './routes/system.ts'
 import { settingsRoutes } from './routes/settings.ts'
 import { reposRoutes } from './routes/repos.ts'
 import { issuesRoutes } from './routes/issues.ts'
@@ -81,6 +82,7 @@ export function createApp(db: WorklingDatabase, options: AppOptions) {
   app.route('/', sessionRoutes(deps))
   app.route('/', pagesRoutes(deps))
   app.route('/', settingsRoutes(deps))
+  app.route('/', systemRoutes(deps))
   app.route('/', reposRoutes(deps))
   app.route('/', issuesRoutes(deps))
   app.route('/', runsRoutes(deps))

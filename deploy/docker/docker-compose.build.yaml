@@ -1,11 +1,14 @@
 # 本地从源码构建镜像并运行：在仓库根目录执行
 #   docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
+# 指定版本实测：WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yaml build
 # 构建上下文是仓库根目录；忽略规则在同目录的 Dockerfile.dockerignore。
 services:
   workling:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
+      args:
+        WORKLING_VERSION: '${WORKLING_VERSION:-dev}'
     image: workling:local
     init: true # 回收 Pi / codex 遗留的孤儿进程，避免僵尸进程干扰存活判断
     restart: unless-stopped

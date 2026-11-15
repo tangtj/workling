@@ -78,8 +78,31 @@ watch, tasks, Pi and codex run in one container, so select **local process** as 
   ```
 
 - **Use a pushed image**: copy `deploy/docker/docker-compose.yaml` and `deploy/docker/.env.example` to a deployment directory on the server, rename the latter to `.env`, set `WORKLING_IMAGE` and `WORKLING_VERSION`, then run `docker compose up -d`.
+- **Release and update**: publish to GHCR by pushing a tag as described below. Update or roll back online from **the sidebar version badge**, or run `./update.sh <tag>` to pull a new image when the Dockerfile or entrypoint changes.
 
 The first-start admin password is in the logs: `docker compose logs workling | grep -A1 管理密码`. After signing in, set the LLM base URL and key in Settings, then add repositories. Data lives in the named volume `workling-data` by default and survives container rebuilds; to keep it in a host directory, set `WORKLING_DATA_DIR` in `.env` (the directory must be writable by uid 1000).
+
+### Releases
+
+Publish by creating and pushing a tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The version comes only from the tag and is written to `/app/VERSION` in the image at build time. The version in `package.json` does not participate in releases. Running the source locally displays `dev`.
+
+Actions installs dependencies and runs checks, builds a `linux/amd64` image with the official Docker Actions, pushes it to GHCR, and creates a GitHub Release. Stable releases generate `v0.2.0`, `v0.2`, and `latest` image tags. Prereleases such as `v0.2.0-rc.1` generate only the full tag, are marked as prereleases, and stay out of the online update list. The GHCR package must allow this repository's Actions to write with `GITHUB_TOKEN`.
+
+For code updates, use **the sidebar version badge** after setting `WORKLING_UPDATE_REPO` and, for private repositories, a read-only `WORKLING_UPDATE_TOKEN`. `WORKLING_UPDATE_PROXY` covers GitHub requests, source downloads and dependency installation. Updates pause new task launches and wait for running tasks to finish before backing up the database, switching code and restarting. You can cancel while waiting or choose to update immediately and interrupt running tasks. To return to an older version, run `./update.sh <old tag>` on the server. Older versions may not be able to read a migrated database; restore a compatible backup from `/data/backups` as needed. The page shows the last successful update and its time. Three consecutive failed starts of a new version trigger automatic rollback and restore the database backup taken before the update.
+
+Changes to either `deploy/docker/Dockerfile` or `deploy/docker/entrypoint.sh` require a new image: online updates reject them, and you must run `./update.sh <tag>` from the deployment directory. That script backs up the database, updates the Compose configuration and checks health, restoring the previous version and database on failure. Online code survives in the data volume; the entrypoint compares versions using SemVer and selects the image when it is newer.
+
+Build a specific version locally for testing (the default is `dev`):
+
+```sh
+WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yaml build
+```
 
 ### Alternative: systemd
 
@@ -96,6 +119,7 @@ systemd runs watch on the host, and each task runs in its own container that mou
 3. Copy `deploy/workling.env.example` to `/etc/workling/workling.env` (mode 600, owned by workling).
 4. Install and start the service: `sudo cp deploy/workling.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now workling`.
 5. The first-start admin password: `journalctl -u workling | grep -A1 管理密码`.
+6. To upgrade, run `deploy/update.sh <tag>` in `/opt/workling`.
 
 ## Development
 

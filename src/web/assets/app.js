@@ -176,5 +176,10 @@ document
 const refresh = Number(document.body.dataset.autorefresh)
 if (refresh > 0)
   setInterval(() => {
-    if (!document.hidden) location.reload()
+    if (
+      !document.hidden &&
+      !document.querySelector('[role="dialog"]:not([hidden])') &&
+      document.body.dataset.refreshPaused !== 'true'
+    )
+      location.reload()
   }, refresh * 1000)

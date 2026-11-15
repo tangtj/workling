@@ -9,6 +9,7 @@ import type { Command, Environment } from '../runtime/types.ts'
 import { createApp } from '../web/app.ts'
 import type { Settings } from '../config/env.ts'
 
+import { markHealthy, launchPaused } from '../update/index.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import { loadSteps, runUpgradeSteps, type UpgradeStep } from '../upgrade/index.ts'
 import { pollOnce } from './poll.ts'
@@ -104,6 +105,7 @@ export async function serve({
           .all()
           .map((repo) => repo.token),
         readPiSettings(db).llmApiKey ?? '',
+        env.WORKLING_UPDATE_TOKEN ?? '',
       ],
       allowedHosts: settings.allowedHosts,
       secureCookie: settings.secureCookie,
@@ -120,8 +122,10 @@ export async function serve({
       },
     })
     server = Bun.serve({ hostname: settings.host, port: settings.port, fetch: app.fetch })
+    markHealthy()
     log(`workling 管理接口：http://${settings.host}:${server.port}`)
     const labeledRepos = new Set<number>()
+    let wasPaused = false
     while (!signal.aborted) {
       const pi = readPiSettings(db)
       const executorSettings = readExecutorSettings(db)
@@ -143,7 +147,10 @@ export async function serve({
       }
       if (!signal.aborted) {
         try {
-          await launchQueued({ db, command, log, settings, pi, executorSettings })
+          const paused = launchPaused()
+          if (paused && !wasPaused) log('在线更新进行中，暂停拉起新任务')
+          wasPaused = paused
+          if (!paused) await launchQueued({ db, command, log, settings, pi, executorSettings })
         } catch (error) {
           log(`拉起任务失败：${errorMessage(error)}`)
         }
