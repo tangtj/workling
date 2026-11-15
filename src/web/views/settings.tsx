@@ -71,6 +71,7 @@ export function SettingsPage({
     ['set-pi', 'Pi 与 LLM'],
     ['set-git', '提交身份'],
     ['set-executor', '执行器'],
+    ['set-password', '管理密码'],
     ['set-env', '启动参数'],
     ['set-labels', '标签与命令'],
   ]
@@ -99,10 +100,18 @@ export function SettingsPage({
           </button>
         </div>
       )}
+      {notice === 'password' && (
+        <div class="notice" role="status">
+          密码已修改，其他会话已退出
+          <button type="button" data-dismiss>
+            关闭
+          </button>
+        </div>
+      )}
       <div class="settings">
         <nav class="subnav" aria-label="设置分区">
           {sections.map(([id, title], index) => (
-            <a class={index === 4 ? 'subnav-divider' : ''} href={`#${id}`}>
+            <a class={index === 5 ? 'subnav-divider' : ''} href={`#${id}`}>
               {title}
             </a>
           ))}
@@ -305,6 +314,46 @@ export function SettingsPage({
               </fieldset>
             </div>
           </SettingsCard>
+          <section id="set-password">
+            <form id="password-form" class="card">
+              <div class="card-head">
+                <div>
+                  <h2>管理密码</h2>
+                  <p class="small muted">修改后其他已登录设备需要重新登录</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label class="field">
+                  当前密码
+                  <input
+                    name="currentPassword"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                  />
+                </label>
+                <label class="field">
+                  新密码
+                  <input name="newPassword" type="password" autocomplete="new-password" required />
+                </label>
+                <label class="field">
+                  确认新密码
+                  <input
+                    name="confirmPassword"
+                    type="password"
+                    autocomplete="new-password"
+                    required
+                  />
+                </label>
+              </div>
+              <div class="card-foot">
+                <button class="button button--primary button--sm" type="submit">
+                  修改密码
+                </button>
+              </div>
+              <div class="error-box" role="alert" hidden></div>
+            </form>
+          </section>
           <section class="card" id="set-env">
             <div class="card-head">
               <div>

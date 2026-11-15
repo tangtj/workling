@@ -39,3 +39,32 @@ test('首次初始化仅返回一次随机密码，重置覆盖哈希并撤销�
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('修改密码检查旧哈希并只保留指定会话', async () => {
+  const { changePassword } = await import('../src/web/auth.ts')
+  const dir = await mkdtemp(join(tmpdir(), 'workling-change-password-'))
+  const { db, close } = await openDatabase(dir)
+  try {
+    await ensurePassword(db)
+    const original = db.select().from(admin).get()!
+    for (const id of ['keep', 'remove'])
+      db.insert(sessions)
+        .values({ id, createdAt: new Date(), expiresAt: new Date(Date.now() + 60000) })
+        .run()
+    expect(changePassword(db, 'stale', 'new-hash', 'keep')).toBe(false)
+    expect(db.select().from(admin).get()).toEqual(original)
+    expect(db.select().from(sessions).all()).toHaveLength(2)
+    expect(changePassword(db, original.passwordHash, 'new-hash', 'keep')).toBe(true)
+    expect(db.select().from(admin).get()!.passwordHash).toBe('new-hash')
+    expect(
+      db
+        .select()
+        .from(sessions)
+        .all()
+        .map((session) => session.id),
+    ).toEqual(['keep'])
+  } finally {
+    close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

@@ -1544,3 +1544,70 @@ test('执行器并发上限 PATCH 持久化，非法值返回 400，刷新页面
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('修改密码共享登录限流并保留当前会话', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-password-api-'))
+  const { db, close } = await openDatabase(dir)
+  let time = Date.now()
+  const app = createApp(db, { workspace: dir, now: () => time })
+  const post = (path: string, body: unknown, cookie = '') =>
+    app.request(path, {
+      method: 'POST',
+      headers: { host: 'localhost', cookie, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  try {
+    const password = (await ensurePassword(db))!
+    const next = 'a new password 123'
+    expect(
+      (await post('/api/password', { currentPassword: password, newPassword: next })).status,
+    ).toBe(401)
+    const login1 = await post('/login', { password })
+    const login2 = await post('/login', { password })
+    const cookie1 = login1.headers.get('set-cookie')!.split(';')[0]!
+    const cookie2 = login2.headers.get('set-cookie')!.split(';')[0]!
+    const change = (body: unknown) => post('/api/password', body, cookie1)
+    for (const body of [
+      { currentPassword: password, newPassword: 'short' },
+      { currentPassword: password, newPassword: password },
+      { currentPassword: password, newPassword: next, extra: true },
+      { currentPassword: password, newPassword: 'x'.repeat(129) },
+    ])
+      expect((await change(body)).status).toBe(400)
+    const badJson = await app.request('/api/password', {
+      method: 'POST',
+      headers: { host: 'localhost', cookie: cookie1, 'content-type': 'application/json' },
+      body: '{',
+    })
+    expect(await badJson.json()).toEqual({ error: 'JSON 格式无效' })
+    for (let i = 0; i < 5; i++) {
+      const response = await change({ currentPassword: 'wrong', newPassword: next })
+      expect(response.status).toBe(401)
+      expect(await response.json()).toEqual({ error: '当前密码不正确' })
+    }
+    expect((await post('/login', { password })).status).toBe(429)
+    expect((await change({ currentPassword: password, newPassword: next })).status).toBe(429)
+    time += 15 * 60 * 1000
+    const page = await (
+      await app.request('/settings?notice=password', {
+        headers: { host: 'localhost', cookie: cookie1 },
+      })
+    ).text()
+    expect(page).toContain('id="set-password"')
+    expect(page).toContain('href="#set-password"')
+    expect(page).toContain('管理密码')
+    expect(page).toContain('密码已修改，其他会话已退出')
+    expect((await change({ currentPassword: password, newPassword: next })).status).toBe(204)
+    expect(
+      (await app.request('/api/repos', { headers: { host: 'localhost', cookie: cookie1 } })).status,
+    ).toBe(200)
+    expect(
+      (await app.request('/api/repos', { headers: { host: 'localhost', cookie: cookie2 } })).status,
+    ).toBe(401)
+    expect((await post('/login', { password })).status).toBe(401)
+    expect((await post('/login', { password: next })).status).toBe(204)
+  } finally {
+    close()
+    await rm(dir, { recursive: true, force: true })
+  }
+}, 15000)

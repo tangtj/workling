@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, ne } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
 import { admin, sessions } from '../db/schema.ts'
 
@@ -39,4 +39,19 @@ export async function resetPassword(db: WorklingDatabase): Promise<string> {
     tx.delete(sessions).run()
   })
   return password
+}
+
+export function changePassword(
+  db: WorklingDatabase,
+  expectedHash: string,
+  passwordHash: string,
+  keepSessionId: string,
+): boolean {
+  return db.transaction((tx) => {
+    if (tx.select().from(admin).where(eq(admin.id, 1)).get()?.passwordHash !== expectedHash)
+      return false
+    tx.update(admin).set({ passwordHash, updatedAt: new Date() }).where(eq(admin.id, 1)).run()
+    tx.delete(sessions).where(ne(sessions.id, keepSessionId)).run()
+    return true
+  })
 }

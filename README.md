@@ -87,6 +87,8 @@ Without an AI assistant, copy the files under [templates/repo/](templates/repo/)
 
 Without `bun link`, replace `workling` with `bun src/cli.ts`. `task` and `read` are internal commands invoked by serve and Pi. Run `cancel` and `reset-password` from the directory serve was started in, or set the same `WORKLING_WORKSPACE`. Issue references look like `github:owner/repo#12` or `https://github.com/owner/repo/issues/12`.
 
+After signing in, you can change the password on the settings page; use `workling reset-password` if you forget it.
+
 ## Deployment
 
 Docker files live in `deploy/docker/`; systemd files live in `deploy/`. Either way the admin UI listens only on `127.0.0.1:7420`; reach it remotely through an SSH tunnel: `ssh -L 7420:127.0.0.1:7420 <server>`.
