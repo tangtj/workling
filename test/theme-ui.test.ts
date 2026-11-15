@@ -11,13 +11,15 @@ test('首屏按有效主题偏好设置属性，缺省、非法值和读取失�
     ['dark', 'dark'],
   ] as Array<[string | null, string | undefined]>) {
     let theme: string | undefined
+    const style = { colorScheme: '' }
     runInNewContext(themeScript, {
       localStorage: { getItem: () => stored },
       document: {
-        documentElement: { setAttribute: (_: string, value: string) => (theme = value) },
+        documentElement: { style, setAttribute: (_: string, value: string) => (theme = value) },
       },
     })
     expect(theme).toBe(expected)
+    expect(style.colorScheme).toBe(expected ?? '')
   }
   expect(() =>
     runInNewContext(themeScript, {

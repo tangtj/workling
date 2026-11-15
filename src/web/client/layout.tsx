@@ -42,6 +42,8 @@ function useTheme() {
   useEffect(() => {
     if (mode === 0) document.documentElement.removeAttribute('data-theme')
     else document.documentElement.setAttribute('data-theme', modes[mode]!)
+    // 强制主题时同步 color-scheme，CSS 加载前的画布颜色才与所选主题一致。
+    document.documentElement.style.colorScheme = mode === 0 ? '' : modes[mode]!
   }, [mode])
   return {
     mode,

@@ -130,6 +130,8 @@ test('runTask 真实克隆和配置 Git，假 Pi 收到精确参数、指令和�
     join(options.dir, 'pi-session'),
     '--append-system-prompt',
     join(ROOT, 'configs/workling/AGENTS.md'),
+    '--extension',
+    join(ROOT, 'configs/workling/extensions/no-bash-timeout.ts'),
     '--model',
     'test-provider/model',
     '--',
