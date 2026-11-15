@@ -1,3 +1,5 @@
+import { themeScript } from './theme.ts'
+
 export function LoginPage() {
   return (
     <html lang="zh-CN">
@@ -5,6 +7,7 @@ export function LoginPage() {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>登录 · Workling</title>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }}></script>
         <link rel="stylesheet" href="/style.css" />
         <script src="/login.js" defer></script>
       </head>

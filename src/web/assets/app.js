@@ -1,3 +1,38 @@
+;(() => {
+  const button = document.getElementById('theme-toggle')
+  if (!button) return
+  const modes = ['system', 'light', 'dark']
+  const labels = ['跟随系统', '浅色', '深色']
+  const icons = [
+    'M3 4h18v13H3zM8 21h8M12 17v4',
+    'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
+    'M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5z',
+  ]
+  let mode = 'system'
+  try {
+    const stored = localStorage.getItem('workling-theme')
+    if (modes.includes(stored)) mode = stored
+  } catch {}
+  const render = () => {
+    if (mode === 'system') document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.setAttribute('data-theme', mode)
+    const index = modes.indexOf(mode)
+    button.setAttribute('aria-label', `主题：${labels[index]}`)
+    button.title = `主题：${labels[index]}`
+    document.getElementById('theme-icon').setAttribute('d', icons[index])
+  }
+  button.addEventListener('click', () => {
+    const next = modes[(modes.indexOf(mode) + 1) % modes.length]
+    try {
+      localStorage.setItem('workling-theme', next)
+      mode = next
+    } catch {
+      mode = 'system'
+    }
+    render()
+  })
+  render()
+})()
 async function request(path, method, body, signal) {
   const response = await fetch(path, {
     method,

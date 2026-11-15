@@ -2,6 +2,7 @@ import { readVersion } from '../../runtime/version.ts'
 import type { Child } from 'hono/jsx'
 import type { PageData } from '../data.ts'
 import { secondsAgo } from './format.ts'
+import { themeScript } from './theme.ts'
 
 export function Layout({
   title,
@@ -24,6 +25,7 @@ export function Layout({
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title} · Workling</title>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }}></script>
         <link rel="stylesheet" href="/style.css" />
         <script src="/app.js" defer></script>
         <script src="/version.js" defer></script>
@@ -52,7 +54,6 @@ export function Layout({
                   <span class="dot" hidden></span>
                 </button>
               </div>
-              <VersionPopover />
             </div>
             <nav class="nav">
               {(['overview', 'issues', 'repos', 'settings'] as const).map((key, index) => (
@@ -151,6 +152,27 @@ export function Layout({
                   </div>
                 )}
               </div>
+              <button
+                id="theme-toggle"
+                class="button theme-toggle"
+                type="button"
+                aria-label="主题：跟随系统"
+                title="主题：跟随系统"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path id="theme-icon" d="M3 4h18v13H3zM8 21h8M12 17v4" />
+                </svg>
+              </button>
               <button id="logout" class="button button--wide" type="button">
                 退出登录
               </button>
@@ -158,6 +180,7 @@ export function Layout({
           </aside>
           <main class="main">{children}</main>
         </div>
+        <VersionPopover />
       </body>
     </html>
   )
