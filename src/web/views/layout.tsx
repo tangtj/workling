@@ -31,7 +31,7 @@ export function Layout({
         <div class="shell">
           <aside class="sidebar">
             <a class="brand" href="/">
-              <span class="brand-mark">P</span>
+              <span class="brand-mark">W</span>
               <div>
                 <b>workling</b>
                 <span>本机管理</span>
