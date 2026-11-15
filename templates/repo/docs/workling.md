@@ -71,7 +71,9 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 ## 状态与返工
 
 - 进度看 Issue 标签：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`。
+- 领取时 workling 会在 Issue 下评论；运行中亲自确认的待办项会勾选，修改勾选状态前先评论说明。
 - 失败或要返工：修改 Issue 正文或文档分支上的文档（推送到文档分支），再重新打上 `workling:ready`。
+- 返工时已勾选的项仍会重新核对。
 - 会改同一处代码的 Issue 不要同时就绪，并行 PR 会冲突。
 
 ## 本仓库约定
