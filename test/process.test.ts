@@ -57,6 +57,8 @@ test.skipIf(!canInspectProcess)('isTaskAlive 校验真实进程的任务目录�
   const dir = '/tmp/workling-task-alive-test'
   const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)', dir])
   try {
+    // spawn 返回时子进程可能尚未完成 exec，/proc/<pid>/cmdline 仍是父进程的命令行。
+    for (let i = 0; i < 100 && !isTaskAlive(child.pid, dir); i++) await Bun.sleep(20)
     expect(isTaskAlive(child.pid, dir)).toBe(true)
     expect(isTaskAlive(child.pid, `${dir}-other`)).toBe(false)
   } finally {
