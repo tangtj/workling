@@ -96,6 +96,19 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '--add-label',
       'workling:running',
     ])
+    expect(s.calls[1]!.args).toEqual([
+      'gh',
+      'issue',
+      'comment',
+      '2',
+      '-R',
+      'a/b',
+      '--body-file',
+      '-',
+    ])
+    expect(s.calls[1]!.options?.input).toBe(
+      `workling：已领取，开始执行。\n\n- 机器：worker\n- 开始时间：${clock.toISOString()}\n- 任务目录：${launched[0]!.taskDir}`,
+    )
     expect(s.logs.some((line) => line.includes('跳过'))).toBe(true)
     await launchQueued({
       ...s.options,
@@ -198,12 +211,34 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
           return { pid: 99 }
         },
       }),
-      command: async () => {
-        throw new Error('标签失败')
+      command: async (args, options) => {
+        if (args[2] === 'edit') throw new Error('标签失败')
+        return s.options.command(args, options)
       },
     })
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'running', lastRunId: 2 })
     expect(s.logs.some((line) => line.includes('标签失败'))).toBe(true)
+    expect(s.calls.map((call) => call.args[2])).toEqual(['comment'])
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('领取评论发送失败只记录日志，任务保持 running', async () => {
+  const s = await scenario()
+  try {
+    await s.issue(42, 'queued')
+    await launchQueued({
+      ...s.options,
+      executor: fakeExecutor(),
+      command: async (args, options) => {
+        if (args[2] === 'comment') throw new Error('评论失败')
+        return s.options.command(args, options)
+      },
+    })
+    expect(s.calls.map((call) => call.args[2])).toEqual(['edit'])
+    expect(s.db.select().from(issues).get()?.status).toBe('running')
+    expect(s.logs).toContain('github:a/b #42 发送领取评论失败：评论失败')
   } finally {
     await s.dispose()
   }

@@ -137,5 +137,14 @@ export async function launchQueued({
     } catch (error) {
       log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
     }
+    try {
+      const body = `workling：已领取，开始执行。\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}`
+      await command(
+        ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
+        { env: ghEnv(repo.token, repo.host), input: body },
+      )
+    } catch (error) {
+      log(`${repo.ref} #${issue.number} 发送领取评论失败：${errorMessage(error)}`)
+    }
   }
 }
