@@ -1,3 +1,13 @@
+@view-transition {
+  navigation: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+}
+
 :root {
   font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   color: var(--text);
