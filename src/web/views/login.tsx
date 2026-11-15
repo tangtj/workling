@@ -4,7 +4,7 @@ export function LoginPage() {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>登录 · workling</title>
+        <title>登录 · Workling</title>
         <link rel="stylesheet" href="/style.css" />
         <script src="/login.js" defer></script>
       </head>
@@ -13,7 +13,7 @@ export function LoginPage() {
           <div class="brand">
             <span class="brand-mark">W</span>
             <span>
-              workling<small>本机管理</small>
+              Workling<small>本机管理</small>
             </span>
           </div>
           <form id="login-form" class="card stack">
