@@ -1,10 +1,9 @@
 # 只读权限、不用 secret，因此可安全地在 pull_request 上触发。
+# main 由仓库规则禁止直接推送，只能经 PR 合入，且要求本工作流的 check 通过，
+# 所以不在 push 上重复运行。
 name: CI
 on:
   pull_request:
-    branches: [main]
-  push:
-    branches: [main]
 permissions:
   contents: read
 concurrency:
