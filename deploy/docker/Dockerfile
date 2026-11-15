@@ -26,6 +26,9 @@ RUN printf '%s\n' "$WORKLING_VERSION" > /app/VERSION
 
 RUN mkdir -p /data && chown node:node /data
 ENV WORKLING_WORKSPACE=/data WORKLING_HOST=0.0.0.0 WORKLING_PORT=7420
+# 容器默认不允许创建用户命名空间，codex 的 workspace-write（bwrap）在这里必然失败；
+# 隔离边界由容器本身（及 docker 执行器的单任务容器）提供，codex 不再套内层沙箱。
+ENV WORKLING_CODEX_SANDBOX=danger-full-access
 USER node
 EXPOSE 7420
 HEALTHCHECK --interval=30s CMD curl -fsS http://127.0.0.1:7420/health || exit 1
