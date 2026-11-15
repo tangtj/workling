@@ -50,8 +50,32 @@ bun run start          # or: workling serve
 1. On first start the admin password is printed to the terminal (shown only once). Open <http://127.0.0.1:7420> and sign in.
 2. Under **Settings**, fill in the LLM base URL and key.
 3. Under **Repos**, add a repository (e.g. `github:owner/repo`) with a token that can read and write its Issues, code and pull requests. workling creates the `workling:*` labels in that repository.
-4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort.
+4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort. For larger designs, keep the documents on a branch and add a `分支：<name>` line; the task branch is created from it.
 5. Follow progress and logs in the admin UI. Results show up as labels: `workling:queued` → `workling:running` → `workling:done` / `workling:failed`. To retry a failed Issue, add `workling:ready` again.
+
+## Adopting in other projects
+
+After setup, development tasks in the target repository work like this: the local AI assistant writes requirements and design documents and creates an Issue, a person adds `workling:ready`, and workling implements it and opens a PR. Developers of that repository only need an authenticated `gh`; they do not install workling.
+
+1. Register the repository under **Repos** in the admin UI (GitHub only for now).
+2. In the target repository, send this prompt to your local AI coding assistant (Claude Code, Codex, Cursor, etc.):
+
+   ```text
+   Set up this repository for workling following https://raw.githubusercontent.com/tangtj/workling/main/templates/SETUP.md:
+   - On a new branch, write the three files it lists into this repository: docs/workling.md, the two rules in AGENTS.md, and the GitHub Issue template.
+   - Fill in the repository-specific section at the end of docs/workling.md from this repository; ask me when unsure.
+   - Change only these files, not application code. Open a setup PR and give me the link.
+   ```
+
+3. Review and merge the setup PR. From then on, tell the local assistant to hand a task to workling.
+
+To update the setup later:
+
+```text
+Update this repository's workling setup following https://raw.githubusercontent.com/tangtj/workling/main/templates/SETUP.md, keep the repository-specific section at the end of docs/workling.md, and open a PR
+```
+
+Without an AI assistant, copy the files under [templates/repo/](templates/repo/) into the repository by hand as described in [templates/SETUP.md](templates/SETUP.md). The templates are in Chinese.
 
 ## Commands
 
