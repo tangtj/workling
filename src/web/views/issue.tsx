@@ -119,7 +119,6 @@ export function IssuePage({ data, issue }: { data: PageData; issue: Issue }) {
           <div class="card empty">尚未执行</div>
         )}
       </section>
-      <script type="module" src="/run-log.js"></script>
     </>
   )
 }

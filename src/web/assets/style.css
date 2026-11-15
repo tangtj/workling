@@ -1,3 +1,13 @@
+@view-transition {
+  navigation: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+}
+
 :root {
   font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   color: var(--text);
@@ -2357,4 +2367,9 @@ legend {
 .badge--pr-closed {
   color: #4b5563;
   background: #e5e7eb;
+}
+
+/* Keep SSR fragment children in the existing main flex layout. */
+.legacy-content {
+  display: contents;
 }

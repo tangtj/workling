@@ -7,6 +7,7 @@ import { run } from '../runtime/process.ts'
 import { importPiSettings, readPiSettings } from '../config/pi.ts'
 import type { Command, Environment } from '../runtime/types.ts'
 import { createApp } from '../web/app.ts'
+import { getWebBundle } from '../web/bundle.ts'
 import type { Settings } from '../config/env.ts'
 
 import { markHealthy, launchPaused } from '../update/index.ts'
@@ -122,6 +123,7 @@ export async function serve({
         ),
       },
     })
+    await getWebBundle()
     server = Bun.serve({ hostname: settings.host, port: settings.port, fetch: app.fetch })
     markHealthy()
     log(`workling 管理接口：http://${settings.host}:${server.port}`)

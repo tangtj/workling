@@ -1,5 +1,8 @@
 import { readExecutorSettings, updateExecutorSettings } from '../src/config/executor.ts'
 import { eq } from 'drizzle-orm'
+import { createHash } from 'node:crypto'
+import { assetUrl, type AssetName } from '../src/web/assets.ts'
+import { themeScript } from '../src/web/views/theme.ts'
 import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -160,21 +163,35 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       /^default-src 'none'; script-src 'self' 'sha256-[A-Za-z0-9+/=]+'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'$/,
     )
     const html = await response.text()
-    expect(html).toContain('<script src="/app.js"')
-    expect(html).toContain('<script src="/version.js"')
-    expect(html).toContain('id="version-pill"')
-    expect(html).toContain('id="version-popover"')
-    expect(html).toContain('aria-haspopup="dialog"')
-    expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('aria-label="版本与更新"')
-    expect(html).toContain('rel="noopener noreferrer"')
-    for (const path of ['/issues', '/repos', '/settings']) {
-      const page = await (await app.request(path, { headers })).text()
-      expect(page).toContain('id="version-pill"')
-      expect(page).toContain('id="version-popover"')
-      expect(page).toContain('<script src="/version.js" defer="">')
+    expect(html).toContain('id="root"')
+    expect(html).toMatch(/<script type="module" src="\/assets\/main-[^"/]+\.js"/)
+    expect(html).toMatch(/<link rel="stylesheet" href="\/assets\/main-[^"/]+\.css"/)
+    expect(html).toContain('<meta name="color-scheme" content="light dark"/>')
+    expect(response.headers.get('content-security-policy')).toContain(
+      `'sha256-${createHash('sha256').update(themeScript).digest('base64')}'`,
+    )
+    for (const name of [
+      'style.css',
+      'app.js',
+      'version.js',
+      'timeline.js',
+      'run-log.js',
+      'login.js',
+    ] as AssetName[]) {
+      const url = assetUrl(name)
+      expect(url).toMatch(/\?v=[0-9a-f]{12}$/)
+      const asset = await app.request(url, { headers })
+      const body = await asset.text()
+      expect(url).toEndWith(createHash('sha256').update(body).digest('hex').slice(0, 12))
+      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+      expect(asset.headers.get('content-security-policy')).toBe(
+        response.headers.get('content-security-policy'),
+      )
+      expect(
+        (await app.request(`/${name}?v=wrong`, { headers })).headers.get('cache-control'),
+      ).toBe('no-cache')
+      if (name === 'run-log.js') expect(body).toContain(`from '${assetUrl('timeline.js')}'`)
     }
-    expect(html).toContain('/style.css')
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
@@ -192,7 +209,7 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       )
       expect(asset.headers.get('x-content-type-options')).toBe('nosniff')
       expect(asset.headers.get('referrer-policy')).toBe('no-referrer')
-      expect(asset.headers.get('cache-control')).toBe('no-store')
+      expect(asset.headers.get('cache-control')).toBe('no-cache')
     }
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
@@ -257,6 +274,12 @@ test('登录鉴权、会话过期、限流窗口和退出登录', async () => {
     const page = await request('/login')
     expect(page.headers.get('cache-control')).toBe('no-store')
     const html = await page.text()
+    expect(html).toContain('<meta name="color-scheme" content="light dark"/>')
+    expect(html).toContain(assetUrl('style.css'))
+    expect(html).toContain(assetUrl('login.js'))
+    expect((await request(assetUrl('style.css'))).status).toBe(200)
+    expect((await request(assetUrl('login.js'))).status).toBe(200)
+    expect((await request(assetUrl('app.js'))).status).toBe(302)
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
@@ -352,8 +375,13 @@ test('Issue 接口要求登录并返回按时间排序的状态和执行历史',
       headers: { host: 'localhost', 'content-type': 'application/json' },
       body: JSON.stringify({ password }),
     })
-    const headers = { host: 'localhost', cookie: login.headers.get('set-cookie')!.split(';')[0]! }
-    const request = (path: string) => app.request(path, { headers })
+    const headers = {
+      host: 'localhost',
+      cookie: login.headers.get('set-cookie')!.split(';')[0]!,
+      'X-Workling-Fragment': '1',
+    }
+    const request = (path: string) =>
+      app.request(path, { headers: { ...headers, 'X-Workling-Fragment': '1' } })
     const old = new Date('2020-01-01T00:00:00Z')
     const recent = new Date('2020-01-02T00:00:00Z')
     const project = db
@@ -500,7 +528,11 @@ test.each([false, true])('状态接口在提供 status=%s 时返回当前轮询�
       headers: { host: 'localhost', 'content-type': 'application/json' },
       body: JSON.stringify({ password }),
     })
-    const headers = { host: 'localhost', cookie: login.headers.get('set-cookie')!.split(';')[0]! }
+    const headers = {
+      host: 'localhost',
+      cookie: login.headers.get('set-cookie')!.split(';')[0]!,
+      'X-Workling-Fragment': '1',
+    }
     const initial = await app.request('/api/status', { headers })
     expect(initial.status).toBe(200)
     expect(await initial.json()).toEqual({
@@ -535,7 +567,11 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
       headers: { host: 'localhost', 'content-type': 'application/json' },
       body: JSON.stringify({ password }),
     })
-    const headers = { host: 'localhost', cookie: login.headers.get('set-cookie')!.split(';')[0]! }
+    const headers = {
+      host: 'localhost',
+      cookie: login.headers.get('set-cookie')!.split(';')[0]!,
+      'X-Workling-Fragment': '1',
+    }
     const repo = db
       .insert(repos)
       .values({
@@ -566,7 +602,8 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
         .returning()
         .get(),
     )
-    const request = (path: string) => app.request(path, { headers })
+    const request = (path: string) =>
+      app.request(path, { headers: { ...headers, 'X-Workling-Fragment': '1' } })
     const home = await request('/')
     const html = await home.text()
     expect(home.status).toBe(200)
@@ -632,8 +669,13 @@ test('执行日志接口鉴权、路径校验、截断和打码，页面转义�
       headers: { host: 'localhost', 'content-type': 'application/json' },
       body: JSON.stringify({ password }),
     })
-    const headers = { host: 'localhost', cookie: login.headers.get('set-cookie')!.split(';')[0]! }
-    const request = (path: string) => app.request(path, { headers })
+    const headers = {
+      host: 'localhost',
+      cookie: login.headers.get('set-cookie')!.split(';')[0]!,
+      'X-Workling-Fragment': '1',
+    }
+    const request = (path: string) =>
+      app.request(path, { headers: { ...headers, 'X-Workling-Fragment': '1' } })
     for (const id of ['bad', '999'])
       expect(await (await request(`/api/runs/${id}/log`)).json()).toEqual({
         error: '执行记录不存在',
@@ -754,7 +796,8 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
       })
       .run()
     const headers = { ...host, cookie: 'workling_session=events-session' }
-    const request = (path: string) => app.request(path, { headers })
+    const request = (path: string) =>
+      app.request(path, { headers: { ...headers, 'X-Workling-Fragment': '1' } })
     for (const id of ['bad', '0', '999']) {
       const response = await request(`/api/runs/${id}/events`)
       expect(response.status).toBe(404)
@@ -911,7 +954,6 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
       '原始日志',
       'id="run-timeline"',
       'data-status=',
-      '<script type="module" src="/run-log.js"',
       '<pre id="run-log" hidden',
     ])
       expect(html).toContain(text)
@@ -966,8 +1008,13 @@ test('旧日志 fallback 仅在首次且没有结构化事件时返回，扫描�
       })
       .returning()
       .get()
-    const headers = { host: 'localhost', cookie: 'workling_session=fallback' }
-    const request = (path: string) => app.request(path, { headers })
+    const headers = {
+      host: 'localhost',
+      cookie: 'workling_session=fallback',
+      'X-Workling-Fragment': '1',
+    }
+    const request = (path: string) =>
+      app.request(path, { headers: { ...headers, 'X-Workling-Fragment': '1' } })
     const path = `/api/runs/${run.id}/events`
     expect((await request(path)).status).toBe(404)
     await Bun.write(join(taskDir, 'task.log'), 'secret\n中文')
@@ -1010,7 +1057,7 @@ test('旧日志 fallback 仅在首次且没有结构化事件时返回，扫描�
     expect(html).not.toContain('日志末尾')
     expect(html).toContain(`href="/runs/${run.id}/log">完整时间线`)
     expect(html).toContain(`href="/runs/${run.id}/log">查看完整时间线`)
-    expect(html).toContain('<script type="module" src="/run-log.js"')
+    expect(html).not.toContain('<script')
     expect(html).not.toContain('data-autorefresh="15"')
   } finally {
     close()
@@ -1044,7 +1091,11 @@ test('Pi 配置接口鉴权、严格校验与脱敏，设置页包含表单且�
         expiresAt: new Date(Date.now() + 60000),
       })
       .run()
-    const headers = { ...host, cookie: 'workling_session=pi-settings-session' }
+    const headers = {
+      ...host,
+      cookie: 'workling_session=pi-settings-session',
+      'X-Workling-Fragment': '1',
+    }
     const patch = (body: unknown) =>
       app.request(path, {
         method: 'PATCH',
@@ -1115,7 +1166,7 @@ test('Pi 配置接口鉴权、严格校验与脱敏，设置页包含表单且�
       '留空表示不修改',
       '设置已保存',
       '保存后下一轮轮询生效，运行中的任务不受影响',
-      'href="/settings"',
+      'href="#set-codex"',
     ])
       expect(html).toContain(value)
     expect(html).not.toContain('distinctive-api-secret')
@@ -1205,6 +1256,7 @@ test('执行器接口鉴权、读取默认值、严格校验和合并保存，Do
     const headers = {
       host: 'localhost',
       cookie: 'workling_session=executor-session',
+      'X-Workling-Fragment': '1',
       'content-type': 'application/json',
     }
     const patch = (body: unknown) =>
@@ -1336,7 +1388,11 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
       headers: { host: 'localhost', 'content-type': 'application/json' },
       body: JSON.stringify({ password }),
     })
-    const headers = { host: 'localhost', cookie: login.headers.get('set-cookie')!.split(';')[0]! }
+    const headers = {
+      host: 'localhost',
+      cookie: login.headers.get('set-cookie')!.split(';')[0]!,
+      'X-Workling-Fragment': '1',
+    }
     const request = async (path: string) => (await app.request(path, { headers })).text()
     const projects = ['alpha', 'beta'].map((name) =>
       db
@@ -1449,7 +1505,7 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
     const overview = await request('/')
     expect(overview.match(/class="slot idle"/g)).toHaveLength(1)
     expect(overview).toContain('下一个：Queued earliest')
-    expect(overview).toContain('名额 1 / 2')
+    expect(overview).toContain('并发 1 / 2')
     expect(overview).toContain('15 秒前')
     expect(overview).toContain('<progress')
     expect(overview).toContain('拆分 Issue')
@@ -1458,8 +1514,8 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
     const settings = await request('/settings')
     for (const id of ['codex-form', 'pi-settings-form', 'git-form', 'executor-settings-form'])
       expect(settings).toContain(`id="${id}"`)
-    expect(settings).toContain('id="version-pill"')
-    expect(settings).toContain('id="version-popover"')
+    expect(settings).not.toContain('id="version-pill"')
+    expect(settings).not.toContain('id="version-popover"')
     expect(settings).not.toContain('id="set-version"')
     expect(settings).not.toContain('<h2>版本与更新</h2>')
     expect(settings).not.toContain('<h2>版本与更新</h2>')
@@ -1507,6 +1563,7 @@ test('执行器并发上限 PATCH 持久化，非法值返回 400，刷新页面
     const headers = {
       host: 'localhost',
       cookie: 'workling_session=concurrency-session',
+      'X-Workling-Fragment': '1',
       'content-type': 'application/json',
     }
     const patch = (concurrency: unknown) =>
@@ -1530,7 +1587,7 @@ test('执行器并发上限 PATCH 持久化，非法值返回 400，刷新页面
     expect(readExecutorSettings(db).concurrency).toBe(5)
     const overview = await (await app.request('/', { headers })).text()
     expect(overview).toContain('并发 0 / 5')
-    expect(overview).toContain('名额 0 / 5')
+    expect(overview).toContain('并发 0 / 5')
     expect(overview.match(/class="slot idle"/g)).toHaveLength(5)
     const settings = await (await app.request('/settings', { headers })).text()
     const input = settings.match(/<input[^>]*name="concurrency"[^>]*>/)?.[0]
@@ -1600,7 +1657,7 @@ test('修改密码共享登录限流并保留当前会话', async () => {
     time += 15 * 60 * 1000
     const page = await (
       await app.request('/settings?notice=password', {
-        headers: { host: 'localhost', cookie: cookie1 },
+        headers: { host: 'localhost', cookie: cookie1, 'X-Workling-Fragment': '1' },
       })
     ).text()
     expect(page).toContain('id="set-password"')

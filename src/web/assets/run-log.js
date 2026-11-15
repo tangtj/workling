@@ -8,9 +8,9 @@ import {
   shouldReload,
 } from '/timeline.js'
 
-function initTimeline(timeline) {
+function initTimeline(timeline, root, ctx, lifetime) {
   const compact = timeline.classList.contains('compact')
-  const scope = compact ? timeline : document
+  const scope = compact ? timeline : root
   if (compact) {
     const phases = document.createElement('ol')
     phases.className = 'run-phases'
@@ -28,16 +28,18 @@ function initTimeline(timeline) {
       phases.append(phase)
     }
     timeline.append(phases)
+    lifetime.cleanup.push(() => phases.remove())
   }
   const state = createTimeline()
   const nodes = new Map()
-  const raw = document.querySelector('#run-log')
-  const follow = document.querySelector('#log-follow')
-  const live = document.querySelector('#log-live')
-  const errorBox = compact ? element('p', 'error-box') : document.querySelector('#log-error')
+  const raw = root.querySelector('#run-log')
+  const follow = root.querySelector('#log-follow')
+  const live = root.querySelector('#log-live')
+  const errorBox = compact ? element('p', 'error-box') : root.querySelector('#log-error')
   if (compact) {
     errorBox.hidden = true
     timeline.append(errorBox)
+    lifetime.cleanup.push(() => errorBox.remove())
   }
   let filter = 'all'
   let workling = 0
@@ -48,15 +50,17 @@ function initTimeline(timeline) {
   const finalWorkling = []
   const url = `/api/runs/${timeline.dataset.runId}`
   async function request(path) {
-    const response = await fetch(path)
+    const response = await fetch(path, { signal: lifetime.controller.signal })
     if (response.status === 401) {
       location.assign('/login')
       throw new Error('未登录')
     }
     if (!response.ok) throw new Error((await response.json()).error || '加载失败')
+    if (lifetime.disposed) throw new DOMException('已取消', 'AbortError')
     return response
   }
   function showError(error) {
+    if (lifetime.disposed) return
     errorBox.textContent = error.message
     errorBox.hidden = false
   }
@@ -244,9 +248,9 @@ function initTimeline(timeline) {
       timeline.scrollIntoView({ block: 'end' })
   }
   scope.querySelectorAll('[data-filter]').forEach((button) => {
-    button.addEventListener('click', () => {
+    lifetime.on(button, 'click', () => {
       filter = button.dataset.filter
-      document
+      root
         .querySelectorAll('[data-filter]')
         .forEach((b) => b.setAttribute('aria-pressed', String(b === button)))
       for (const item of state.items) nodes.get(item.id).root.hidden = !visible(item)
@@ -260,6 +264,7 @@ function initTimeline(timeline) {
       }
     }
   }, 1000)
+  lifetime.intervals.add(timer)
   let fallbackNotice
   let fallbackText = null
   function showFallbackNotice() {
@@ -271,6 +276,7 @@ function initTimeline(timeline) {
   async function loadEvents() {
     try {
       const response = await (await request(`${url}/events?workling=${workling}&pi=${pi}`)).json()
+      if (lifetime.disposed) return
       let fallbackProgressed = false
       if (response.fallback) {
         const nextText = response.fallback.lines.join('\n')
@@ -322,11 +328,12 @@ function initTimeline(timeline) {
       if (stop) {
         clearInterval(timer)
         if (live) live.hidden = true
-        if (!compact && reload) location.reload()
+        if (!compact && reload) ctx.refresh()
         return
       }
-      setTimeout(loadEvents, finished ? 0 : 3000)
+      lifetime.later(loadEvents, finished ? 0 : 3000)
     } catch (error) {
+      if (lifetime.disposed) return
       clearInterval(timer)
       if (compact && error.message === '日志已清理' && timeline.dataset.logTail) {
         Object.assign(state, createTimeline())
@@ -348,6 +355,7 @@ function initTimeline(timeline) {
     try {
       const response = await request(`${url}/log?offset=${rawOffset}`)
       const content = decoder.decode(await response.arrayBuffer(), { stream: true })
+      if (lifetime.disposed) return
       if (content) {
         if (!rawHasContent) raw.textContent = ''
         rawHasContent = true
@@ -363,13 +371,14 @@ function initTimeline(timeline) {
         return
       }
       rawEnded = finished
-      setTimeout(loadRaw, progressed || finished ? 0 : 3000)
+      lifetime.later(loadRaw, progressed || finished ? 0 : 3000)
     } catch (error) {
+      if (lifetime.disposed) return
       raw.textContent = error.message
     }
   }
   if (!compact)
-    document.querySelector('#log-raw-toggle').addEventListener('click', (event) => {
+    lifetime.on(root.querySelector('#log-raw-toggle'), 'click', (event) => {
       raw.hidden = !raw.hidden
       timeline.hidden = !raw.hidden
       event.currentTarget.setAttribute('aria-pressed', String(!raw.hidden))
@@ -378,18 +387,49 @@ function initTimeline(timeline) {
         loadRaw()
       }
     })
+  lifetime.cleanup.push(() => {
+    for (const view of nodes.values()) view.root.remove()
+    fallbackNotice?.remove()
+  })
   loadEvents()
 }
 
-for (const timeline of document.querySelectorAll('.run-timeline')) {
-  const details = timeline.closest('.run-process')
-  if (!details || details.open) initTimeline(timeline)
-  else {
-    const load = () => {
-      if (!details.open) return
-      details.removeEventListener('toggle', load)
-      initTimeline(timeline)
+export function init(root, ctx = { refresh() {} }) {
+  const lifetime = {
+    controller: new AbortController(),
+    disposed: false,
+    intervals: new Set(),
+    cleanup: [],
+    timers: new Set(),
+    on(node, type, handler) {
+      node.addEventListener(type, handler, { signal: this.controller.signal })
+    },
+    later(callback, ms) {
+      if (this.disposed) return
+      const timer = setTimeout(() => {
+        this.timers.delete(timer)
+        if (!this.disposed) callback()
+      }, ms)
+      this.timers.add(timer)
+    },
+  }
+  for (const timeline of root.querySelectorAll('.run-timeline')) {
+    const details = timeline.closest('.run-process')
+    if (!details || details.open) initTimeline(timeline, root, ctx, lifetime)
+    else {
+      const load = () => {
+        if (!details.open) return
+        details.removeEventListener('toggle', load)
+        initTimeline(timeline, root, ctx, lifetime)
+      }
+      lifetime.on(details, 'toggle', load)
     }
-    details.addEventListener('toggle', load)
+  }
+  return () => {
+    lifetime.disposed = true
+    lifetime.controller.abort()
+    for (const timer of lifetime.intervals) clearInterval(timer)
+    for (const timer of lifetime.timers) clearTimeout(timer)
+    lifetime.cleanup.forEach((clean) => clean())
   }
 }

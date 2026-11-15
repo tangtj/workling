@@ -1,3 +1,4 @@
+import { assetUrl } from '../assets.ts'
 import { themeScript } from './theme.ts'
 
 export function LoginPage() {
@@ -7,9 +8,10 @@ export function LoginPage() {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>登录 · Workling</title>
+        <meta name="color-scheme" content="light dark" />
         <script dangerouslySetInnerHTML={{ __html: themeScript }}></script>
-        <link rel="stylesheet" href="/style.css" />
-        <script src="/login.js" defer></script>
+        <link rel="stylesheet" href={assetUrl('style.css')} />
+        <script src={assetUrl('login.js')} defer></script>
       </head>
       <body data-page="login" class="login">
         <div class="login-inner">
