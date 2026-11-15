@@ -87,6 +87,8 @@ bun run start          # 或 workling serve
 
 未执行 `bun link` 时把 `workling` 换成 `bun src/cli.ts`。`task` 与 `read` 是内部命令，由 serve 和 Pi 调用。`cancel`、`reset-password` 要在启动 serve 的同一目录执行，或设置相同的 `WORKLING_WORKSPACE`。Issue 引用格式：`github:owner/repo#12` 或 `https://github.com/owner/repo/issues/12`。
 
+登录后也可在设置页修改密码；忘记密码时使用 `workling reset-password`。
+
 ## 部署
 
 Docker 相关文件都在 `deploy/docker/`，systemd 相关文件在 `deploy/`。两种方式的管理接口都只监听本机 `127.0.0.1:7420`，远程访问用 SSH 隧道：`ssh -L 7420:127.0.0.1:7420 <服务器>`。

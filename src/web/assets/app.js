@@ -127,6 +127,33 @@ document.querySelectorAll('form[data-settings]').forEach((form) => {
     }
   })
 })
+document.querySelector('#password-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const form = event.currentTarget
+  const errorBox = form.querySelector('.error-box')
+  errorBox.hidden = true
+  const currentPassword = form.elements.currentPassword.value
+  const newPassword = form.elements.newPassword.value
+  if (newPassword !== form.elements.confirmPassword.value) {
+    errorBox.textContent = '两次输入的新密码不一致'
+    errorBox.hidden = false
+    return
+  }
+  try {
+    const response = await fetch('/api/password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    })
+    if (!response.ok) throw new Error((await response.json()).error || '操作失败')
+    location.assign('/settings?notice=password#set-password')
+  } catch (error) {
+    errorBox.textContent = error.message
+    errorBox.hidden = false
+  } finally {
+    form.reset()
+  }
+})
 document.querySelector('[data-clear-key]')?.addEventListener('click', async (event) => {
   const form = event.currentTarget.closest('form')
   if (!confirm('确认清除 LLM Key？')) return
