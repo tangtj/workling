@@ -7,7 +7,12 @@ const child = process.env.WORKLING_TEST_SLEEP
   : undefined
 if (child) {
   process.once('SIGTERM', () => {
-    child.once('exit', () => process.kill(process.pid, 'SIGTERM'))
+    const stop = (): void => {
+      process.kill(process.pid, 'SIGTERM')
+    }
+    // 进程组信号会同时送达子进程，它可能已先退出且 exit 事件已发出，此时直接结束。
+    if (child.exitCode !== null || child.signalCode !== null) return stop()
+    child.once('exit', stop)
     child.kill('SIGTERM')
   })
 }
