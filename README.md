@@ -93,6 +93,8 @@ Docker files live in `deploy/docker/`; systemd files live in `deploy/`. Either w
 
 ### Recommended: Docker
 
+The image includes common command-line tools: `rg`, `fd`, `jq`, `less`, `file`, `tree`, `patch`, `unzip`, `xz`, `ps`, `lsof`, `make`, `python3`, and `sqlite3`.
+
 watch, tasks, Pi and codex run in one container, so select **local process** as the executor in Settings (the container has no docker command).
 
 - **Build from source and run**: create a `.env` in the repository root (it may be empty), then run
