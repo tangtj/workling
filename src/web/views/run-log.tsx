@@ -85,7 +85,6 @@ export function RunLogPage({ data, issue, run }: { data: PageData; issue: Issue;
         ></div>
         <pre id="run-log" hidden></pre>
       </section>
-      <script type="module" src="/run-log.js"></script>
     </>
   )
 }

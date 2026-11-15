@@ -2358,3 +2358,8 @@ legend {
   color: #4b5563;
   background: #e5e7eb;
 }
+
+/* Keep SSR fragment children in the existing main flex layout. */
+.legacy-content {
+  display: contents;
+}

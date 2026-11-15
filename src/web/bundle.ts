@@ -1,0 +1,38 @@
+import { basename } from 'node:path'
+
+export type WebBundle = {
+  files: Map<string, { body: Uint8Array; type: string }>
+  script: string
+  styles: string[]
+}
+
+export async function buildWebBundle(): Promise<WebBundle> {
+  const result = await Bun.build({
+    entrypoints: [new URL('./client/main.tsx', import.meta.url).pathname],
+    target: 'browser',
+    throw: false,
+    define: { 'process.env.NODE_ENV': '"production"' },
+    minify: true,
+    naming: '[name]-[hash].[ext]',
+    splitting: false,
+    external: ['/app.js', '/run-log.js', '/version.js'],
+  })
+  if (!result.success) throw new Error(`Web 打包失败：\n${result.logs.join('\n')}`)
+  const files: WebBundle['files'] = new Map()
+  let script = ''
+  const styles: string[] = []
+  for (const artifact of result.outputs) {
+    const path = `/assets/${basename(artifact.path)}`
+    files.set(path, {
+      body: new Uint8Array(await artifact.arrayBuffer()),
+      type: artifact.type,
+    })
+    if (artifact.kind === 'entry-point' && path.endsWith('.js')) script = path
+    if (path.endsWith('.css')) styles.push(path)
+  }
+  if (!script) throw new Error('Web 打包缺少 JS 入口')
+  return { files, script, styles }
+}
+
+let bundle: Promise<WebBundle> | undefined
+export const getWebBundle = () => (bundle ??= buildWebBundle())

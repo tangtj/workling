@@ -61,33 +61,48 @@ function browser(local: Record<string, unknown> = {}) {
   const latest = { tag: 'v1.1.0', body: '<img src=x onerror=alert(1)>\n一\n二\n三\n四' }
   let job: Record<string, unknown> | null = null
   let reloads = 0
-  runInNewContext(readFileSync('src/web/assets/version.js', 'utf8'), {
-    document: {
-      getElementById: get,
-      addEventListener: (name: string, fn: (event: unknown) => unknown) => events.set(name, fn),
-      body: { dataset: {} },
-    },
-    window: {},
-    location: { assign() {}, reload: () => reloads++ },
-    AbortSignal,
-    setTimeout: (callback: () => void, ms: number) => timers.push({ callback, ms }),
-    fetch: async (path: string, init: RequestInit) => {
-      const body = init.body ? JSON.parse(String(init.body)) : undefined
-      calls.push({ path, body })
-      if (path.endsWith('version?local=1')) return Response.json(info)
-      if (path.endsWith('/job')) return Response.json(job)
-      if (path.endsWith('/update')) {
-        job = {
-          kind: 'update',
-          tag: body.tag,
-          status: 'waiting',
-          logs: ['1', '2', '3', '4', '5', '6'],
+  const destroy = runInNewContext(
+    readFileSync('src/web/assets/version.js', 'utf8').replace(
+      'export function init()',
+      'function init()',
+    ) + '\ninit()',
+    {
+      document: {
+        getElementById: get,
+        addEventListener: (name: string, fn: (event: unknown) => unknown) => events.set(name, fn),
+        removeEventListener: (name: string) => events.delete(name),
+        body: { dataset: {} },
+      },
+      window: {},
+      location: { assign() {}, reload: () => reloads++ },
+      AbortSignal,
+      AbortController,
+      setTimeout: (callback: () => void, ms: number) => {
+        timers.push({ callback, ms })
+        return callback
+      },
+      clearTimeout: (callback: () => void) => {
+        const index = timers.findIndex((timer) => timer.callback === callback)
+        if (index !== -1) timers.splice(index, 1)
+      },
+      fetch: async (path: string, init: RequestInit) => {
+        const body = init.body ? JSON.parse(String(init.body)) : undefined
+        calls.push({ path, body })
+        if (path.endsWith('version?local=1')) return Response.json(info)
+        if (path.endsWith('/job')) return Response.json(job)
+        if (path.endsWith('/update')) {
+          job = {
+            kind: 'update',
+            tag: body.tag,
+            status: 'waiting',
+            logs: ['1', '2', '3', '4', '5', '6'],
+          }
+          return Response.json({ job })
         }
-        return Response.json({ job })
-      }
-      return Response.json({ ...info, hasUpdate: true, latest })
+        return Response.json({ ...info, hasUpdate: true, latest })
+      },
     },
-  })
+  )
   const flush = () => Bun.sleep(0)
   const click = async (id: string) => {
     await get(`version-${id}`).handlers.get('click')?.()
@@ -101,6 +116,8 @@ function browser(local: Record<string, unknown> = {}) {
   }
   return {
     get,
+    destroy,
+    timers,
     calls,
     info,
     click,
@@ -179,5 +196,17 @@ test('已有运行作业时自动打开弹层并恢复进度', async () => {
   expect(b.get('version-popover').hidden).toBe(false)
   expect(b.get('version-status').textContent).toBe('正在执行…')
   expect(b.get('version-logs').textContent).toBe('正在安装')
+  expect(b.calls).toHaveLength(1)
+})
+
+test('版本面板销毁移除全局监听并取消待执行检查', async () => {
+  const b = browser()
+  await b.flush()
+  expect(b.events.size).toBe(2)
+  expect(b.timers.length).toBe(1)
+  b.destroy()
+  await b.flush()
+  expect(b.events.size).toBe(0)
+  expect(b.timers.length).toBe(0)
   expect(b.calls).toHaveLength(1)
 })
