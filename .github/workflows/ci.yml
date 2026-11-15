@@ -1,0 +1,25 @@
+# 只读权限、不用 secret，因此可安全地在 pull_request 上触发。
+# main 由仓库规则禁止直接推送，只能经 PR 合入，且要求本工作流的 check 通过，
+# 所以不在 push 上重复运行。
+name: CI
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # 与发布工作流、Docker 镜像保持同一 bun 版本。
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+      - name: 安装依赖
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: 格式、lint、类型检查与测试
+        run: bun run check
