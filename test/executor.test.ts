@@ -320,9 +320,12 @@ test.each(['none', 'docker'] as const)(
   },
 )
 
+// 真实容器用例依赖本地构建的默认任务镜像；CI 机器有 Docker 但没有该镜像时跳过，避免去远端拉取失败。
 const dockerAvailable = (() => {
   try {
-    return spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 5000 }).status === 0
+    const docker = (...args: string[]) =>
+      spawnSync('docker', args, { stdio: 'ignore', timeout: 5000 }).status === 0
+    return docker('info') && docker('image', 'inspect', parseExecutorSettings({}).taskImage)
   } catch {
     return false
   }
