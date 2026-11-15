@@ -15,9 +15,11 @@ import { readExecutorSettings } from './config/executor.ts'
 import { createExecutor } from './executor/index.ts'
 import { readSettings } from './config/env.ts'
 import { serve } from './serve/index.ts'
+import { readVersion } from './runtime/version.ts'
 
 const usage = `用法：bun src/cli.ts <命令>
 命令：
+  version / --version / -v 显示版本
   serve                  启动服务：轮询 Issue、拉起任务、对账、管理页
   cancel <issue 引用>    取消运行中的任务
   reset-password         重置管理密码
@@ -32,6 +34,10 @@ const usage = `用法：bun src/cli.ts <命令>
 
 export async function main(args: string[]): Promise<number> {
   const [command, ref] = args
+  if (['version', '--version', '-v'].includes(command ?? '')) {
+    console.log(readVersion())
+    return 0
+  }
   if (command === 'cancel') {
     if (!ref || args.length !== 2) throw new Error('用法：bun src/cli.ts cancel <issue 引用>')
     const reference = parseIssueRef(ref, process.env.WORKLING_GITLAB_HOST || 'gitlab.com')

@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -314,11 +315,15 @@ test('runTask 中止时结束假 Pi 与其子进程并返回信号', async () =>
   }
 })
 
-test('Pi 工作约定与规格 4.4 代码块逐字一致', async () => {
-  const spec = await readFile(join(ROOT, 'docs/M1实现说明.md'), 'utf8')
-  const expected = spec.split('````md\n')[1]!.split('````')[0]!
-  expect(await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')).toBe(expected)
-})
+// docs/ 是本地设计文档，不随仓库发布；CI 检出代码中没有它时跳过对照。
+test.skipIf(!existsSync(join(ROOT, 'docs/M1实现说明.md')))(
+  'Pi 工作约定与规格 4.4 代码块逐字一致',
+  async () => {
+    const spec = await readFile(join(ROOT, 'docs/M1实现说明.md'), 'utf8')
+    const expected = spec.split('````md\n')[1]!.split('````')[0]!
+    expect(await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')).toBe(expected)
+  },
+)
 
 test('runTask 保存原始事件并输出脱敏的步骤与 Pi 进度', async () => {
   const options = await setupTask()

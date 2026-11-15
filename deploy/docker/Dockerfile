@@ -21,6 +21,9 @@ COPY src/ ./src/
 COPY drizzle/ ./drizzle/
 COPY configs/ ./configs/
 COPY tsconfig.json ./
+# 在线更新比较 Dockerfile 与入口脚本，运行环境变化时拒绝在线更新。
+COPY deploy/docker/Dockerfile ./deploy/docker/Dockerfile
+COPY deploy/docker/entrypoint.sh ./deploy/docker/entrypoint.sh
 COPY --chmod=755 deploy/docker/entrypoint.sh /usr/local/bin/workling-entrypoint
 RUN printf '%s\n' "$WORKLING_VERSION" > /app/VERSION
 

@@ -2104,3 +2104,197 @@ legend {
   font-size: 14px;
   line-height: 1;
 }
+
+.update-logs {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow: auto;
+}
+
+.brand {
+  position: relative;
+}
+.brand .version-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--sunken);
+  color: var(--muted);
+  cursor: pointer;
+  font: 11px var(--mono);
+}
+.brand .version-pill .dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.version-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+}
+.version-popover [hidden],
+.version-pill [hidden] {
+  display: none !important;
+}
+.version-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.version-head b {
+  font-size: 13px;
+}
+.version-icon-button,
+.version-text-button {
+  border: 0;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+.version-icon-button:disabled {
+  cursor: default;
+}
+.version-icon-button.loading svg {
+  animation: version-spin 1s linear infinite;
+}
+.version-body {
+  text-align: center;
+  padding: 20px 16px 16px;
+}
+.version-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.version-number strong {
+  font-size: 28px;
+  font-weight: 700;
+}
+.brand .version-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--muted);
+}
+.brand .version-badge--check {
+  background: var(--done-soft);
+  color: var(--done);
+}
+.brand .version-badge--arrow {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.brand .version-badge--warning {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.version-popover p {
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.version-notes {
+  white-space: pre-wrap;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.version-notes.expanded {
+  display: block;
+}
+.version-text-button {
+  color: var(--accent);
+}
+.version-link {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  color: var(--muted);
+}
+.version-section {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.version-popover fieldset {
+  border: 0;
+  padding: 8px 0;
+  margin: 0;
+}
+.version-popover fieldset label {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.brand .version-popover fieldset span {
+  display: inline;
+  line-height: inherit;
+}
+.version-popover .version-warning {
+  color: var(--warn);
+}
+.version-popover .version-error {
+  color: var(--failed);
+}
+.version-popover .version-error {
+  padding: 0 16px;
+}
+#version-logs {
+  font: 11px/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.version-footer {
+  padding: 0 16px;
+}
+@keyframes version-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .version-icon-button.loading svg {
+    animation: none;
+  }
+}
+
+.brand .version-badge > span {
+  display: inline-flex;
+  color: inherit;
+}

@@ -8,9 +8,23 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/db/index.ts'
 import { repos } from '../src/db/schema.ts'
 import { main } from '../src/cli.ts'
+import * as version from '../src/runtime/version.ts'
 
 describe('命令行入口', () => {
   afterEach(() => mock.restore())
+
+  test('version、--version 与 -v 只输出 VERSION 或 dev', async () => {
+    const log = spyOn(console, 'log').mockImplementation(() => {})
+    const read = spyOn(version, 'readVersion').mockReturnValue('v1.2.3')
+    for (const command of ['version', '--version', '-v']) {
+      expect(await main([command])).toBe(0)
+      expect(log.mock.calls.at(-1)).toEqual(['v1.2.3'])
+      read.mockReturnValue('dev')
+      expect(await main([command])).toBe(0)
+      expect(log.mock.calls.at(-1)).toEqual(['dev'])
+      read.mockReturnValue('v1.2.3')
+    }
+  })
 
   test('帮助与未知命令输出分组用法', async () => {
     const log = spyOn(console, 'log').mockImplementation(() => {})

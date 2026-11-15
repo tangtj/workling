@@ -55,3 +55,8 @@ declare module '*/web/assets/run-log.js' {
   const text: string
   export default text
 }
+
+declare module '*/web/assets/version.js' {
+  const text: string
+  export default text
+}

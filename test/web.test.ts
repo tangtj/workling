@@ -161,6 +161,19 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
     )
     const html = await response.text()
     expect(html).toContain('<script src="/app.js"')
+    expect(html).toContain('<script src="/version.js"')
+    expect(html).toContain('id="version-pill"')
+    expect(html).toContain('id="version-popover"')
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('aria-label="版本与更新"')
+    expect(html).toContain('rel="noopener noreferrer"')
+    for (const path of ['/issues', '/repos', '/settings']) {
+      const page = await (await app.request(path, { headers })).text()
+      expect(page).toContain('id="version-pill"')
+      expect(page).toContain('id="version-popover"')
+      expect(page).toContain('<script src="/version.js" defer="">')
+    }
     expect(html).toContain('/style.css')
     expect(html).not.toMatch(/<script\b(?![^>]*\bsrc=)[^>]*>/i)
     expect(html).not.toMatch(/<script\b[^>]*>\s*[^\s<]/i)
@@ -168,6 +181,7 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
     for (const [path, type] of [
       ['/app.js', 'text/javascript; charset=utf-8'],
+      ['/version.js', 'text/javascript; charset=utf-8'],
       ['/style.css', 'text/css; charset=utf-8'],
       ['/login.js', 'text/javascript; charset=utf-8'],
     ]) {
@@ -1434,6 +1448,11 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
     const settings = await request('/settings')
     for (const id of ['codex-form', 'pi-settings-form', 'git-form', 'executor-settings-form'])
       expect(settings).toContain(`id="${id}"`)
+    expect(settings).toContain('id="version-pill"')
+    expect(settings).toContain('id="version-popover"')
+    expect(settings).not.toContain('id="set-version"')
+    expect(settings).not.toContain('<h2>版本与更新</h2>')
+    expect(settings).not.toContain('<h2>版本与更新</h2>')
     expect(settings).toContain('/p1-workspace')
     expect(settings).toContain('WORKLING_WORKSPACE')
     for (const name of ['ready', 'queued', 'running', 'done', 'failed'])

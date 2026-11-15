@@ -78,8 +78,31 @@ watch、task、Pi、codex 运行在同一个容器里，设置页的执行器要
   ```
 
 - **使用已推送的镜像**：把 `deploy/docker/docker-compose.yaml` 和 `deploy/docker/.env.example` 复制到服务器的部署目录，后者改名为 `.env`，填写 `WORKLING_IMAGE` 与 `WORKLING_VERSION`，再执行 `docker compose up -d`。
+- **发布与更新**：按下方 tag 流程发布到 GHCR。之后可以在管理页「侧栏版本徽标」在线更新；Dockerfile 或入口脚本变化时执行 `./update.sh <tag>` 拉新镜像。
 
 首次启动的管理密码在日志里：`docker compose logs workling | grep -A1 管理密码`。登录后在「设置」填写 LLM 接入地址与 Key，再登记仓库。数据默认保存在命名卷 `workling-data` 中，重建容器不会丢失；想放到宿主机目录，在 `.env` 里设置 `WORKLING_DATA_DIR`（该目录需对 uid 1000 可写）。
+
+### 发布
+
+发布只需创建并推送 tag：
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+版本号只来自 tag，构建时写入镜像的 `/app/VERSION`；`package.json` 的 version 不参与发布。本地直接运行源码显示 `dev`。
+
+Actions 安装依赖并运行检查，使用官方 Docker Actions 构建 `linux/amd64` 镜像推送 GHCR，再创建 GitHub Release。正式版生成 `v0.2.0`、`v0.2` 与 `latest` 镜像标签；预发布如 `v0.2.0-rc.1` 只有完整 tag，Release 标为预发布，不出现在在线更新列表。GHCR 包须允许该仓库 Actions 使用 `GITHUB_TOKEN` 写入。
+
+管理页「侧栏版本徽标」用于只换代码的在线更新：配置 `WORKLING_UPDATE_REPO`，私有仓库另配只读 `WORKLING_UPDATE_TOKEN`；`WORKLING_UPDATE_PROXY` 同时用于 GitHub 请求、源码下载与依赖安装。默认暂停拉起新任务，等待运行中任务结束后备份数据库、切换代码并重启；等待期间可以取消，也可选择立即升级并中断运行中的任务。回退旧版本请在服务器执行 `./update.sh <旧 tag>`；旧版本可能无法读取已迁移的新库，需配合 `/data/backups` 下的备份恢复。页面显示上次成功升级的版本与时间；新版本连续 3 次启动失败会自动回滚并恢复升级前的数据库备份。
+
+`deploy/docker/Dockerfile` 或 `deploy/docker/entrypoint.sh` 任一变化，在线更新会拒绝，必须在部署目录执行 `./update.sh <tag>` 拉取新镜像。脚本会备份数据库、更新 Compose 配置并检查健康状态，失败时恢复旧版本与数据库。在线代码保存在数据卷，入口脚本按 SemVer 选择镜像与在线版本；镜像版本更高时以镜像为准。
+
+本地可构建指定版本用于实测（默认 `dev`）：
+
+```sh
+WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yaml build
+```
 
 ### 备选：systemd
 
@@ -96,6 +119,7 @@ watch 由 systemd 运行在宿主机上，每个任务启动一个独立容器�
 3. 把 `deploy/workling.env.example` 复制为 `/etc/workling/workling.env`（权限 600，属主 workling）。
 4. 安装并启动服务：`sudo cp deploy/workling.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now workling`。
 5. 首次启动的管理密码：`journalctl -u workling | grep -A1 管理密码`。
+6. 升级：在 `/opt/workling` 执行 `deploy/update.sh <tag>`。
 
 ## 开发
 

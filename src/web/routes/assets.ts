@@ -1,5 +1,6 @@
 import timelineJs from '../../web/assets/timeline.js?text' with { type: 'text' }
 import runLogJs from '../../web/assets/run-log.js' with { type: 'text' }
+import versionJs from '../../web/assets/version.js' with { type: 'text' }
 import appJs from '../../web/assets/app.js' with { type: 'text' }
 import loginJs from '../../web/assets/login.js' with { type: 'text' }
 import styleCss from '../../web/assets/style.css' with { type: 'text' }
@@ -16,6 +17,9 @@ export function assetsRoutes(deps: AppDeps): Hono {
       ...webHeaders,
       'Content-Type': 'text/javascript; charset=utf-8',
     }),
+  )
+  app.get('/version.js', (c) =>
+    c.body(versionJs, 200, { ...webHeaders, 'Content-Type': 'text/javascript; charset=utf-8' }),
   )
   app.get('/app.js', (c) =>
     c.body(appJs, 200, { ...webHeaders, 'Content-Type': 'text/javascript; charset=utf-8' }),
