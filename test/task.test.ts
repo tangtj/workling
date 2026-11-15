@@ -145,6 +145,7 @@ test('runTask 真实克隆和配置 Git，假 Pi 收到精确参数、指令和�
   expect(captured.env.GH_PROMPT_DISABLED).toBe('1')
   expect(captured.env.GH_HOST).toBe('wrong')
   expect(options.calls.slice(1)).toEqual([
+    ['git', 'config', '--local', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'],
     ['git', 'config', '--local', 'credential.helper', ''],
     ['git', 'config', '--local', '--add', 'credential.helper', '!gh auth git-credential'],
     ['git', 'config', '--local', 'user.name', 'workling'],
@@ -152,9 +153,41 @@ test('runTask 真实克隆和配置 Git，假 Pi 收到精确参数、指令和�
   ])
   const git = (key: string) =>
     run(['git', 'config', '--local', '--get-all', key], { cwd: join(options.dir, 'repo') })
+  expect(await git('remote.origin.fetch')).toBe('+refs/heads/*:refs/remotes/origin/*')
   expect(await git('credential.helper')).toBe('!gh auth git-credential')
   expect(await git('user.name')).toBe('workling')
   expect(await git('user.email')).toBe('workling@users.noreply.github.com')
+})
+
+test('浅克隆配置全部分支后推送新分支会建立远端跟踪引用', async () => {
+  const workspace = await temp()
+  const bare = join(workspace, 'source.git')
+  const seed = join(workspace, 'seed')
+  const repo = join(workspace, 'clone')
+  await run(['git', 'init', '--bare', bare])
+  await run(['git', 'clone', bare, seed])
+  const seedOptions = { cwd: seed }
+  await run(['git', 'config', '--local', 'user.name', 'workling'], seedOptions)
+  await run(['git', 'config', '--local', 'user.email', 'workling@example.com'], seedOptions)
+  for (let i = 0; i < 51; i++)
+    await run(['git', 'commit', '--allow-empty', '-m', `Seed commit ${i}`], seedOptions)
+  await run(['git', 'push', 'origin', 'HEAD'], seedOptions)
+  await run(['git', 'clone', '--depth', '50', `file://${bare}`, repo])
+  const options = { cwd: repo }
+  expect(await run(['git', 'rev-parse', '--is-shallow-repository'], options)).toBe('true')
+  expect(await run(['git', 'rev-list', '--count', 'HEAD'], options)).toBe('50')
+  await run(
+    ['git', 'config', '--local', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'],
+    options,
+  )
+  await run(['git', 'config', '--local', 'user.name', 'workling'], options)
+  await run(['git', 'config', '--local', 'user.email', 'workling@example.com'], options)
+  await run(['git', 'checkout', '-b', 'task-branch'], options)
+  await run(['git', 'commit', '--allow-empty', '-m', 'Task commit'], options)
+  await run(['git', 'push', '-u', 'origin', 'HEAD'], options)
+  expect(await run(['git', 'rev-parse', '--symbolic-full-name', '@{push}'], options)).toBe(
+    'refs/remotes/origin/task-branch',
+  )
 })
 
 test('runTask 可选 Pi 模型与默认入口符合规格，拒绝不支持的引用并透传克隆失败', async () => {
