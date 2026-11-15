@@ -1,3 +1,4 @@
+import { assetUrl } from '../assets.ts'
 import type { Issue, PageData } from '../data.ts'
 import { githubUrl } from '../data.ts'
 import { formatDuration, formatTime } from './format.ts'
@@ -119,7 +120,7 @@ export function IssuePage({ data, issue }: { data: PageData; issue: Issue }) {
           <div class="card empty">尚未执行</div>
         )}
       </section>
-      <script type="module" src="/run-log.js"></script>
+      <script type="module" src={assetUrl('run-log.js')}></script>
     </>
   )
 }

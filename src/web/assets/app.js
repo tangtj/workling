@@ -16,6 +16,7 @@
   const render = () => {
     if (mode === 'system') document.documentElement.removeAttribute('data-theme')
     else document.documentElement.setAttribute('data-theme', mode)
+    document.documentElement.style.colorScheme = mode === 'system' ? '' : mode
     const index = modes.indexOf(mode)
     button.setAttribute('aria-label', `主题：${labels[index]}`)
     button.title = `主题：${labels[index]}`

@@ -1,5 +1,8 @@
 import { readExecutorSettings, updateExecutorSettings } from '../src/config/executor.ts'
 import { eq } from 'drizzle-orm'
+import { createHash } from 'node:crypto'
+import { assetUrl, type AssetName } from '../src/web/assets.ts'
+import { themeScript } from '../src/web/views/theme.ts'
 import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -160,8 +163,37 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       /^default-src 'none'; script-src 'self' 'sha256-[A-Za-z0-9+/=]+'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'$/,
     )
     const html = await response.text()
-    expect(html).toContain('<script src="/app.js"')
-    expect(html).toContain('<script src="/version.js"')
+    expect(html).toContain('<meta name="color-scheme" content="light dark"/>')
+    expect(response.headers.get('content-security-policy')).toContain(
+      `'sha256-${createHash('sha256').update(themeScript).digest('base64')}'`,
+    )
+    for (const name of ['style.css', 'app.js', 'version.js'] as const) {
+      expect(html).toContain(assetUrl(name))
+    }
+    for (const name of [
+      'style.css',
+      'app.js',
+      'version.js',
+      'timeline.js',
+      'run-log.js',
+      'login.js',
+    ] as AssetName[]) {
+      const url = assetUrl(name)
+      expect(url).toMatch(/\?v=[0-9a-f]{12}$/)
+      const asset = await app.request(url, { headers })
+      const body = await asset.text()
+      expect(url).toEndWith(createHash('sha256').update(body).digest('hex').slice(0, 12))
+      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+      expect(asset.headers.get('content-security-policy')).toBe(
+        response.headers.get('content-security-policy'),
+      )
+      expect(
+        (await app.request(`/${name}?v=wrong`, { headers })).headers.get('cache-control'),
+      ).toBe('no-cache')
+      if (name === 'run-log.js') expect(body).toContain(`from '${assetUrl('timeline.js')}'`)
+    }
+    expect(html).toContain('<script src="/app.js?v=')
+    expect(html).toContain('<script src="/version.js?v=')
     expect(html).toContain('id="version-pill"')
     expect(html).toContain('id="version-popover"')
     expect(html).toContain('aria-haspopup="dialog"')
@@ -172,7 +204,7 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       const page = await (await app.request(path, { headers })).text()
       expect(page).toContain('id="version-pill"')
       expect(page).toContain('id="version-popover"')
-      expect(page).toContain('<script src="/version.js" defer="">')
+      expect(page).toContain('<script src="/version.js?v=')
     }
     expect(html).toContain('/style.css')
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
@@ -192,7 +224,7 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       )
       expect(asset.headers.get('x-content-type-options')).toBe('nosniff')
       expect(asset.headers.get('referrer-policy')).toBe('no-referrer')
-      expect(asset.headers.get('cache-control')).toBe('no-store')
+      expect(asset.headers.get('cache-control')).toBe('no-cache')
     }
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
@@ -257,6 +289,12 @@ test('登录鉴权、会话过期、限流窗口和退出登录', async () => {
     const page = await request('/login')
     expect(page.headers.get('cache-control')).toBe('no-store')
     const html = await page.text()
+    expect(html).toContain('<meta name="color-scheme" content="light dark"/>')
+    expect(html).toContain(assetUrl('style.css'))
+    expect(html).toContain(assetUrl('login.js'))
+    expect((await request(assetUrl('style.css'))).status).toBe(200)
+    expect((await request(assetUrl('login.js'))).status).toBe(200)
+    expect((await request(assetUrl('app.js'))).status).toBe(302)
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
@@ -911,7 +949,7 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
       '原始日志',
       'id="run-timeline"',
       'data-status=',
-      '<script type="module" src="/run-log.js"',
+      '<script type="module" src="/run-log.js?v=',
       '<pre id="run-log" hidden',
     ])
       expect(html).toContain(text)
@@ -1010,7 +1048,7 @@ test('旧日志 fallback 仅在首次且没有结构化事件时返回，扫描�
     expect(html).not.toContain('日志末尾')
     expect(html).toContain(`href="/runs/${run.id}/log">完整时间线`)
     expect(html).toContain(`href="/runs/${run.id}/log">查看完整时间线`)
-    expect(html).toContain('<script type="module" src="/run-log.js"')
+    expect(html).toContain(assetUrl('run-log.js'))
     expect(html).not.toContain('data-autorefresh="15"')
   } finally {
     close()

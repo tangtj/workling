@@ -1,3 +1,4 @@
+import { assetUrl } from '../assets.ts'
 import { readVersion } from '../../runtime/version.ts'
 import type { Child } from 'hono/jsx'
 import type { PageData } from '../data.ts'
@@ -25,10 +26,11 @@ export function Layout({
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title} · Workling</title>
+        <meta name="color-scheme" content="light dark" />
         <script dangerouslySetInnerHTML={{ __html: themeScript }}></script>
-        <link rel="stylesheet" href="/style.css" />
-        <script src="/app.js" defer></script>
-        <script src="/version.js" defer></script>
+        <link rel="stylesheet" href={assetUrl('style.css')} />
+        <script src={assetUrl('app.js')} defer></script>
+        <script src={assetUrl('version.js')} defer></script>
       </head>
       <body data-page={active} data-autorefresh={refresh ? '15' : undefined}>
         <div class="shell">
