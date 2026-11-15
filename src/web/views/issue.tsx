@@ -2,7 +2,7 @@ import type { Issue, PageData } from '../data.ts'
 import { githubUrl } from '../data.ts'
 import { formatDuration, formatTime } from './format.ts'
 
-import { Badge, Title, PRState, result, resultText } from './shared.tsx'
+import { Badge, Title, PRState, PlatformIcon, platformName, result, resultText } from './shared.tsx'
 
 export function IssuePage({ data, issue }: { data: PageData; issue: Issue }) {
   return (
@@ -27,13 +27,26 @@ export function IssuePage({ data, issue }: { data: PageData; issue: Issue }) {
             </p>
           </div>
           <div class="row">
-            <a class="button button--primary" href={githubUrl(issue)} rel="noreferrer">
-              在 GitHub 打开 ↗
+            <a
+              class="button button--primary"
+              href={githubUrl(issue)}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`在 ${platformName[issue.repo.platform]} 打开`}
+            >
+              <PlatformIcon platform={issue.repo.platform} /> 在 {platformName[issue.repo.platform]}{' '}
+              打开
             </a>
             {issue.prUrl ? (
               <>
                 {issue.prUrl.startsWith('https://') ? (
-                  <a class="button" href={issue.prUrl} rel="noreferrer">
+                  <a
+                    class="button"
+                    href={issue.prUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="查看 PR"
+                  >
                     查看 PR ↗
                   </a>
                 ) : (

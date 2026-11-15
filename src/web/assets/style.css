@@ -2373,3 +2373,9 @@ legend {
 .legacy-content {
   display: contents;
 }
+
+.platform-icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+}
