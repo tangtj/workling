@@ -388,6 +388,7 @@ test('Issue 接口要求登录并返回按时间排序的状态和执行历史',
         title: '已完成的 Issue',
         status: 'done',
         prUrl: 'https://git.example/a/b/pull/3',
+        prState: 'merged',
         createdAt: old,
         updatedAt: recent,
       })
@@ -433,6 +434,7 @@ test('Issue 接口要求登录并返回按时间排序的状态和执行历史',
         url: 'https://git.example/a/b/issues/2',
         status: 'done',
         prUrl: done.prUrl,
+        prState: 'merged',
         lastRun: lastResponse,
         createdAt: old.toISOString(),
         updatedAt: recent.toISOString(),
@@ -446,6 +448,7 @@ test('Issue 接口要求登录并返回按时间排序的状态和执行历史',
         url: 'https://git.example/a/b/issues/1',
         status: 'queued',
         prUrl: null,
+        prState: null,
         lastRun: null,
         createdAt: old.toISOString(),
         updatedAt: old.toISOString(),
@@ -555,7 +558,8 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
           number: n + 1,
           title: n === 2 ? '<script>alert(1)</script>' : `标题${n}`,
           status,
-          prUrl: n === 2 ? 'javascript:alert(1)' : null,
+          prUrl: n === 2 ? 'javascript:alert(1)' : n === 3 ? 'https://github.com/a/b/pull/3' : null,
+          prState: n === 3 ? 'merged' : null,
           createdAt: time,
           updatedAt: time,
         })
@@ -586,7 +590,15 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
     expect(filtered).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(filtered).not.toContain('标题0')
     expect(filtered).not.toContain('href="javascript:alert(1)"')
-    expect((await request(`/issues/${records[0]!.id}`)).status).toBe(200)
+    const list = await (await request('/issues')).text()
+    expect(list).toContain('已合并')
+    const donePage = await (await request(`/issues/${records[3]!.id}`)).text()
+    expect(donePage).toContain('已合并')
+    expect(donePage).toContain('查看 PR ↗')
+    const emptyPage = await (await request(`/issues/${records[0]!.id}`)).text()
+    expect(emptyPage).toContain('暂无 PR')
+    const unsafePage = await (await request(`/issues/${records[2]!.id}`)).text()
+    expect(unsafePage).not.toContain('href="javascript:alert(1)"')
     for (const path of [
       '/repos/invalid',
       '/repos/999',

@@ -15,6 +15,7 @@ import { loadSteps, runUpgradeSteps, type UpgradeStep } from '../upgrade/index.t
 import { pollOnce } from './poll.ts'
 import { launchQueued } from './launch.ts'
 import { reconcile } from './reconcile.ts'
+import { syncPullRequests } from './pr-sync.ts'
 type Log = (message: string) => void
 
 export type ServeStatus = {
@@ -133,6 +134,11 @@ export async function serve({
         await reconcile({ db, command, log, settings, pi, executorSettings })
       } catch (error) {
         log(`对账失败：${errorMessage(error)}`)
+      }
+      try {
+        await syncPullRequests({ db, command, log, signal })
+      } catch (error) {
+        if (!signal.aborted) log(`PR 同步失败：${errorMessage(error)}`)
       }
       try {
         await pollOnce({ db, command, signal, log, labeledRepos })

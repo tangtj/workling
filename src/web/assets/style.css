@@ -2345,3 +2345,16 @@ legend {
 .theme-toggle {
   margin-bottom: 8px;
 }
+
+.badge--pr-open {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+.badge--pr-merged {
+  color: #7e22ce;
+  background: #f3e8ff;
+}
+.badge--pr-closed {
+  color: #4b5563;
+  background: #e5e7eb;
+}

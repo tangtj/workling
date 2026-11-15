@@ -230,7 +230,7 @@ export function OverviewPage({ data }: { data: PageData }) {
                   </td>
                   <td>{formatDuration(run.endedAt!.getTime() - run.startedAt.getTime())}</td>
                   <td>
-                    <PR url={issue.prUrl} />
+                    <PR url={issue.prUrl} state={issue.prState} />
                   </td>
                 </tr>
               ))}

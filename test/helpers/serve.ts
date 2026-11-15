@@ -52,9 +52,9 @@ export async function scenario() {
     calls.push({ args, options })
     return args[1] === 'pr'
       ? JSON.stringify([
-          { url: 'wrong', headRefName: 'workling/420-task' },
-          { url: 'https://github.com/a/b/pull/1', headRefName: 'workling/42-task' },
-          { url: 'second', headRefName: 'workling/42-other' },
+          { url: 'wrong', headRefName: 'workling/420-task', state: 'OPEN' },
+          { url: 'https://github.com/a/b/pull/1', headRefName: 'workling/42-task', state: 'OPEN' },
+          { url: 'second', headRefName: 'workling/42-other', state: 'OPEN' },
         ])
       : ''
   }
