@@ -2,7 +2,7 @@ import type { Issue, PageData } from '../data.ts'
 import { githubUrl } from '../data.ts'
 import { formatDuration, formatTime } from './format.ts'
 
-import { Badge, Title, result, resultText } from './shared.tsx'
+import { Badge, Title, PRState, result, resultText } from './shared.tsx'
 
 export function IssuePage({ data, issue }: { data: PageData; issue: Issue }) {
   return (
@@ -26,9 +26,25 @@ export function IssuePage({ data, issue }: { data: PageData; issue: Issue }) {
               　状态更新 {formatTime(issue.updatedAt, data.now)}
             </p>
           </div>
-          <a class="button button--primary" href={githubUrl(issue)} rel="noreferrer">
-            在 GitHub 打开 ↗
-          </a>
+          <div class="row">
+            <a class="button button--primary" href={githubUrl(issue)} rel="noreferrer">
+              在 GitHub 打开 ↗
+            </a>
+            {issue.prUrl ? (
+              <>
+                {issue.prUrl.startsWith('https://') ? (
+                  <a class="button" href={issue.prUrl} rel="noreferrer">
+                    查看 PR ↗
+                  </a>
+                ) : (
+                  <span>{issue.prUrl}</span>
+                )}{' '}
+                <PRState state={issue.prState} />
+              </>
+            ) : (
+              <span class="muted">暂无 PR</span>
+            )}
+          </div>
         </div>
       </section>
       {['failed', 'done', 'canceled'].includes(issue.status) && (

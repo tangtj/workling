@@ -17,7 +17,13 @@ import type { Settings } from '../config/env.ts'
 import { errorMessage } from '../runtime/errors.ts'
 type Log = (message: string) => void
 
-const prsSchema = Type.Array(Type.Object({ url: Type.String(), headRefName: Type.String() }))
+const prsSchema = Type.Array(
+  Type.Object({
+    url: Type.String(),
+    headRefName: Type.String(),
+    state: Type.Union([Type.Literal('OPEN'), Type.Literal('MERGED'), Type.Literal('CLOSED')]),
+  }),
+)
 
 async function cleanTaskDirs(
   db: WorklingDatabase,
@@ -84,6 +90,7 @@ export async function reconcile({
       let endedAt = current
       let exitCode: number | null = null
       let prUrl: string | undefined
+      let prState: typeof issue.prState | undefined
       if (!run?.taskDir) error = '缺少任务目录'
       else {
         const result = await readResult(run.taskDir)
@@ -109,7 +116,7 @@ export async function reconcile({
                 '--search',
                 `head:workling/${issue.number}-`,
                 '--json',
-                'url,headRefName',
+                'url,headRefName,state',
                 '--limit',
                 '20',
               ],
@@ -121,6 +128,7 @@ export async function reconcile({
             if (pr) {
               status = 'done'
               prUrl = pr.url
+              prState = pr.state.toLowerCase() as NonNullable<typeof issue.prState>
             } else error = '未找到 PR'
           } else {
             error =
@@ -150,7 +158,7 @@ export async function reconcile({
         : { summary: null, reportResult: null, logTail: null }
       db.transaction((tx) => {
         tx.update(issueStates)
-          .set({ status, updatedAt: current, prUrl })
+          .set({ status, updatedAt: current, prUrl, prState })
           .where(eq(issueStates.id, issue.id))
           .run()
         if (run)

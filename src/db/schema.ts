@@ -41,6 +41,7 @@ export const issues = sqliteTable(
     title: text('title'),
     status: text('status', { enum: ['queued', 'running', 'done', 'failed', 'canceled'] }).notNull(),
     prUrl: text('pr_url'),
+    prState: text('pr_state', { enum: ['open', 'merged', 'closed'] }),
     // 不设外键，避免 issues 与 runs 循环引用。
     lastRunId: integer('last_run_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),

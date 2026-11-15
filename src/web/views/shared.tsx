@@ -18,15 +18,26 @@ export const Badge = ({ status, text }: { status: keyof typeof labels; text?: st
 export const Title = ({ issue }: { issue: Issue }) => (
   <>{issue.title ?? <span class="muted">（未记录标题）</span>}</>
 )
-export const PR = ({ url }: { url: string | null }) =>
+export const PRState = ({ state }: { state: Issue['prState'] }) =>
+  state ? (
+    <span class={`badge badge--pr-${state}`}>
+      {{ open: '打开中', merged: '已合并', closed: '已关闭' }[state]}
+    </span>
+  ) : null
+export const PR = ({ url, state }: { url: string | null; state: Issue['prState'] }) =>
   !url ? (
     <span>—</span>
-  ) : url.startsWith('https://') ? (
-    <a href={url} rel="noreferrer">
-      {prLabel(url)}
-    </a>
   ) : (
-    <span>{url}</span>
+    <span>
+      {url.startsWith('https://') ? (
+        <a href={url} rel="noreferrer">
+          {prLabel(url)}
+        </a>
+      ) : (
+        <span>{url}</span>
+      )}{' '}
+      <PRState state={state} />
+    </span>
   )
 export const result = (run: Run): keyof typeof labels =>
   !run.endedAt ? 'running' : run.exitCode === 0 && !run.error ? 'done' : 'failed'
@@ -182,7 +193,7 @@ export function IssueTable({
                 <td>{issue.status === 'failed' ? <span class="reason">{stage}</span> : stage}</td>
                 <td>{issue.runs.length}</td>
                 <td>
-                  <PR url={issue.prUrl} />
+                  <PR url={issue.prUrl} state={issue.prState} />
                 </td>
                 <td>{formatTime(issue.updatedAt, now)}</td>
               </tr>

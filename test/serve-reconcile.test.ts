@@ -20,6 +20,7 @@ test('对账退出码 0 查询首个匹配 PR 后 done，保存链接与结果�
     expect(s.db.select().from(issues).get()).toMatchObject({
       status: 'done',
       prUrl: 'https://github.com/a/b/pull/1',
+      prState: 'open',
     })
     expect(s.db.select().from(runs).get()).toMatchObject({
       endedAt: new Date('2026-11-14T10:29:59Z'),
@@ -39,7 +40,7 @@ test('对账退出码 0 查询首个匹配 PR 后 done，保存链接与结果�
         '--search',
         'head:workling/42-',
         '--json',
-        'url,headRefName',
+        'url,headRefName,state',
         '--limit',
         '20',
       ],
@@ -70,7 +71,9 @@ test('对账退出码 0 无匹配 PR 判为未找到 PR，不能只按退出码�
       ...s.options,
       command: async (args, options) => {
         s.calls.push({ args, options })
-        return args[1] === 'pr' ? '[{"url":"wrong","headRefName":"workling/420-task"}]' : ''
+        return args[1] === 'pr'
+          ? '[{"url":"wrong","headRefName":"workling/420-task","state":"OPEN"}]'
+          : ''
       },
     })
     expect(s.db.select().from(issues).get()?.status).toBe('failed')

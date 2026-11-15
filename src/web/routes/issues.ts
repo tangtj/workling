@@ -39,6 +39,7 @@ export function issuesRoutes(deps: AppDeps): Hono {
         url: `https://${repo.host}/${repo.path}/issues/${issue.number}`,
         status: issue.status,
         prUrl: issue.prUrl,
+        prState: issue.prState,
         lastRun: lastRun ? responseRun(lastRun) : null,
         createdAt: issue.createdAt.toISOString(),
         updatedAt: issue.updatedAt.toISOString(),
