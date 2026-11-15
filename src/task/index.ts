@@ -42,6 +42,8 @@ export async function runTask(options: {
   await command(['gh', 'repo', 'clone', ref.project, repo, '--', '--depth', '50'], { env, signal })
   log('配置 git 凭证与提交身份')
   for (const args of [
+    // 浅克隆只跟踪默认分支，push 后缺少 origin/<分支> 会使 gh pr create 误判未推送。
+    ['remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'],
     ['credential.helper', ''],
     ['--add', 'credential.helper', '!gh auth git-credential'],
     ['user.name', env.WORKLING_GIT_NAME!],
