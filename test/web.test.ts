@@ -602,6 +602,32 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
         .returning()
         .get(),
     )
+    const gitlab = db
+      .insert(repos)
+      .values({
+        ref: 'gitlab:c/d',
+        platform: 'gitlab',
+        host: 'gitlab.com',
+        path: 'c/d',
+        token: 'secret1234',
+        enabled: true,
+        createdAt: time,
+        updatedAt: time,
+      })
+      .returning()
+      .get()
+    const gitlabIssue = db
+      .insert(issues)
+      .values({
+        repoId: gitlab.id,
+        number: 7,
+        title: 'GitLab issue',
+        status: 'queued',
+        createdAt: time,
+        updatedAt: time,
+      })
+      .returning()
+      .get()
     const request = (path: string) =>
       app.request(path, { headers: { ...headers, 'X-Workling-Fragment': '1' } })
     const home = await request('/')
@@ -629,9 +655,30 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
     expect(filtered).not.toContain('href="javascript:alert(1)"')
     const list = await (await request('/issues')).text()
     expect(list).toContain('已合并')
+    expect(list).toMatch(
+      /<a href="https:\/\/github\.com\/a\/b\/issues\/1" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 打开"[^>]*><svg[^>]*><path d="M12 \.297/,
+    )
+    expect(list).toMatch(
+      /<a href="https:\/\/gitlab\.com\/c\/d\/issues\/7" target="_blank" rel="noopener noreferrer" aria-label="在 GitLab 打开"[^>]*><svg[^>]*><path d="m23\.6004/,
+    )
+    expect(list).toContain(
+      'href="https://github.com/a/b/pull/3" target="_blank" rel="noopener noreferrer"',
+    )
+    expect(list).toContain(`href="/issues/${gitlabIssue.id}"`)
+    const gitlabPage = await (await request(`/issues/${gitlabIssue.id}`)).text()
+    expect(gitlabPage).toContain('在 GitLab 打开')
+    expect(gitlabPage).toContain('aria-label="在 GitLab 打开"')
+    expect(gitlabPage).toContain('m23.6004')
+    const gitlabRepo = await (await request(`/repos/${gitlab.id}`)).text()
+    expect(gitlabRepo).toContain('aria-label="在 GitLab 查看 Issues"')
+    expect(gitlabRepo).toContain('m23.6004')
+
     const donePage = await (await request(`/issues/${records[3]!.id}`)).text()
     expect(donePage).toContain('已合并')
     expect(donePage).toContain('查看 PR ↗')
+    expect(donePage).toContain(
+      'href="https://github.com/a/b/pull/3" target="_blank" rel="noopener noreferrer" aria-label="查看 PR"',
+    )
     const emptyPage = await (await request(`/issues/${records[0]!.id}`)).text()
     expect(emptyPage).toContain('暂无 PR')
     const unsafePage = await (await request(`/issues/${records[2]!.id}`)).text()

@@ -2,6 +2,8 @@ import type { PageData } from '../data.ts'
 import { maskToken } from '../data.ts'
 import {
   IssueTable,
+  PlatformIcon,
+  platformName,
   StatusChips,
   selectedStatus,
   statusCounts,
@@ -23,8 +25,13 @@ export function RepoPage({ data, id, filter }: { data: PageData; id: number; fil
           <h1 class="mono">{repo.ref}</h1>
           <p>
             {repo.enabled ? '已启用' : '已停用'} · Token {maskToken(repo.token)} ·{' '}
-            <a href={`https://${repo.host}/${repo.path}/issues`} rel="noreferrer">
-              GitHub Issues ↗
+            <a
+              href={`https://${repo.host}/${repo.path}/issues`}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`在 ${platformName[repo.platform]} 查看 Issues`}
+            >
+              <PlatformIcon platform={repo.platform} /> Issues
             </a>
           </p>
         </div>
