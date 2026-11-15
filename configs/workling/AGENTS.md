@@ -37,7 +37,7 @@
    - 未完成与存疑：原因与建议
    ```
 
-5. 调用 codex（命令可能运行数十分钟，不要设置短超时）：
+5. 调用 codex（命令可能运行数十分钟；调用 bash 时不要传 timeout 参数，超时由 workling 整体回收）：
 
    ```text
    env -u GH_TOKEN -u GITHUB_TOKEN codex exec -C <仓库目录> -s <codex 沙箱模式> --add-dir <任务目录> \
