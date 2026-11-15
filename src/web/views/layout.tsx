@@ -23,7 +23,7 @@ export function Layout({
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{title} · workling</title>
+        <title>{title} · Workling</title>
         <link rel="stylesheet" href="/style.css" />
         <script src="/app.js" defer></script>
         <script src="/version.js" defer></script>
@@ -32,12 +32,12 @@ export function Layout({
         <div class="shell">
           <aside class="sidebar">
             <div class="brand">
-              <a class="brand-mark" href="/" aria-label="workling 首页">
+              <a class="brand-mark" href="/" aria-label="Workling 首页">
                 W
               </a>
               <div>
                 <a href="/">
-                  <b>workling</b>
+                  <b>Workling</b>
                 </a>
                 <button
                   id="version-pill"
