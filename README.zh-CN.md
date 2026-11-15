@@ -95,6 +95,8 @@ Docker 相关文件都在 `deploy/docker/`，systemd 相关文件在 `deploy/`�
 
 ### 推荐：Docker
 
+镜像预装了常用命令行工具：`rg`、`fd`、`jq`、`less`、`file`、`tree`、`patch`、`unzip`、`xz`、`ps`、`lsof`、`make`、`python3` 和 `sqlite3`。
+
 watch、task、Pi、codex 运行在同一个容器里，设置页的执行器要选「本机进程」（容器内没有 docker 命令）。
 
 - **从源码构建并运行**：在仓库根目录准备好 `.env`（可以为空），然后执行
