@@ -1,4 +1,3 @@
-import { assetUrl } from '../assets.ts'
 import type { Issue, PageData, Run } from '../data.ts'
 import { formatDuration, formatTime } from './format.ts'
 
@@ -86,7 +85,6 @@ export function RunLogPage({ data, issue, run }: { data: PageData; issue: Issue;
         ></div>
         <pre id="run-log" hidden></pre>
       </section>
-      <script type="module" src={assetUrl('run-log.js')}></script>
     </>
   )
 }

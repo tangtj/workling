@@ -1,248 +1,218 @@
-;(() => {
-  const button = document.getElementById('theme-toggle')
-  if (!button) return
-  const modes = ['system', 'light', 'dark']
-  const labels = ['跟随系统', '浅色', '深色']
-  const icons = [
-    'M3 4h18v13H3zM8 21h8M12 17v4',
-    'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
-    'M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5z',
-  ]
-  let mode = 'system'
-  try {
-    const stored = localStorage.getItem('workling-theme')
-    if (modes.includes(stored)) mode = stored
-  } catch {}
-  const render = () => {
-    if (mode === 'system') document.documentElement.removeAttribute('data-theme')
-    else document.documentElement.setAttribute('data-theme', mode)
-    document.documentElement.style.colorScheme = mode === 'system' ? '' : mode
-    const index = modes.indexOf(mode)
-    button.setAttribute('aria-label', `主题：${labels[index]}`)
-    button.title = `主题：${labels[index]}`
-    document.getElementById('theme-icon').setAttribute('d', icons[index])
+export function init(root, ctx) {
+  const controller = new AbortController()
+  let disposed = false
+  const timers = new Set()
+  const on = (node, type, handler) =>
+    node?.addEventListener(type, handler, { signal: controller.signal })
+  const later = (callback, ms) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer)
+      if (!disposed) callback()
+    }, ms)
+    timers.add(timer)
   }
-  button.addEventListener('click', () => {
-    const next = modes[(modes.indexOf(mode) + 1) % modes.length]
-    try {
-      localStorage.setItem('workling-theme', next)
-      mode = next
-    } catch {
-      mode = 'system'
-    }
-    render()
-  })
-  render()
-})()
-async function request(path, method, body, signal) {
-  const response = await fetch(path, {
-    method,
-    signal,
-    headers: { 'content-type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  })
-  if (response.status === 401) {
-    location.assign('/login')
-    throw new Error('未登录')
+  const navigate = (url) => {
+    if (!disposed) ctx.navigate(url)
   }
-  if (!response.ok) throw new Error((await response.json()).error || '操作失败')
-  return response
-}
-document.querySelector('#logout')?.addEventListener('click', async () => {
-  await request('/logout', 'POST', {})
-  location.assign('/login')
-})
-document.querySelectorAll('[role="switch"]').forEach((button) =>
-  button.addEventListener('click', async () => {
-    const enabled = button.getAttribute('aria-checked') !== 'true'
-    try {
-      await request(`/api/repos/${button.dataset.repoId}`, 'PATCH', { enabled })
-      location.assign(`/repos?notice=${enabled ? 'enabled' : 'disabled'}`)
-    } catch (error) {
-      alert(error.message)
-    }
-  }),
-)
-document.querySelectorAll('[data-token-toggle]').forEach((button) =>
-  button.addEventListener('click', () => {
-    const row = document.getElementById(`token-form-${button.dataset.tokenToggle}`)
-    row.hidden = !row.hidden
-  }),
-)
-document.querySelectorAll('.token-form').forEach((form) =>
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault()
-    try {
-      await request(`/api/repos/${form.dataset.repoId}`, 'PATCH', {
-        token: form.elements.token.value,
-      })
-      location.assign('/repos?notice=token')
-    } catch (error) {
-      form.querySelector('[role="alert"]').textContent = error.message
-    }
-  }),
-)
-document.querySelectorAll('[data-delete]').forEach((button) =>
-  button.addEventListener('click', async () => {
-    if (
-      prompt(`输入 ${button.dataset.ref} 确认删除；该仓库的 Issue 记录会一并删除`) !==
-      button.dataset.ref
-    )
-      return
-    try {
-      await request(`/api/repos/${button.dataset.repoId}`, 'DELETE')
-      location.assign('/repos?notice=deleted')
-    } catch (error) {
-      alert(error.message)
-    }
-  }),
-)
-document.querySelector('#add-form')?.addEventListener('submit', async (event) => {
-  event.preventDefault()
-  const form = event.currentTarget
-  const errorBox = document.querySelector('#add-error')
-  errorBox.hidden = true
-  try {
-    await request('/api/repos', 'POST', {
-      ref: form.elements.ref.value,
-      token: form.elements.token.value,
-      enabled: form.elements.enabled.checked,
+  async function request(path, method, body) {
+    const response = await fetch(path, {
+      method,
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-    location.assign('/repos?notice=added')
-  } catch (error) {
-    errorBox.textContent = error.message
-    errorBox.hidden = false
-  }
-})
-document.querySelectorAll('form[data-settings]').forEach((form) => {
-  const snapshot = () => JSON.stringify([...new FormData(form)])
-  const initial = snapshot()
-  const foot = form.querySelector('.card-foot')
-  const label = foot.querySelector('[data-dirty-label]')
-  const note = label.textContent
-  const update = () => {
-    const dirty = snapshot() !== initial
-    foot.classList.toggle('dirty', dirty)
-    label.textContent = dirty ? '有未保存的修改' : note
-    if (form.dataset.settings === 'executor') {
-      form
-        .querySelectorAll('.opt')
-        .forEach((opt) => opt.classList.toggle('on', opt.querySelector('input').checked))
-      form
-        .querySelector('[data-docker-only]')
-        .classList.toggle('muted-fieldset', form.elements.sandbox.value === 'none')
+    if (response.status === 401) {
+      location.assign('/login')
+      throw new Error('未登录')
     }
+    if (!response.ok) throw new Error((await response.json()).error || '操作失败')
+    return response
   }
-  form.addEventListener('input', update)
-  form.addEventListener('change', update)
-  form.addEventListener('reset', () => setTimeout(update, 0))
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault()
-    const errorBox = form.querySelector('[role="alert"]')
-    errorBox.hidden = true
-    const body = {}
-    for (const [key, value] of new FormData(form)) {
-      if (form.dataset.settings === 'pi') {
-        if (['model', 'effort', 'gitName', 'gitEmail', 'llmApi'].includes(key)) body[key] = value
-        else if (['piModel', 'llmBaseUrl'].includes(key)) body[key] = value || null
-        else if (key === 'llmApiKey' && value !== '') body[key] = value
-      } else {
-        body[key] = ['concurrency', 'taskCpus', 'taskPids'].includes(key)
-          ? Number(value)
-          : key === 'taskNetwork'
-            ? value || null
-            : value
+  root.querySelectorAll('[role="switch"]').forEach((button) =>
+    on(button, 'click', async () => {
+      const enabled = button.getAttribute('aria-checked') !== 'true'
+      try {
+        await request(`/api/repos/${button.dataset.repoId}`, 'PATCH', { enabled })
+        navigate(`/repos?notice=${enabled ? 'enabled' : 'disabled'}`)
+      } catch (error) {
+        if (disposed) return
+        alert(error.message)
       }
-    }
+    }),
+  )
+  root.querySelectorAll('[data-token-toggle]').forEach((button) =>
+    on(button, 'click', () => {
+      const row = root.querySelector(`#token-form-${button.dataset.tokenToggle}`)
+      row.hidden = !row.hidden
+    }),
+  )
+  root.querySelectorAll('.token-form').forEach((form) =>
+    on(form, 'submit', async (event) => {
+      event.preventDefault()
+      try {
+        await request(`/api/repos/${form.dataset.repoId}`, 'PATCH', {
+          token: form.elements.token.value,
+        })
+        navigate('/repos?notice=token')
+      } catch (error) {
+        if (disposed) return
+        form.querySelector('[role="alert"]').textContent = error.message
+      }
+    }),
+  )
+  root.querySelectorAll('[data-delete]').forEach((button) =>
+    on(button, 'click', async () => {
+      if (
+        prompt(`输入 ${button.dataset.ref} 确认删除；该仓库的 Issue 记录会一并删除`) !==
+        button.dataset.ref
+      )
+        return
+      try {
+        await request(`/api/repos/${button.dataset.repoId}`, 'DELETE')
+        navigate('/repos?notice=deleted')
+      } catch (error) {
+        if (disposed) return
+        alert(error.message)
+      }
+    }),
+  )
+  on(root.querySelector('#add-form'), 'submit', async (event) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const errorBox = root.querySelector('#add-error')
+    errorBox.hidden = true
     try {
-      await request(`/api/settings/${form.dataset.settings}`, 'PATCH', body)
-      location.assign('/settings?notice=saved#' + form.closest('section').id)
+      await request('/api/repos', 'POST', {
+        ref: form.elements.ref.value,
+        token: form.elements.token.value,
+        enabled: form.elements.enabled.checked,
+      })
+      navigate('/repos?notice=added')
     } catch (error) {
+      if (disposed) return
       errorBox.textContent = error.message
       errorBox.hidden = false
     }
   })
-})
-document.querySelector('#password-form')?.addEventListener('submit', async (event) => {
-  event.preventDefault()
-  const form = event.currentTarget
-  const errorBox = form.querySelector('.error-box')
-  errorBox.hidden = true
-  const currentPassword = form.elements.currentPassword.value
-  const newPassword = form.elements.newPassword.value
-  if (newPassword !== form.elements.confirmPassword.value) {
-    errorBox.textContent = '两次输入的新密码不一致'
-    errorBox.hidden = false
-    return
-  }
-  try {
-    const response = await fetch('/api/password', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ currentPassword, newPassword }),
+  root.querySelectorAll('form[data-settings]').forEach((form) => {
+    const snapshot = () => JSON.stringify([...new FormData(form)])
+    const initial = snapshot()
+    const foot = form.querySelector('.card-foot')
+    const label = foot.querySelector('[data-dirty-label]')
+    const note = label.textContent
+    const update = () => {
+      const dirty = snapshot() !== initial
+      foot.classList.toggle('dirty', dirty)
+      label.textContent = dirty ? '有未保存的修改' : note
+      if (form.dataset.settings === 'executor') {
+        form
+          .querySelectorAll('.opt')
+          .forEach((opt) => opt.classList.toggle('on', opt.querySelector('input').checked))
+        form
+          .querySelector('[data-docker-only]')
+          .classList.toggle('muted-fieldset', form.elements.sandbox.value === 'none')
+      }
+    }
+    on(form, 'input', update)
+    on(form, 'change', update)
+    on(form, 'reset', () => later(update, 0))
+    on(form, 'submit', async (event) => {
+      event.preventDefault()
+      const errorBox = form.querySelector('[role="alert"]')
+      errorBox.hidden = true
+      const body = {}
+      for (const [key, value] of new FormData(form)) {
+        if (form.dataset.settings === 'pi') {
+          if (['model', 'effort', 'gitName', 'gitEmail', 'llmApi'].includes(key)) body[key] = value
+          else if (['piModel', 'llmBaseUrl'].includes(key)) body[key] = value || null
+          else if (key === 'llmApiKey' && value !== '') body[key] = value
+        } else {
+          body[key] = ['concurrency', 'taskCpus', 'taskPids'].includes(key)
+            ? Number(value)
+            : key === 'taskNetwork'
+              ? value || null
+              : value
+        }
+      }
+      try {
+        await request(`/api/settings/${form.dataset.settings}`, 'PATCH', body)
+        navigate('/settings?notice=saved#' + form.closest('section').id)
+      } catch (error) {
+        if (disposed) return
+        errorBox.textContent = error.message
+        errorBox.hidden = false
+      }
     })
-    if (!response.ok) throw new Error((await response.json()).error || '操作失败')
-    location.assign('/settings?notice=password#set-password')
-  } catch (error) {
-    errorBox.textContent = error.message
-    errorBox.hidden = false
-  } finally {
-    form.reset()
-  }
-})
-document.querySelector('[data-clear-key]')?.addEventListener('click', async (event) => {
-  const form = event.currentTarget.closest('form')
-  if (!confirm('确认清除 LLM Key？')) return
-  try {
-    await request('/api/settings/pi', 'PATCH', { llmApiKey: null })
-    location.assign('/settings?notice=saved#set-pi')
-  } catch (error) {
-    const errorBox = form.querySelector('[role="alert"]')
-    errorBox.textContent = error.message
-    errorBox.hidden = false
-  }
-})
-document
-  .querySelectorAll('[data-open]')
-  .forEach((button) =>
-    button.addEventListener('click', () =>
-      document.getElementById(button.dataset.open).showModal(),
-    ),
-  )
-document
-  .querySelectorAll('[data-close]')
-  .forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()))
-if (location.hash === '#add') document.querySelector('#add-dialog')?.showModal()
-window.addEventListener('hashchange', () => {
-  const dialog = document.querySelector('#add-dialog')
-  if (location.hash === '#add' && dialog && !dialog.open) dialog.showModal()
-})
-const issueFilter = document.querySelector('#issue-filter')
-issueFilter?.addEventListener('submit', (event) => {
-  event.preventDefault()
-  location.assign(`/issues?${new URLSearchParams(new FormData(issueFilter))}`)
-})
-issueFilter?.querySelector('select').addEventListener('change', () => issueFilter.requestSubmit())
-document.querySelectorAll('[data-copy]').forEach((button) =>
-  button.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(button.dataset.copy)
-    const label = button.textContent
-    button.textContent = '已复制'
-    setTimeout(() => {
-      button.textContent = label
-    }, 2000)
-  }),
-)
-document
-  .querySelectorAll('[data-dismiss]')
-  .forEach((button) => button.addEventListener('click', () => button.parentElement.remove()))
-const refresh = Number(document.body.dataset.autorefresh)
-if (refresh > 0)
-  setInterval(() => {
-    if (
-      !document.hidden &&
-      !document.querySelector('[role="dialog"]:not([hidden])') &&
-      document.body.dataset.refreshPaused !== 'true'
+  })
+  on(root.querySelector('#password-form'), 'submit', async (event) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const errorBox = form.querySelector('.error-box')
+    errorBox.hidden = true
+    const currentPassword = form.elements.currentPassword.value
+    const newPassword = form.elements.newPassword.value
+    if (newPassword !== form.elements.confirmPassword.value) {
+      errorBox.textContent = '两次输入的新密码不一致'
+      errorBox.hidden = false
+      return
+    }
+    try {
+      await request('/api/password', 'POST', { currentPassword, newPassword })
+      navigate('/settings?notice=password#set-password')
+    } catch (error) {
+      if (disposed) return
+      errorBox.textContent = error.message
+      errorBox.hidden = false
+    } finally {
+      form.reset()
+    }
+  })
+  on(root.querySelector('[data-clear-key]'), 'click', async (event) => {
+    const form = event.currentTarget.closest('form')
+    if (!confirm('确认清除 LLM Key？')) return
+    try {
+      await request('/api/settings/pi', 'PATCH', { llmApiKey: null })
+      navigate('/settings?notice=saved#set-pi')
+    } catch (error) {
+      if (disposed) return
+      const errorBox = form.querySelector('[role="alert"]')
+      errorBox.textContent = error.message
+      errorBox.hidden = false
+    }
+  })
+  root
+    .querySelectorAll('[data-open]')
+    .forEach((button) =>
+      on(button, 'click', () => root.querySelector(`#${button.dataset.open}`).showModal()),
     )
-      location.reload()
-  }, refresh * 1000)
+  root
+    .querySelectorAll('[data-close]')
+    .forEach((button) => on(button, 'click', () => button.closest('dialog').close()))
+  if (location.hash === '#add') root.querySelector('#add-dialog')?.showModal()
+  const issueFilter = root.querySelector('#issue-filter')
+  on(issueFilter, 'submit', (event) => {
+    event.preventDefault()
+    navigate(`/issues?${new URLSearchParams(new FormData(issueFilter))}`)
+  })
+  on(issueFilter?.querySelector('select'), 'change', () => issueFilter.requestSubmit())
+  root.querySelectorAll('[data-copy]').forEach((button) =>
+    on(button, 'click', async () => {
+      await navigator.clipboard.writeText(button.dataset.copy)
+      if (disposed) return
+      const label = button.textContent
+      button.textContent = '已复制'
+      later(() => {
+        button.textContent = label
+      }, 2000)
+    }),
+  )
+  root
+    .querySelectorAll('[data-dismiss]')
+    .forEach((button) => on(button, 'click', () => button.parentElement.remove()))
+  return () => {
+    disposed = true
+    controller.abort()
+    for (const timer of timers) clearTimeout(timer)
+    root.querySelectorAll('dialog[open]').forEach((dialog) => dialog.close())
+  }
+}

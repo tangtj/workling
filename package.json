@@ -11,17 +11,23 @@
     "start": "bun src/cli.ts serve",
     "dev": "bun --watch src/cli.ts serve",
     "format": "oxfmt --write .",
-    "check": "oxfmt --check . && oxlint --deny-warnings src test && tsc --noEmit && bun test",
+    "check": "oxfmt --check . && oxlint --deny-warnings src test && tsc --noEmit && tsc --noEmit -p src/web/client && bun test",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.5.2",
+    "@tanstack/react-query": "5.90.7",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.14",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-router": "7.9.5",
     "typebox": "1.4.6"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
     "drizzle-kit": "0.31.11",
     "oxfmt": "0.78.0",
     "oxlint": "1.93.0",

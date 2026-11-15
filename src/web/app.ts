@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
 import { sessions } from '../db/schema.ts'
 import type { ServeStatus } from '../serve/index.ts'
+import { getWebBundle } from './bundle.ts'
 import { Layout } from './views/layout.tsx'
 import { NotFoundPage } from './views/not-found.tsx'
 
@@ -17,7 +18,7 @@ import { reposRoutes } from './routes/repos.ts'
 import { issuesRoutes } from './routes/issues.ts'
 import { runsRoutes } from './routes/runs.ts'
 import { assetsRoutes } from './routes/assets.ts'
-import { html, headers } from './response.ts'
+import { html, headers, webHeaders } from './response.ts'
 
 export type AppOptions = {
   workspace: string
@@ -70,10 +71,17 @@ export function createApp(db: WorklingDatabase, options: AppOptions) {
     const path = c.req.path
     if (c.req.method === 'GET' && path === '/login' && authenticated) return c.redirect('/')
     const publicRoute =
-      (c.req.method === 'GET' && ['/health', '/login', '/login.js', '/style.css'].includes(path)) ||
+      (c.req.method === 'GET' &&
+        (path.startsWith('/assets/') ||
+          ['/health', '/login', '/login.js', '/style.css'].includes(path))) ||
       (c.req.method === 'POST' && path === '/login')
     if (!authenticated && !publicRoute && !(c.req.method === 'POST' && path === '/logout')) {
-      if (c.req.method === 'GET' && !path.startsWith('/api/')) return c.redirect('/login')
+      if (
+        c.req.method === 'GET' &&
+        !path.startsWith('/api/') &&
+        c.req.header('X-Workling-Fragment') !== '1'
+      )
+        return c.redirect('/login')
       return c.json({ error: '未登录' }, 401)
     }
     await next()
@@ -88,12 +96,21 @@ export function createApp(db: WorklingDatabase, options: AppOptions) {
   app.route('/', runsRoutes(deps))
   app.route('/', assetsRoutes(deps))
   const data = () => pageData(db, now(), options.status?.())
-  app.notFound((c) => {
+  app.notFound(async (c) => {
+    if (c.req.path.startsWith('/assets/')) return c.body(null, 404, webHeaders)
     if (c.req.method !== 'GET' || c.req.path.startsWith('/api/'))
       return c.json({ error: '资源不存在' }, 404)
     const sidebar = data()
     return c.body(
-      html(Layout({ title: '页面不存在', active: '', sidebar, children: NotFoundPage() })),
+      html(
+        Layout({
+          title: '页面不存在',
+          active: '',
+          sidebar,
+          children: NotFoundPage(),
+          bundle: await getWebBundle(),
+        }),
+      ),
       404,
       headers,
     )

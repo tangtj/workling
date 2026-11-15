@@ -1,6 +1,14 @@
-;(() => {
+export function init() {
+  let disposed = false
+  const controller = new AbortController()
+  const listeners = []
+  const pauses = new Map()
+  const on = (node, type, handler) => {
+    node.addEventListener?.(type, handler)
+    listeners.push(() => node.removeEventListener?.(type, handler))
+  }
   const pill = document.getElementById('version-pill')
-  if (!pill) return
+  if (!pill) return () => {}
   const panel = document.getElementById('version-popover')
   const el = (id) => document.getElementById(`version-${id}`)
   let info = { current: pill.dataset.current }
@@ -12,12 +20,22 @@
   let selection = null
   let expanded = false
   let preparing = false
-  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const pause = (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pauses.delete(timer)
+        resolve()
+      }, ms)
+      pauses.set(timer, resolve)
+    })
   const api = async (path, body) => {
     const response = await fetch(`/api/system/${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       cache: 'no-store',
-      signal: AbortSignal.timeout(path === 'version?local=1' || path === 'job' ? 5000 : 35000),
+      signal: AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(path === 'version?local=1' || path === 'job' ? 5000 : 35000),
+      ]),
       ...(body === undefined
         ? {}
         : {
@@ -29,16 +47,19 @@
       location.assign('/login')
       throw new Error('未登录')
     }
+    if (disposed) throw new DOMException('已取消', 'AbortError')
     const data = await response.json()
     if (!response.ok) throw new Error(data.error || '操作失败')
     return data
   }
   const fail = (error) => {
+    if (disposed) return
     el('error').textContent = error.message
     el('error').hidden = false
   }
   const busy = () => watching || submitting || preparing
   const render = () => {
+    if (disposed) return
     el('label').textContent = info.current
     el('current').textContent = info.current
     const available = info.hasUpdate && info.current !== 'dev'
@@ -106,6 +127,7 @@
     return info
   }
   const check = (force = false) => {
+    if (disposed) return Promise.resolve()
     if (!ready || busy()) return Promise.resolve()
     if (checking) return checking
     checking = (async () => {
@@ -137,7 +159,7 @@
     panel.style.top = `${Math.max(0, top)}px`
     panel.style.maxHeight = `${Math.max(0, window.innerHeight - top - 16)}px`
   }
-  window.addEventListener?.('resize', () => {
+  on(window, 'resize', () => {
     if (!panel.hidden) position()
   })
   const open = (inspect = true) => {
@@ -148,18 +170,18 @@
     panel.focus()
     if (inspect && !checked && !busy()) void check()
   }
-  pill.addEventListener('click', () => (panel.hidden ? open() : close()))
-  document.addEventListener('click', (event) => {
+  on(pill, 'click', () => (panel.hidden ? open() : close()))
+  on(document, 'click', (event) => {
     if (!panel.hidden && !panel.contains(event.target) && !pill.contains(event.target)) close()
   })
-  document.addEventListener('keydown', (event) => {
+  on(document, 'keydown', (event) => {
     if (!panel.hidden && event.key === 'Escape') {
       event.preventDefault()
       close()
     }
   })
-  el('check').addEventListener('click', () => check(true))
-  el('more').addEventListener('click', () => {
+  on(el('check'), 'click', () => check(true))
+  on(el('more'), 'click', () => {
     expanded = !expanded
     render()
   })
@@ -176,7 +198,7 @@
     open(false)
     render()
     try {
-      for (;;) {
+      for (; !disposed;) {
         if (active) {
           el('logs').textContent = active.logs.slice(-5).join('\n')
           el('cancel').hidden = active.status !== 'waiting'
@@ -185,6 +207,7 @@
         }
         if (!active || active.status === 'done') break
         await pause(1500)
+        if (disposed) return
         try {
           active = await api('job')
         } catch {
@@ -194,8 +217,9 @@
       el('cancel').hidden = true
       el('status').textContent = '正在重启…'
       const deadline = Date.now() + 90000
-      while (Date.now() < deadline) {
+      while (!disposed && Date.now() < deadline) {
         await pause(2000)
+        if (disposed) return
         try {
           await local()
           if (info.current !== original) {
@@ -221,7 +245,7 @@
       render()
     }
   }
-  el('back').addEventListener('click', () => {
+  on(el('back'), 'click', () => {
     el('progress').hidden = true
     el('error').hidden = true
     render()
@@ -258,13 +282,13 @@
       render()
     }
   }
-  el('update').addEventListener('click', confirm)
-  el('dismiss').addEventListener('click', () => {
+  on(el('update'), 'click', confirm)
+  on(el('dismiss'), 'click', () => {
     selection = null
     el('confirmation').hidden = true
     render()
   })
-  el('confirm').addEventListener('click', async () => {
+  on(el('confirm'), 'click', async () => {
     if (!selection || busy()) return
     submitting = true
     el('confirm').disabled = true
@@ -287,7 +311,7 @@
       render()
     }
   })
-  el('cancel').addEventListener('click', async () => {
+  on(el('cancel'), 'click', async () => {
     el('cancel').disabled = true
     try {
       const result = await api('job/cancel', {})
@@ -307,8 +331,19 @@
           if (!checked && !busy()) void check()
         }
         if ('requestIdleCallback' in window) window.requestIdleCallback(inspect, { timeout: 3000 })
-        else setTimeout(inspect, 1000)
+        else void pause(1000).then(inspect)
       }
     })
     .catch(fail)
-})()
+  return () => {
+    disposed = true
+    controller.abort()
+    listeners.forEach((remove) => remove())
+    for (const [timer, resolve] of pauses) {
+      clearTimeout(timer)
+      resolve()
+    }
+    pauses.clear()
+    document.body.dataset.refreshPaused = 'false'
+  }
+}
