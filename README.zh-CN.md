@@ -50,8 +50,32 @@ bun run start          # 或 workling serve
 1. 首次启动会在终端打印管理密码（只显示一次），打开 <http://127.0.0.1:7420> 登录。
 2. 在「设置」里填好 LLM 接入地址与 Key。
 3. 在「仓库」里添加仓库（如 `github:owner/repo`）和 token。token 需要能读写该仓库的 Issue、代码与 PR。添加后 workling 会在仓库里创建 `workling:*` 标签。
-4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值。
+4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值；设计文档较多时放在文档分支上，正文加 `分支：<名称>` 行，任务分支会从该分支切出。
 5. 在管理页查看进度与日志。结果以标签呈现：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`；失败后重新打上 `workling:ready` 即可重试。
+
+## 在其他项目接入
+
+接入后，业务仓库的开发类任务改为：本地 AI 写需求与设计文档、建 Issue，人打上 `workling:ready`，由 workling 实现并发起 PR。业务仓库的开发者只需要已登录的 `gh`，不需要安装 workling。
+
+1. 在管理页「仓库」中登记业务仓库（目前只支持 GitHub）。
+2. 在业务仓库里，把下面的提示词发给本地 AI 编码助手（Claude Code、Codex、Cursor 等）：
+
+   ```text
+   按 https://raw.githubusercontent.com/tangtj/workling/main/templates/SETUP.md 把这个仓库接入 workling：
+   - 新建分支，把其中列出的三个文件写入本仓库：docs/workling.md、AGENTS.md 中的两行规则、GitHub Issue 模板；
+   - 按本仓库实际情况填写 docs/workling.md 末尾的「本仓库约定」，拿不准的先问我；
+   - 只改这些文件，不改业务代码，最后发起接入 PR 并给我链接。
+   ```
+
+3. 审阅并合并接入 PR。之后对本地 AI 说「这个需求交给 workling」即可。
+
+更新接入文档时发送：
+
+```text
+按 https://raw.githubusercontent.com/tangtj/workling/main/templates/SETUP.md 更新本仓库的 workling 接入文档，保留「本仓库约定」，发起 PR
+```
+
+不用 AI 时，照 [templates/SETUP.md](templates/SETUP.md) 手动把 [templates/repo/](templates/repo/) 下的文件复制到业务仓库对应位置。
 
 ## 命令
 
