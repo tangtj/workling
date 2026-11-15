@@ -11,7 +11,7 @@ export function LoginPage() {
       <body data-page="login" class="login">
         <div class="login-inner">
           <div class="brand">
-            <span class="brand-mark">P</span>
+            <span class="brand-mark">W</span>
             <span>
               workling<small>本机管理</small>
             </span>
