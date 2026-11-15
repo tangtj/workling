@@ -57,6 +57,7 @@ jobs:
             type=semver,pattern=v{{major}}.{{minor}},value=${{ env.TAG }},enable=${{ !contains(env.TAG, '-') }}
           flavor: latest=${{ !contains(env.TAG, '-') }}
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: .
           file: deploy/docker/Dockerfile
@@ -67,14 +68,26 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: 创建 GitHub Release
+      # 镜像信息追加在说明末尾：版本面板只展示说明开头几行，更新内容应在前。
+      # 网页上先建好的 Release 只补镜像段落，不覆盖已有说明。
+      - name: 创建或补充 GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          marker='## Docker 镜像'
+          image_notes=$(printf '%s\n\n```bash\ndocker pull %s:%s\n```\n\nDigest：`%s`\n' "$marker" "$image" "$TAG" "$DIGEST")
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release ${TAG} 已存在，跳过"
+            body=$(gh release view "$TAG" --json body --jq .body)
+            if [[ "$body" == *"$marker"* ]]; then
+              echo "Release ${TAG} 已包含镜像信息，跳过"
+            else
+              gh release edit "$TAG" --notes "$(printf '%s\n\n%s' "$body" "$image_notes")"
+            fi
           else
+            notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body)
             flags=()
             if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
-            gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag "${flags[@]}"
+            gh release create "$TAG" --title "$TAG" --verify-tag --notes "$(printf '%s\n\n%s' "$notes" "$image_notes")" "${flags[@]}"
           fi
