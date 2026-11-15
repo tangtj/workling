@@ -110,6 +110,8 @@ workling 命令：bun ${CLI}
       join(dir, 'pi-session'),
       '--append-system-prompt',
       join(ROOT, 'configs/workling/AGENTS.md'),
+      '--extension',
+      join(ROOT, 'configs/workling/extensions/no-bash-timeout.ts'),
       ...modelArgs,
       '--',
       instruction,
