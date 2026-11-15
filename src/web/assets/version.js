@@ -128,9 +128,22 @@
     pill.setAttribute('aria-expanded', 'false')
     pill.focus()
   }
+  const position = () => {
+    if (!pill.getBoundingClientRect) return
+    const rect = pill.getBoundingClientRect()
+    const width = Math.min(300, window.innerWidth - 32)
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 16)
+    panel.style.left = `${Math.max(16, Math.min(rect.left, window.innerWidth - width - 16))}px`
+    panel.style.top = `${Math.max(0, top)}px`
+    panel.style.maxHeight = `${Math.max(0, window.innerHeight - top - 16)}px`
+  }
+  window.addEventListener?.('resize', () => {
+    if (!panel.hidden) position()
+  })
   const open = (inspect = true) => {
     panel.hidden = false
     pill.setAttribute('aria-expanded', 'true')
+    position()
     render()
     panel.focus()
     if (inspect && !checked && !busy()) void check()

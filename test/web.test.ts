@@ -156,8 +156,8 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
     const response = await app.request('/', { headers })
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8')
-    expect(response.headers.get('content-security-policy')).toBe(
-      "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    expect(response.headers.get('content-security-policy')).toMatch(
+      /^default-src 'none'; script-src 'self' 'sha256-[A-Za-z0-9+/=]+'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'$/,
     )
     const html = await response.text()
     expect(html).toContain('<script src="/app.js"')
@@ -175,8 +175,7 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       expect(page).toContain('<script src="/version.js" defer="">')
     }
     expect(html).toContain('/style.css')
-    expect(html).not.toMatch(/<script\b(?![^>]*\bsrc=)[^>]*>/i)
-    expect(html).not.toMatch(/<script\b[^>]*>\s*[^\s<]/i)
+    expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
     for (const [path, type] of [
@@ -258,8 +257,7 @@ test('登录鉴权、会话过期、限流窗口和退出登录', async () => {
     const page = await request('/login')
     expect(page.headers.get('cache-control')).toBe('no-store')
     const html = await page.text()
-    expect(html).not.toMatch(/<script\b(?![^>]*\bsrc=)[^>]*>/i)
-    expect(html).not.toMatch(/<script\b[^>]*>\s*[^\s<]/i)
+    expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
     expect((await request('/login', 'POST', { password, extra: true })).status).toBe(400)
