@@ -7,6 +7,7 @@ import { repos } from '../../db/schema.ts'
 import { formatRepoRef, parseRepoRef } from '../../issue/reference.ts'
 import type { AppDeps } from '../app.ts'
 import { repoId } from '../response.ts'
+import { reposSchema } from '../repos.ts'
 
 const createSchema = Type.Object(
   { ref: Type.String(), token: Type.String(), enabled: Type.Optional(Type.Boolean()) },
@@ -29,9 +30,11 @@ function responseRepo(row: typeof repos.$inferSelect) {
 export function reposRoutes(deps: AppDeps): Hono {
   const { db } = deps
   const app = new Hono()
-  app.get('/api/repos', (c) =>
-    c.json(db.select().from(repos).orderBy(repos.id).all().map(responseRepo)),
-  )
+  app.get('/api/repos', (c) => {
+    const body = db.select().from(repos).orderBy(repos.id).all().map(responseRepo)
+    if (!Value.Check(reposSchema, body)) throw new Error('仓库数据无效')
+    return c.json(body)
+  })
   app.post('/api/repos', async (c) => {
     let body: unknown
     try {

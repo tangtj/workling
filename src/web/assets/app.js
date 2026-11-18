@@ -28,72 +28,6 @@ export function init(root, ctx) {
     if (!response.ok) throw new Error((await response.json()).error || '操作失败')
     return response
   }
-  root.querySelectorAll('[role="switch"]').forEach((button) =>
-    on(button, 'click', async () => {
-      const enabled = button.getAttribute('aria-checked') !== 'true'
-      try {
-        await request(`/api/repos/${button.dataset.repoId}`, 'PATCH', { enabled })
-        navigate(`/repos?notice=${enabled ? 'enabled' : 'disabled'}`)
-      } catch (error) {
-        if (disposed) return
-        alert(error.message)
-      }
-    }),
-  )
-  root.querySelectorAll('[data-token-toggle]').forEach((button) =>
-    on(button, 'click', () => {
-      const row = root.querySelector(`#token-form-${button.dataset.tokenToggle}`)
-      row.hidden = !row.hidden
-    }),
-  )
-  root.querySelectorAll('.token-form').forEach((form) =>
-    on(form, 'submit', async (event) => {
-      event.preventDefault()
-      try {
-        await request(`/api/repos/${form.dataset.repoId}`, 'PATCH', {
-          token: form.elements.token.value,
-        })
-        navigate('/repos?notice=token')
-      } catch (error) {
-        if (disposed) return
-        form.querySelector('[role="alert"]').textContent = error.message
-      }
-    }),
-  )
-  root.querySelectorAll('[data-delete]').forEach((button) =>
-    on(button, 'click', async () => {
-      if (
-        prompt(`输入 ${button.dataset.ref} 确认删除；该仓库的 Issue 记录会一并删除`) !==
-        button.dataset.ref
-      )
-        return
-      try {
-        await request(`/api/repos/${button.dataset.repoId}`, 'DELETE')
-        navigate('/repos?notice=deleted')
-      } catch (error) {
-        if (disposed) return
-        alert(error.message)
-      }
-    }),
-  )
-  on(root.querySelector('#add-form'), 'submit', async (event) => {
-    event.preventDefault()
-    const form = event.currentTarget
-    const errorBox = root.querySelector('#add-error')
-    errorBox.hidden = true
-    try {
-      await request('/api/repos', 'POST', {
-        ref: form.elements.ref.value,
-        token: form.elements.token.value,
-        enabled: form.elements.enabled.checked,
-      })
-      navigate('/repos?notice=added')
-    } catch (error) {
-      if (disposed) return
-      errorBox.textContent = error.message
-      errorBox.hidden = false
-    }
-  })
   root.querySelectorAll('form[data-settings]').forEach((form) => {
     const snapshot = () => JSON.stringify([...new FormData(form)])
     const initial = snapshot()
@@ -188,7 +122,6 @@ export function init(root, ctx) {
   root
     .querySelectorAll('[data-close]')
     .forEach((button) => on(button, 'click', () => button.closest('dialog').close()))
-  if (location.hash === '#add') root.querySelector('#add-dialog')?.showModal()
   root.querySelectorAll('[data-copy]').forEach((button) =>
     on(button, 'click', async () => {
       await navigator.clipboard.writeText(button.dataset.copy)
