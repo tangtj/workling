@@ -205,7 +205,7 @@ export async function reconcile({
           const minutes = run
             ? Math.ceil((endedAt.getTime() - run.startedAt.getTime()) / 60_000)
             : 0
-          const body = `workling：执行未完成（${error}）。\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready 即可重试。`
+          const body = `workling：执行未完成（${error}）。\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。`
           await sync(
             ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
             body,
