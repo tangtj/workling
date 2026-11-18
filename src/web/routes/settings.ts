@@ -5,6 +5,8 @@ import * as Value from 'typebox/value'
 import { readPiSettings, updatePiSettings } from '../../config/pi.ts'
 import type { AppDeps } from '../app.ts'
 import { responsePi } from '../response.ts'
+import { settingsSchema } from '../settings.ts'
+import { WORKLING_LABELS } from '../../serve/poll.ts'
 
 const piPatchSchema = Type.Object(
   {
@@ -36,6 +38,16 @@ const executorPatchSchema = Type.Object(
 export function settingsRoutes(deps: AppDeps): Hono {
   const { db } = deps
   const app = new Hono()
+  app.get('/api/settings', (c) => {
+    const body = {
+      pi: responsePi(readPiSettings(db)),
+      executor: readExecutorSettings(db),
+      startup: deps.options.startup ?? null,
+      labels: WORKLING_LABELS.map(({ name, description }) => ({ name, description })),
+    }
+    if (!Value.Check(settingsSchema, body)) throw new Error('设置数据无效')
+    return c.json(body, 200, { 'Cache-Control': 'no-store' })
+  })
   app.get('/api/settings/pi', (c) => c.json(responsePi(readPiSettings(db))))
   app.patch('/api/settings/pi', async (c) => {
     let body: unknown

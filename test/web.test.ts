@@ -1177,27 +1177,24 @@ test('Pi 配置接口鉴权、严格校验与脱敏，设置页包含表单且�
       model: 'updated',
       llmApiKey: '****cret',
     })
-    const page = await app.request('/settings?notice=saved', { headers })
-    expect(page.status).toBe(200)
-    const html = await page.text()
-    for (const value of [
-      'id="pi-settings-form"',
-      'id="codex-form"',
-      'id="git-form"',
-      '未提供启动参数',
-      'role="alert"',
-      'placeholder="****cret"',
-      '留空表示不修改',
-      '设置已保存',
-      '保存后下一轮轮询生效，运行中的任务不受影响',
-      'href="#set-codex"',
-    ])
-      expect(html).toContain(value)
-    expect(html).not.toContain('distinctive-api-secret')
-    expect(html).not.toContain('value="****cret"')
-    expect(
-      await (await app.request('/settings?notice=untrusted-marker', { headers })).text(),
-    ).not.toContain('untrusted-marker')
+    expect((await app.request('/api/settings', { headers: host })).status).toBe(401)
+    const settingsResponse = await app.request('/api/settings', { headers })
+    expect(settingsResponse.headers.get('cache-control')).toBe('no-store')
+    const settingsData: unknown = await settingsResponse.json()
+    const { settingsSchema } = await import('../src/web/settings.ts')
+    const Value = await import('typebox/value')
+    expect(Value.Check(settingsSchema, settingsData)).toBe(true)
+    expect(settingsData).toMatchObject({ pi: { llmApiKey: '****cret' }, startup: null })
+    expect(JSON.stringify(settingsData)).not.toContain('distinctive-api-secret')
+    for (const fragment of [true, false]) {
+      const page = await app.request('/settings?notice=saved', {
+        headers: fragment ? headers : { ...host, cookie: headers.cookie },
+      })
+      expect(page.status).toBe(200)
+      const html = await page.text()
+      expect(html).toContain('id="root"')
+      expect(html).not.toContain('distinctive-api-secret')
+    }
     expect((await patch({ piModel: null, llmBaseUrl: null })).status).toBe(200)
     expect(readPiSettings(db)).toMatchObject({ piModel: null, llmBaseUrl: null, llmApiKey: null })
     updatePiSettings(db, { llmBaseUrl: 'https://llm.example', llmApiKey: 'short' })
@@ -1351,18 +1348,9 @@ test('执行器接口鉴权、读取默认值、严格校验和合并保存，Do
     })
     expect(piRejected.status).toBe(400)
     expect(await piRejected.json()).toEqual({ error: 'docker 沙箱必须配置 LLM 接入地址' })
-    const html = await (await app.request('/settings', { headers })).text()
-    for (const value of [
-      'id="executor-settings-form"',
-      '保存执行器设置',
-      '本机进程',
-      'Docker 容器',
-      'value="custom:tag"',
-      'value="1.5"',
-      '留空表示 Docker 默认',
-      '切换只影响之后拉起的任务；Docker 需本机已构建镜像且已配置 LLM 接入地址',
-    ])
-      expect(html).toContain(value)
+    expect((await (await app.request('/api/settings', { headers })).json()).executor).toMatchObject(
+      { taskImage: 'custom:tag', taskCpus: 1.5 },
+    )
     expect((await patch({ sandbox: 'none' })).status).toBe(200)
     expect(
       (
@@ -1417,7 +1405,6 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
       cookie: login.headers.get('set-cookie')!.split(';')[0]!,
       'X-Workling-Fragment': '1',
     }
-    const request = async (path: string) => (await app.request(path, { headers })).text()
     const projects = ['alpha', 'beta'].map((name) =>
       db
         .insert(repos)
@@ -1503,20 +1490,13 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
     expect(overview.concurrency).toBe(2)
     expect(overview.issues).toHaveLength(5)
     expect(JSON.stringify(overview)).not.toContain('repo-secret-1234')
-    const settings = await request('/settings')
-    for (const id of ['codex-form', 'pi-settings-form', 'git-form', 'executor-settings-form'])
-      expect(settings).toContain(`id="${id}"`)
-    expect(settings).not.toContain('id="version-pill"')
-    expect(settings).not.toContain('id="version-popover"')
-    expect(settings).not.toContain('id="set-version"')
-    expect(settings).not.toContain('<h2>版本与更新</h2>')
-    expect(settings).not.toContain('<h2>版本与更新</h2>')
-    expect(settings).toContain('/p1-workspace')
-    expect(settings).toContain('WORKLING_WORKSPACE')
+    const settings = await (await app.request('/api/settings', { headers })).json()
+    expect(settings.startup.workspace).toBe('/p1-workspace')
     for (const name of ['ready', 'queued', 'running', 'done', 'failed'])
-      expect(settings).toContain(`workling:${name}`)
-    expect(settings).not.toMatch(/\sstyle\s*=/i)
-    expect(settings).not.toContain('repo-secret-1234')
+      expect(
+        settings.labels.some((label: { name: string }) => label.name === `workling:${name}`),
+      ).toBe(true)
+    expect(JSON.stringify(settings)).not.toContain('repo-secret-1234')
     status.lastPollError = '<unsafe-error>'
     const warned = await (await app.request('/api/overview', { headers })).json()
     expect(warned.watch.lastPollError).toBe('<unsafe-error>')
@@ -1576,23 +1556,8 @@ test('执行器并发上限 PATCH 持久化，非法值返回 400，刷新页面
     expect(readExecutorSettings(db).concurrency).toBe(5)
     const overview = await (await app.request('/api/overview', { headers })).json()
     expect(overview.concurrency).toBe(5)
-    const settings = await (await app.request('/settings', { headers })).text()
-    const input = settings.match(/<input[^>]*name="concurrency"[^>]*>/)?.[0]
-    expect(input).toBeDefined()
-    for (const attribute of [
-      'type="number"',
-      'min="1"',
-      'max="32"',
-      'step="1"',
-      'required',
-      'value="5"',
-    ])
-      expect(input).toContain(attribute)
-    expect(settings).toContain('同时运行的任务数，保存后下一轮轮询生效')
-    expect(settings.indexOf('name="concurrency"')).toBeLessThan(
-      settings.indexOf('data-docker-only'),
-    )
-    expect(settings).toContain('muted-fieldset')
+    const settings = await (await app.request('/api/settings', { headers })).json()
+    expect(settings.executor.concurrency).toBe(5)
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })
@@ -1647,10 +1612,7 @@ test('修改密码共享登录限流并保留当前会话', async () => {
         headers: { host: 'localhost', cookie: cookie1, 'X-Workling-Fragment': '1' },
       })
     ).text()
-    expect(page).toContain('id="set-password"')
-    expect(page).toContain('href="#set-password"')
-    expect(page).toContain('管理密码')
-    expect(page).toContain('密码已修改，其他会话已退出')
+    expect(page).toContain('id="root"')
     expect((await change({ currentPassword: password, newPassword: next })).status).toBe(204)
     expect(
       (await app.request('/api/repos', { headers: { host: 'localhost', cookie: cookie1 } })).status,
