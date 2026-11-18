@@ -37,16 +37,16 @@
 
 每个阶段对应一个 workling Issue，前一个合入后再就绪下一个（都会改 `src/web/`，并行会冲突）。进度与优先级见 GitHub Project「[workling 路线图](https://github.com/users/tangtj/projects/4)」。
 
-| 阶段 | 内容                                                                                                     | 文档                                           |
-| ---- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| 0    | 止血：静态资源加哈希并长期缓存、`color-scheme` meta、跨页 View Transition                                | Issue 正文即可                                 |
-| 1    | React 底座：内存打包与资源路由、SPA 外壳、React 侧栏与路由、旧页面片段模式、旧脚本改为可重复初始化       | [stage-1-foundation.md](stage-1-foundation.md) |
-| 2    | 任务列表 `/issues`、仓库详情 `/repos/:id`：只读页，新增列表 JSON 接口，筛选写入 URL                      | 阶段开始前补文档                               |
-| 3    | 概览 `/`：用 TanStack Query 每 15 秒轮询，替代片段整块刷新                                               | 同上                                           |
-| 4    | 仓库 `/repos`：增删、启停、换 token、添加抽屉；保存后失效重取，不再跳转带 `?notice=`                     | 同上                                           |
-| 5    | 设置 `/settings`：各卡片独立保存与未保存状态                                                             | 同上                                           |
-| 6    | Issue 详情 `/issues/:id` 与执行日志 `/runs/:id/log`：时间线改为 React（`timeline.js` 的纯函数保留复用）  | 同上                                           |
-| 7    | 收尾：版本面板与登录页改为 React，删除片段模式、`src/web/views/`、`app.js` / `run-log.js` / `version.js` | 同上                                           |
+| 阶段 | 内容                                                                                                     | 文档                                             |
+| ---- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 0    | 止血：静态资源加哈希并长期缓存、`color-scheme` meta、跨页 View Transition                                | Issue 正文即可                                   |
+| 1    | React 底座：内存打包与资源路由、SPA 外壳、React 侧栏与路由、旧页面片段模式、旧脚本改为可重复初始化       | [stage-1-foundation.md](stage-1-foundation.md)   |
+| 2    | 任务列表 `/issues`、仓库详情 `/repos/:id`：只读页，新增列表 JSON 接口，筛选写入 URL                      | [stage-2-issue-lists.md](stage-2-issue-lists.md) |
+| 3    | 概览 `/`：用 TanStack Query 每 15 秒轮询，替代片段整块刷新                                               | 同上                                             |
+| 4    | 仓库 `/repos`：增删、启停、换 token、添加抽屉；保存后失效重取，不再跳转带 `?notice=`                     | 同上                                             |
+| 5    | 设置 `/settings`：各卡片独立保存与未保存状态                                                             | 同上                                             |
+| 6    | Issue 详情 `/issues/:id` 与执行日志 `/runs/:id/log`：时间线改为 React（`timeline.js` 的纯函数保留复用）  | 同上                                             |
+| 7    | 收尾：版本面板与登录页改为 React，删除片段模式、`src/web/views/`、`app.js` / `run-log.js` / `version.js` | 同上                                             |
 
 阶段 0 和阶段 1 互不依赖，但阶段 0 改动小、立刻见效，建议先做；阶段 1 会接管其中的资源哈希。
 
