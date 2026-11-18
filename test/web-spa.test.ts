@@ -129,7 +129,12 @@ test('七个页面片段仅返回原有主体并带标题、高亮、刷新头�
     for (const [index, path] of f.paths.entries()) {
       const response = await f.request(path, true)
       expect(response.status).toBe(200)
-      if (path === '/' || path === '/issues' || path === `/repos/${f.repo.id}`) {
+      if (
+        path === '/' ||
+        path === '/issues' ||
+        path === '/repos' ||
+        path === `/repos/${f.repo.id}`
+      ) {
         expect(await response.text()).toContain('id="root"')
         continue
       }

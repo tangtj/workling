@@ -9,6 +9,8 @@ import { issueListOptions } from './issue-list.ts'
 import { IssuesPage } from './pages/issues.tsx'
 import { overviewOptions } from './overview.ts'
 import { OverviewPage } from './pages/overview.tsx'
+import { reposOptions } from './repos.ts'
+import { ReposPage } from './pages/repos.tsx'
 import { RepoPage } from './pages/repo.tsx'
 
 const queryClient = new QueryClient()
@@ -16,7 +18,7 @@ const router = createBrowserRouter([
   {
     Component: Layout,
     children: [
-      ...['/issues/:id', '/repos', '/settings', '/runs/:id/log'].map((path) => ({
+      ...['/issues/:id', '/settings', '/runs/:id/log'].map((path) => ({
         path,
         Component: LegacyPage,
         async loader({ request }: { request: Request }) {
@@ -42,6 +44,17 @@ const router = createBrowserRouter([
           return null
         },
       })),
+      {
+        path: '/repos',
+        Component: ReposPage,
+        async loader() {
+          await Promise.allSettled([
+            queryClient.fetchQuery(reposOptions),
+            queryClient.fetchQuery(issueListOptions),
+          ])
+          return null
+        },
+      },
       {
         path: '/',
         Component: OverviewPage,

@@ -13,6 +13,8 @@ import { issues, repos, runs, sessions } from '../src/db/schema.ts'
 import { createApp } from '../src/web/app.ts'
 import type { ServeStatus } from '../src/serve/index.ts'
 import { pageData } from '../src/web/data.ts'
+import * as Value from 'typebox/value'
+import { repoSchema } from '../src/web/repos.ts'
 import { failureReason } from '../src/web/views/shared.tsx'
 
 test('管理接口校验请求、掩码凭证并管理仓库', async () => {
@@ -57,6 +59,7 @@ test('管理接口校验请求、掩码凭证并管理仓库', async () => {
     const list = await (await request('/api/repos')).text()
     expect(list).not.toContain('longsecret1234')
     expect(list).toContain('****1234')
+    expect(JSON.parse(list).every((repo: unknown) => Value.Check(repoSchema, repo))).toBe(true)
     expect(
       (
         await request(

@@ -10,7 +10,6 @@ import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
 import { overviewSchema, type OverviewData } from '../overview.ts'
 import { SettingsPage } from '../views/settings.tsx'
-import { ReposPage } from '../views/repos.tsx'
 import { IssuePage } from '../views/issue.tsx'
 import { RunLogPage } from '../views/run-log.tsx'
 import { LoginPage } from '../views/login.tsx'
@@ -186,19 +185,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
       200,
     )
   })
-  app.get('/repos', (c) => {
-    const sidebar = data()
-    return render(
-      c,
-      {
-        title: '仓库',
-        active: 'repos',
-        sidebar,
-        children: ReposPage({ data: sidebar, notice: c.req.query('notice') ?? '' }),
-      },
-      200,
-    )
-  })
+  app.get('/repos', (c) => shell(c, 200))
   app.get('/repos/:id', (c) => {
     const id = repoId(c.req.param('id'))
     return shell(c, id !== undefined && data().repos.some((r) => r.id === id) ? 200 : 404)
