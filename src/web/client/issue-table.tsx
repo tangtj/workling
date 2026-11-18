@@ -21,11 +21,11 @@ export function PlatformIcon({ platform }: { platform: Repo['platform'] }) {
     </svg>
   )
 }
-export function Badge({ status }: { status: IssueRow['status'] }) {
+export function Badge({ status, text }: { status: IssueRow['status']; text?: string }) {
   return (
     <span className={`badge badge--${status}`}>
       <span className={`dot dot--${status}`}></span>
-      {labels[status]}
+      {text ?? labels[status]}
     </span>
   )
 }

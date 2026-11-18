@@ -8,7 +8,7 @@ import { getWebBundle } from '../bundle.ts'
 import { readVersion } from '../../runtime/version.ts'
 import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
-import { OverviewPage } from '../views/overview.tsx'
+import { overviewSchema, type OverviewData } from '../overview.ts'
 import { SettingsPage } from '../views/settings.tsx'
 import { ReposPage } from '../views/repos.tsx'
 import { IssuePage } from '../views/issue.tsx'
@@ -117,22 +117,54 @@ export function pagesRoutes(deps: AppDeps): Hono {
     if (!Value.Check(issueListSchema, body)) throw new Error('任务列表数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
+  app.get('/api/overview', (c) => {
+    const page = data()
+    const recent = (run: (typeof page.issues)[number]['runs'][number]) =>
+      run.endedAt !== null &&
+      run.endedAt.getTime() >= page.now - 86400000 &&
+      run.endedAt.getTime() <= page.now
+    const serialize = (run: (typeof page.issues)[number]['runs'][number]) => ({
+      id: run.id,
+      startedAt: run.startedAt.toISOString(),
+      endedAt: run.endedAt?.toISOString() ?? null,
+      exitCode: run.exitCode,
+      error: run.error,
+    })
+    const body: OverviewData = {
+      now: new Date(page.now).toISOString(),
+      repos: { total: page.repos.length, enabled: page.repos.filter((r) => r.enabled).length },
+      concurrency: page.concurrency,
+      watch: page.status
+        ? {
+            worker: page.status.worker,
+            timeout: page.status.timeout,
+            lastPollAt: page.status.lastPollAt?.toISOString() ?? null,
+            lastPollError: page.status.lastPollError,
+          }
+        : null,
+      issues: page.issues
+        .filter((i) => ['running', 'queued', 'failed'].includes(i.status) || i.runs.some(recent))
+        .map((i) => ({
+          id: i.id,
+          repoId: i.repoId,
+          repoRef: i.repo.ref,
+          number: i.number,
+          title: i.title,
+          status: i.status,
+          prUrl: i.prUrl,
+          prState: i.prState,
+          updatedAt: i.updatedAt.toISOString(),
+          runCount: i.runs.length,
+          lastRun: i.lastRun ? serialize(i.lastRun) : null,
+          runs: i.runs.filter((r) => r.id === i.lastRun?.id || recent(r)).map(serialize),
+        })),
+    }
+    if (!Value.Check(overviewSchema, body)) throw new Error('概览数据无效')
+    return c.json(body, 200, { 'Cache-Control': 'no-store' })
+  })
   const shell = async (c: Context, status: 200 | 404) =>
     c.body(html(Shell(await getWebBundle())), status, { ...headers, Vary: 'X-Workling-Fragment' })
-  app.get('/', (c) => {
-    const sidebar = data()
-    return render(
-      c,
-      {
-        title: '概览',
-        active: 'overview',
-        sidebar,
-        refresh: true,
-        children: OverviewPage({ data: sidebar }),
-      },
-      200,
-    )
-  })
+  app.get('/', (c) => shell(c, 200))
   app.get('/issues', (c) => shell(c, 200))
   app.get('/login', (c) => c.body(html(LoginPage()), 200, headers))
   app.get('/settings', (c) => {
