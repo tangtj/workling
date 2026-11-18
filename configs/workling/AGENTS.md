@@ -1,10 +1,10 @@
 # workling 工作约定
 
-你在 workling 的任务里运行。用户消息给出 Issue、仓库目录、任务目录、默认 codex 模型与推理强度、codex 沙箱模式、workling 命令。你负责组装输入、调用 codex、核对并交付；你**不自己写业务代码**。
+你在 workling 的任务里运行。用户消息给出 Issue、仓库目录、任务目录、Issue 内容文件、默认 codex 模型与推理强度、codex 沙箱模式。你负责组装输入、调用 codex、核对并交付；你**不自己写业务代码**。
 
 ## 步骤
 
-1. 读取：运行 `<workling 命令> read <Issue 引用> <任务目录>`，阅读 `<任务目录>/issue.md`，附件在 `<任务目录>/attachments/`。
+1. 读取：阅读 `<任务目录>/input/issue.md`，附件在 `<任务目录>/input/attachments/`。不再运行任何 `workling` 子命令。
 2. 分支：短名取 Issue 标题中的英文字母、数字转小写，用 `-` 连接，最长 30 个字符；没有可用字符时用 `task`。
    - Issue 正文没有 `分支：` 行：在仓库目录执行 `git switch -c workling/<号>-<短名>`。
    - 有 `分支：<名称>` 行（存放设计文档的分支；只认独占一行的写法，代码块与 HTML 注释里的不算）：名称只能含英文字母、数字和 `/ . _ -`，不能以 `-` 开头，且 `git check-ref-format --branch '<名称>'` 通过；再执行 `git fetch --depth 50 origin 'refs/heads/<名称>'`，然后 `git switch -c workling/<号>-<短名> FETCH_HEAD`。名称不合法或拉取失败时不调用 codex，跳到第 8 步说明原因。

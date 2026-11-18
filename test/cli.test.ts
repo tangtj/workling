@@ -33,11 +33,13 @@ describe('命令行入口', () => {
     const usage = log.mock.calls[0]?.[0] as string
     expect(usage).toContain('用法：bun src/cli.ts <命令>')
     expect(usage).toContain('命令：')
-    expect(usage).toContain('内部命令（由 watch 与 Pi 调用，不要手动运行）：')
+    expect(usage).toContain('内部命令（由 watch 调用，不要手动运行）：')
     expect(usage).toContain('task <issue 引用> <任务目录>')
-    expect(usage).toContain('read <issue 引用> <任务目录>')
+    expect(usage).not.toContain('read <issue 引用> <任务目录>')
     expect(usage).not.toContain('run')
     expect(log.mock.calls[1]?.[0]).toBe(usage)
+    expect(await main(['read', 'github:a/b#1', '/tmp/task'])).toBe(0)
+    expect(log.mock.calls[2]?.[0]).toBe(usage)
   })
 })
 
@@ -77,15 +79,6 @@ test('reset-password 在临时工作区打印新密码并使会话失效', async
     close()
     await rm(dir, { recursive: true, force: true })
   }
-})
-
-test('read 缺少引用或任务目录时报用法错误', async () => {
-  for (const args of [
-    ['read'],
-    ['read', 'github:a/b#1'],
-    ['read', 'github:a/b#1', '/tmp/task', 'extra'],
-  ])
-    await expect(main(args)).rejects.toThrow('用法：bun src/cli.ts read <issue 引用> <任务目录>')
 })
 
 test('task 参数或目录非法时不写 result.json', async () => {
@@ -130,7 +123,24 @@ test('task 仅在启用 WORKLING_TASK_TEE 时将进度同时写入日志', async
   }
 })
 
-test('task 在 Pi 正常、非零、抛错和中止时写结果并返回退出码且不修改进程退出码，补齐默认环境', async () => {
+test('task 没有契约时将校验失败写入 result.json', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'workling-cli-spec-'))
+  process.env.WORKLING_WORKSPACE = workspace
+  try {
+    const dir = join(workspace, 'tasks', 'missing-spec')
+    await mkdir(dir, { recursive: true })
+    expect(await main(['task', 'github:a/b#1', dir])).toBe(1)
+    expect(await taskDir.readResult(dir)).toMatchObject({
+      exitCode: null,
+      signal: null,
+      error: '缺少 spec.json',
+    })
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+  }
+})
+
+test('task 在 Pi 正常、非零、抛错和中止时写结果并返回退出码，不注入模型和 Git 环境默认值', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'workling-cli-task-'))
   process.env.WORKLING_WORKSPACE = workspace
   const oldExit = process.exitCode
@@ -139,10 +149,14 @@ test('task 在 Pi 正常、非零、抛错和中止时写结果并返回退出�
       const dir = join(workspace, 'tasks', kind)
       await mkdir(dir, { recursive: true })
       spyOn(task, 'runTask').mockImplementation(async (options) => {
-        expect(options.env.WORKLING_MODEL).toBe('gpt-6.1-terra')
-        expect(options.env.WORKLING_EFFORT).toBe('medium')
-        expect(options.env.WORKLING_GIT_NAME).toBe('workling')
-        expect(options.env.WORKLING_GIT_EMAIL).toBe('workling@users.noreply.github.com')
+        for (const name of [
+          'WORKLING_MODEL',
+          'WORKLING_EFFORT',
+          'WORKLING_GIT_NAME',
+          'WORKLING_GIT_EMAIL',
+          'WORKLING_PI_MODEL',
+        ])
+          expect(options.env).not.toHaveProperty(name)
         if (kind === 'error') throw new Error('克隆失败')
         if (kind === 'abort') {
           process.emit('SIGTERM')

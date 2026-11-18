@@ -20,10 +20,10 @@ const issue = {
   comments: [] as { author: { login: string }; body: string; createdAt: string }[],
 }
 
-async function withDir(action: (dir: string) => Promise<void>) {
+async function withDir(action: (input: string, dir: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'workling-read-'))
   try {
-    await action(dir)
+    await action(join(dir, 'input'), dir)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -67,7 +67,9 @@ test('评论按时间排序并完整渲染无标签和附件的 issue.md，保�
       })
       return raw
     }
-    const path = await readIssue({ ref, dir, command, env: { GH_TOKEN: 'secret' } })
+    const { path, title } = await readIssue({ ref, dir, command, env: { GH_TOKEN: 'secret' } })
+    expect(path).toBe(join(dir, 'issue.md'))
+    expect(title).toBe('标题')
     expect(await readFile(join(dir, 'issue.json'), 'utf8')).toBe(raw)
     expect(await readFile(path, 'utf8')).toBe(
       '# 标题\n\n- 链接：https://github.com/a/b/issues/12\n- 状态：OPEN\n- 作者：作者\n- 标签：无\n- 创建时间：2026-01-01\n\n## 正文\n\n正文\n\n## 评论\n\n### 先 · 2026-02-01\n\n第一条\n\n### 后 · 2026-02-02\n\n第二条\n\n## 附件\n\n无\n',
@@ -76,7 +78,7 @@ test('评论按时间排序并完整渲染无标签和附件的 issue.md，保�
 
 test('两个标签按顺序渲染到 issue.md', async () =>
   withDir(async (dir) => {
-    const path = await readIssue({
+    const { path } = await readIssue({
       ref,
       dir,
       command: async () =>
@@ -124,7 +126,7 @@ test('提取两类附件、去重与清理结尾，按响应及 URL 命名并处
       },
       { preconnect: fetch.preconnect },
     )
-    const path = await readIssue({
+    const { path } = await readIssue({
       ref,
       dir,
       command: async () => JSON.stringify({ ...issue, body }),
@@ -144,7 +146,7 @@ test('文件名清理控制字符与开头的点，超长截断保留扩展名�
     )
     const names = ['a\u0001b.txt', '..hidden', `${'x'.repeat(120)}.png`, '...']
     const body = urls.join(' ')
-    const path = await readIssue({
+    const { path } = await readIssue({
       ref,
       dir,
       command: async () => JSON.stringify({ ...issue, body }),
@@ -175,7 +177,7 @@ test('链接在方括号、单引号、尖括号处结束', async () =>
     )
     const body = `![图](${urls[0]}]x '${urls[1]}' <${urls[2]}> ${urls[3]},`
     const found: string[] = []
-    const path = await readIssue({
+    const { path } = await readIssue({
       ref,
       dir,
       command: async () => JSON.stringify({ ...issue, body }),
@@ -196,7 +198,7 @@ test('链接在方括号、单引号、尖括号处结束', async () =>
 test('GH_TOKEN 为空时下载不带 Authorization 头', async () =>
   withDir(async (dir) => {
     const url = 'https://github.com/user-attachments/assets/no-token'
-    const path = await readIssue({
+    const { path } = await readIssue({
       ref,
       dir,
       command: async () => JSON.stringify({ ...issue, body: url }),
@@ -213,7 +215,7 @@ test('GH_TOKEN 为空时下载不带 Authorization 头', async () =>
   }))
 
 test('默认任务目录使用 UTC 时间、权限 0700 且拒绝重名', async () =>
-  withDir(async (dir) => {
+  withDir(async (_input, dir) => {
     const now = new Date('2026-11-14T10:30:00Z')
     const path = await createTaskDir(dir, ref, now)
     expect(path).toBe(join(dir, 'tasks/a-b-12-20261114T103000Z'))

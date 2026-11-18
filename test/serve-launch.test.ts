@@ -6,7 +6,9 @@ import {
 import { eq } from 'drizzle-orm'
 import type { StartSpec } from '../src/executor/index.ts'
 import { expect, test } from 'bun:test'
-import { readdir } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { readSpec } from '../src/contract/spec.ts'
 import { issues, repos, runs } from '../src/db/schema.ts'
 import { parsePiSettings, readPiSettings, updatePiSettings } from '../src/config/pi.ts'
 import { launchQueued } from '../src/serve/launch.ts'
@@ -50,9 +52,16 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
     await s.issue(2, 'queued', second.id)
     const first = await s.issue(2, 'queued')
     const launched: StartSpec[] = []
+    const pi = parsePiSettings({
+      model: 'configured-model',
+      effort: 'high',
+      piModel: 'pi-model',
+      gitName: 'configured-name',
+      gitEmail: 'configured@example.com',
+    })
     await launchQueued({
       ...s.options,
-      pi: { ...s.options.pi, piModel: 'pi-model' },
+      pi,
       executor: fakeExecutor({
         async start(spec) {
           launched.push(spec)
@@ -64,12 +73,15 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
             GH_HOST: 'github.com',
             GH_PROMPT_DISABLED: '1',
             WORKLING_WORKSPACE: s.workspace,
-            WORKLING_MODEL: 'gpt-6.1-terra',
-            WORKLING_EFFORT: 'medium',
-            WORKLING_GIT_NAME: 'workling',
-            WORKLING_GIT_EMAIL: 'workling@users.noreply.github.com',
-            WORKLING_PI_MODEL: 'pi-model',
           })
+          expect(await readSpec(dir)).toEqual({
+            contract: 1,
+            kind: 'implement',
+            issue: { ref: 'github:a/b#2', title: '测试 Issue' },
+            model: { codex: pi.model, effort: pi.effort, pi: 'pi-model' },
+            git: { name: pi.gitName, email: pi.gitEmail },
+          })
+          expect(await readFile(join(dir, 'input', 'issue.md'), 'utf8')).toContain('测试正文')
           return { pid: 876 }
         },
       }),
@@ -84,7 +96,12 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       worker: 'worker',
       startedAt: clock,
     })
-    expect(s.calls[0]!.args).toEqual([
+    expect(s.calls[0]?.args.slice(0, 6)).toEqual(['gh', 'issue', 'view', '2', '-R', 'a/b'])
+    expect(s.calls[0]?.options?.env).toMatchObject({
+      GH_TOKEN: 'repo-secret',
+      GH_HOST: 'github.com',
+    })
+    expect(s.calls[1]!.args).toEqual([
       'gh',
       'issue',
       'edit',
@@ -96,7 +113,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '--add-label',
       'workling:running',
     ])
-    expect(s.calls[1]!.args).toEqual([
+    expect(s.calls[2]!.args).toEqual([
       'gh',
       'issue',
       'comment',
@@ -106,7 +123,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '--body-file',
       '-',
     ])
-    expect(s.calls[1]!.options?.input).toBe(
+    expect(s.calls[2]!.options?.input).toBe(
       `workling：已领取，开始执行。\n\n- 机器：worker\n- 开始时间：${clock.toISOString()}\n- 任务目录：${launched[0]!.taskDir}`,
     )
     expect(s.logs.some((line) => line.includes('跳过'))).toBe(true)
@@ -124,7 +141,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
   }
 })
 
-test('拉起时仅在自定义接口启用后向 task 环境传递三个模型变量', async () => {
+test('拉起时仅传递已配置的 LLM 接入变量，旧模型和 Git 环境变量不传入 task', async () => {
   const configured = await scenario()
   try {
     await configured.issue(42, 'queued')
@@ -156,13 +173,17 @@ test('拉起时仅在自定义接口启用后向 task 环境传递三个模型�
   }
   const unset = await scenario()
   try {
-    for (const name of [
+    const removed = [
+      'WORKLING_MODEL',
+      'WORKLING_EFFORT',
+      'WORKLING_GIT_NAME',
+      'WORKLING_GIT_EMAIL',
       'WORKLING_PI_MODEL',
       'WORKLING_LLM_BASE_URL',
       'WORKLING_LLM_API_KEY',
       'WORKLING_LLM_API',
-    ])
-      process.env[name] = 'stale-value'
+    ]
+    for (const name of removed) process.env[name] = 'stale-value'
     await unset.issue(42, 'queued')
     let env: NodeJS.ProcessEnv | undefined
     await launchQueued({
@@ -174,12 +195,42 @@ test('拉起时仅在自定义接口启用后向 task 环境传递三个模型�
         },
       }),
     })
-    expect(env).not.toHaveProperty('WORKLING_PI_MODEL')
-    expect(env).not.toHaveProperty('WORKLING_LLM_BASE_URL')
-    expect(env).not.toHaveProperty('WORKLING_LLM_API_KEY')
-    expect(env).not.toHaveProperty('WORKLING_LLM_API')
+    expect(env).toBeDefined()
+    for (const name of removed) expect(env).not.toHaveProperty(name)
   } finally {
     await unset.dispose()
+  }
+})
+
+test('读取 Issue 失败时记录拉起失败并保持 queued，不调用执行器或更新平台', async () => {
+  const s = await scenario()
+  try {
+    await s.issue(42, 'queued')
+    let starts = 0
+    await launchQueued({
+      ...s.options,
+      command: async (args, options) => {
+        await s.options.command(args, options)
+        if (args[2] === 'view') throw new Error('Issue 读取失败')
+        return ''
+      },
+      executor: fakeExecutor({
+        async start() {
+          starts++
+          return { pid: 123 }
+        },
+      }),
+    })
+    expect(starts).toBe(0)
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view'])
+    expect(s.db.select().from(runs).get()).toMatchObject({
+      error: '拉起失败：Issue 读取失败',
+      endedAt: clock,
+      pid: null,
+    })
+    expect(s.db.select().from(issues).get()).toMatchObject({ status: 'queued', lastRunId: null })
+  } finally {
+    await s.dispose()
   }
 })
 
@@ -201,13 +252,13 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
       pid: null,
     })
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'queued', lastRunId: null })
-    expect(s.calls).toHaveLength(0)
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view'])
     await launchQueued({
       ...s.options,
       now: () => new Date(clock.getTime() + 1000),
       executor: fakeExecutor({
         async start(spec) {
-          expect(spec.env.WORKLING_PI_MODEL).toBeUndefined()
+          expect((await readSpec(spec.taskDir)).model).not.toHaveProperty('pi')
           return { pid: 99 }
         },
       }),
@@ -218,7 +269,7 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
     })
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'running', lastRunId: 2 })
     expect(s.logs.some((line) => line.includes('标签失败'))).toBe(true)
-    expect(s.calls.map((call) => call.args[2])).toEqual(['comment'])
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'view', 'comment'])
   } finally {
     await s.dispose()
   }
@@ -236,7 +287,7 @@ test('领取评论发送失败只记录日志，任务保持 running', async () 
         return s.options.command(args, options)
       },
     })
-    expect(s.calls.map((call) => call.args[2])).toEqual(['edit'])
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'edit'])
     expect(s.db.select().from(issues).get()?.status).toBe('running')
     expect(s.logs).toContain('github:a/b #42 发送领取评论失败：评论失败')
   } finally {
@@ -287,12 +338,14 @@ test('数据库模型更新后下一次拉起使用新配置，已拉起任务�
       now: () => new Date(clock.getTime() + 1000),
     })
     expect(specs).toHaveLength(2)
-    expect(specs[0]!.env.WORKLING_MODEL).toBe('first-model')
-    expect(specs[0]!.env).not.toHaveProperty('WORKLING_PI_MODEL')
-    expect(specs[1]!.env).toMatchObject({
-      WORKLING_MODEL: 'next-model',
-      WORKLING_EFFORT: 'high',
-      WORKLING_PI_MODEL: 'next-pi',
+    expect((await readSpec(specs[0]!.taskDir)).model).toEqual({
+      codex: 'first-model',
+      effort: 'high',
+    })
+    expect((await readSpec(specs[1]!.taskDir)).model).toEqual({
+      codex: 'next-model',
+      effort: 'high',
+      pi: 'next-pi',
     })
   } finally {
     await s.dispose()

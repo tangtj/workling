@@ -55,7 +55,7 @@ export async function readIssue(options: {
   command: Command
   env: Environment
   fetch?: typeof fetch
-}): Promise<string> {
+}): Promise<{ path: string; title: string }> {
   const { ref, command, env } = options
   if (ref.platform !== 'github') throw new Error('read 目前只支持 GitHub')
   const dir = resolve(options.dir)
@@ -138,5 +138,5 @@ export async function readIssue(options: {
   const markdown = `# ${issue.title}\n\n- 链接：${issue.url}\n- 状态：${issue.state}\n- 作者：${issue.author.login}\n- 标签：${issue.labels.map((label) => label.name).join('、') || '无'}\n- 创建时间：${issue.createdAt}\n\n## 正文\n\n${issue.body}\n\n## 评论\n\n${commentText}\n\n## 附件\n\n${lines.join('\n') || '无'}\n`
   const path = join(dir, 'issue.md')
   await writeFile(path, markdown)
-  return path
+  return { path, title: issue.title }
 }
