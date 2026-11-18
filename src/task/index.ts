@@ -1,8 +1,9 @@
 import { appendFileSync } from 'node:fs'
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readSpec } from '../contract/spec.ts'
 import type { IssueRef } from '../issue/reference.ts'
-import { CLI, PI_CLI, ROOT } from '../runtime/paths.ts'
+import { PI_CLI, ROOT } from '../runtime/paths.ts'
 import { streamProcess } from '../runtime/process.ts'
 import { createPiEventFormatter, duration, time } from '../task/pi-events.ts'
 import type { Command, Environment, ExitStatus } from '../runtime/types.ts'
@@ -21,6 +22,13 @@ export async function runTask(options: {
   const { ref, dir, command, signal } = options
   if (ref.platform !== 'github' || ref.host !== 'github.com')
     throw new Error('task 目前只支持 github.com')
+  const spec = await readSpec(dir)
+  const issueRef = `github:${ref.project}#${ref.iid}`
+  if (spec.issue.ref !== issueRef)
+    throw new Error(`spec.json 的 Issue 引用与任务参数不一致：需要 ${issueRef}`)
+  const issuePath = join(dir, 'input', 'issue.md')
+  if (!(await stat(issuePath, { throwIfNoEntry: false }))?.isFile())
+    throw new Error('缺少 Issue 内容文件 input/issue.md')
   const env: Environment = { ...options.env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1' }
   const now = options.now ?? (() => new Date())
   const secrets = [options.env.GH_TOKEN, options.env.WORKLING_LLM_API_KEY].filter(
@@ -46,15 +54,15 @@ export async function runTask(options: {
     ['remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'],
     ['credential.helper', ''],
     ['--add', 'credential.helper', '!gh auth git-credential'],
-    ['user.name', env.WORKLING_GIT_NAME!],
-    ['user.email', env.WORKLING_GIT_EMAIL!],
+    ['user.name', spec.git.name],
+    ['user.email', spec.git.email],
   ]) {
     await command(['git', 'config', '--local', ...args], { cwd: repo, env, signal })
   }
   const llmBaseUrl = env.WORKLING_LLM_BASE_URL
-  const piModel = env.WORKLING_PI_MODEL ?? env.WORKLING_MODEL
+  const piModel = spec.model.pi ?? spec.model.codex
   let piEnv: Environment = { ...options.env, GH_PROMPT_DISABLED: '1' }
-  let modelArgs = env.WORKLING_PI_MODEL ? ['--model', env.WORKLING_PI_MODEL] : []
+  let modelArgs = spec.model.pi ? ['--model', spec.model.pi] : []
   if (llmBaseUrl) {
     const api = env.WORKLING_LLM_API ?? 'openai-responses'
     log(`生成模型配置（${api}，Pi 模型 workling/${piModel}）`)
@@ -79,7 +87,7 @@ export async function runTask(options: {
     })
     await chmod(join(piAgentDir, 'models.json'), 0o600)
     const toml = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
-    const config = `model_provider = "workling"\nmodel = "${toml(env.WORKLING_MODEL ?? '')}"\n\n[model_providers.workling]\nname = "workling"\nbase_url = "${toml(llmBaseUrl)}"\nwire_api = "${api === 'openai-completions' ? 'chat' : 'responses'}"\nenv_key = "WORKLING_LLM_API_KEY"\n`
+    const config = `model_provider = "workling"\nmodel = "${toml(spec.model.codex)}"\n\n[model_providers.workling]\nname = "workling"\nbase_url = "${toml(llmBaseUrl)}"\nwire_api = "${api === 'openai-completions' ? 'chat' : 'responses'}"\nenv_key = "WORKLING_LLM_API_KEY"\n`
     await writeFile(join(codexHome, 'config.toml'), config, { mode: 0o600 })
     await chmod(join(codexHome, 'config.toml'), 0o600)
     piEnv = {
@@ -89,13 +97,13 @@ export async function runTask(options: {
     }
     modelArgs = ['--model', `workling/${piModel}`]
   }
-  const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（github:${ref.project}#${ref.iid}）
+  const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（${issueRef}）
 仓库目录：${repo}
 任务目录：${dir}
-默认 codex 模型：${env.WORKLING_MODEL}
-默认 codex 推理强度：${env.WORKLING_EFFORT}
+Issue 内容：${issuePath}
+默认 codex 模型：${spec.model.codex}
+默认 codex 推理强度：${spec.model.effort}
 codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
-workling 命令：bun ${CLI}
 按系统提示中的 workling 工作约定完成这个 Issue。`
   // watch 对 task 进程组发出的信号需要同时到达 Pi。
   log('拉起 Pi')

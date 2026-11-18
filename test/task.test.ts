@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test'
-import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseIssueRef } from '../src/issue/reference.ts'
-import { CLI, ROOT } from '../src/runtime/paths.ts'
+import { CONTRACT_VERSION, writeSpec, type Spec } from '../src/contract/spec.ts'
+import { ROOT } from '../src/runtime/paths.ts'
 import { isAlive, run } from '../src/runtime/process.ts'
 import type { Command, Environment } from '../src/runtime/types.ts'
 import {
@@ -17,6 +17,13 @@ import {
 import { runTask } from '../src/task/index.ts'
 
 const ref = parseIssueRef('github:a/b#12')
+const spec: Spec = {
+  contract: CONTRACT_VERSION,
+  kind: 'implement',
+  issue: { ref: 'github:a/b#12', title: '测试 Issue' },
+  model: { codex: 'spec-codex', effort: 'high' },
+  git: { name: 'spec-bot', email: 'spec-bot@example.com' },
+}
 const dirs: string[] = []
 afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true })
@@ -24,6 +31,13 @@ afterEach(async () => {
 async function temp() {
   const dir = await mkdtemp(join(tmpdir(), 'workling-task-'))
   dirs.push(dir)
+  return dir
+}
+
+async function prepareTask(dir: string, pi?: string) {
+  await writeSpec(dir, { ...spec, model: { ...spec.model, ...(pi ? { pi } : {}) } })
+  await mkdir(join(dir, 'input'))
+  await writeFile(join(dir, 'input', 'issue.md'), '# 测试 Issue\n')
   return dir
 }
 
@@ -76,20 +90,21 @@ test('result 原子写入后正常往返，缺失、半截 JSON 和错误形状�
   expect(await readResult(dir)).toEqual(failed)
 })
 
-async function setupTask() {
+async function setupTask({ pi, realGit = false }: { pi?: string; realGit?: boolean } = {}) {
   const workspace = await temp()
   const bare = join(workspace, 'source.git')
-  await run(['git', 'init', '--bare', bare])
-  const dir = await createTaskDir(workspace, ref)
+  if (realGit) await run(['git', 'init', '--bare', bare])
+  const dir = await prepareTask(await createTaskDir(workspace, ref), pi)
   const record = join(dir, 'pi.json')
   const env: Environment = {
     ...process.env,
     GH_TOKEN: 'private-token',
     GH_HOST: 'wrong',
-    WORKLING_MODEL: 'gpt-6.1-terra',
-    WORKLING_EFFORT: 'medium',
-    WORKLING_GIT_NAME: 'workling',
-    WORKLING_GIT_EMAIL: 'workling@users.noreply.github.com',
+    WORKLING_MODEL: 'stale-codex',
+    WORKLING_EFFORT: 'low',
+    WORKLING_GIT_NAME: 'stale-bot',
+    WORKLING_GIT_EMAIL: 'stale-bot@example.com',
+    WORKLING_PI_MODEL: 'stale-pi',
     WORKLING_TEST_RECORD: record,
   }
   const calls: string[][] = []
@@ -98,9 +113,11 @@ async function setupTask() {
     expect(options?.env).toEqual({ ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1' })
     if (args[0] === 'gh') {
       expect(args).toEqual(['gh', 'repo', 'clone', 'a/b', join(dir, 'repo'), '--', '--depth', '50'])
-      return run(['git', 'clone', bare, args[4]!], options)
+      if (realGit) return run(['git', 'clone', bare, args[4]!], options)
+      await mkdir(join(dir, 'repo'))
+      return ''
     }
-    return run(args, options)
+    return realGit ? run(args, options) : ''
   }
   return {
     dir,
@@ -115,9 +132,8 @@ async function setupTask() {
 }
 
 test('runTask 真实克隆和配置 Git，假 Pi 收到精确参数、指令和环境并返回非零退出码', async () => {
-  const options = await setupTask()
+  const options = await setupTask({ pi: 'test-provider/model', realGit: true })
   options.env.WORKLING_TEST_EXIT = '7'
-  options.env.WORKLING_PI_MODEL = 'test-provider/model'
   const status = await runTask(options)
   expect(status).toEqual({ code: 7, signal: null })
   const captured = JSON.parse(await readFile(options.record, 'utf8'))
@@ -135,7 +151,7 @@ test('runTask 真实克隆和配置 Git，假 Pi 收到精确参数、指令和�
     '--model',
     'test-provider/model',
     '--',
-    `Issue：https://github.com/a/b/issues/12（github:a/b#12）\n仓库目录：${options.dir}/repo\n任务目录：${options.dir}\n默认 codex 模型：gpt-6.1-terra\n默认 codex 推理强度：medium\ncodex 沙箱模式：workspace-write\nworkling 命令：bun ${CLI}\n按系统提示中的 workling 工作约定完成这个 Issue。`,
+    `Issue：https://github.com/a/b/issues/12（github:a/b#12）\n仓库目录：${options.dir}/repo\n任务目录：${options.dir}\nIssue 内容：${options.dir}/input/issue.md\n默认 codex 模型：spec-codex\n默认 codex 推理强度：high\ncodex 沙箱模式：workspace-write\n按系统提示中的 workling 工作约定完成这个 Issue。`,
   ])
   expect(JSON.stringify(captured.args)).not.toContain('private-token')
   expect(captured.cwd).toBe(
@@ -148,15 +164,15 @@ test('runTask 真实克隆和配置 Git，假 Pi 收到精确参数、指令和�
     ['git', 'config', '--local', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'],
     ['git', 'config', '--local', 'credential.helper', ''],
     ['git', 'config', '--local', '--add', 'credential.helper', '!gh auth git-credential'],
-    ['git', 'config', '--local', 'user.name', 'workling'],
-    ['git', 'config', '--local', 'user.email', 'workling@users.noreply.github.com'],
+    ['git', 'config', '--local', 'user.name', 'spec-bot'],
+    ['git', 'config', '--local', 'user.email', 'spec-bot@example.com'],
   ])
   const git = (key: string) =>
     run(['git', 'config', '--local', '--get-all', key], { cwd: join(options.dir, 'repo') })
   expect(await git('remote.origin.fetch')).toBe('+refs/heads/*:refs/remotes/origin/*')
   expect(await git('credential.helper')).toBe('!gh auth git-credential')
-  expect(await git('user.name')).toBe('workling')
-  expect(await git('user.email')).toBe('workling@users.noreply.github.com')
+  expect(await git('user.name')).toBe('spec-bot')
+  expect(await git('user.email')).toBe('spec-bot@example.com')
 })
 
 test('浅克隆配置全部分支后推送新分支会建立远端跟踪引用', async () => {
@@ -193,8 +209,8 @@ test('浅克隆配置全部分支后推送新分支会建立远端跟踪引用',
 test('runTask 可选 Pi 模型与默认入口符合规格，拒绝不支持的引用并透传克隆失败', async () => {
   const base = {
     ref,
-    dir: await temp(),
-    env: { WORKLING_PI_MODEL: 'provider/model' },
+    dir: await prepareTask(await temp(), 'provider/model'),
+    env: {},
     signal: new AbortController().signal,
     command: async () => '',
   }
@@ -222,18 +238,51 @@ test('runTask 可选 Pi 模型与默认入口符合规格，拒绝不支持的�
   ).rejects.toThrow('克隆失败')
 })
 
+test.each([
+  ['缺少契约', undefined, true, '缺少 spec.json'],
+  ['契约无效', '{}', true, 'spec.json 的结构无效'],
+  [
+    '引用不一致',
+    JSON.stringify({ ...spec, issue: { ...spec.issue, ref: 'github:a/b#13' } }),
+    true,
+    'Issue 引用与任务参数不一致',
+  ],
+  ['缺少内容', JSON.stringify(spec), false, '缺少 Issue 内容文件 input/issue.md'],
+] as const)('runTask 在%s时不克隆也不拉起 Pi', async (_kind, raw, input, error) => {
+  const dir = await temp()
+  if (raw !== undefined) await writeFile(join(dir, 'spec.json'), raw)
+  if (input) {
+    await mkdir(join(dir, 'input'))
+    await writeFile(join(dir, 'input', 'issue.md'), '# 测试 Issue\n')
+  }
+  await expect(
+    runTask({
+      ref,
+      dir,
+      env: {},
+      signal: new AbortController().signal,
+      command: async () => {
+        throw new Error('不应克隆')
+      },
+      wait: async () => {
+        throw new Error('不应拉起 Pi')
+      },
+    }),
+  ).rejects.toThrow(error)
+})
+
 test.each([undefined, 'danger-full-access'])(
   '任务指令的 codex 沙箱模式使用配置或默认 workspace-write：%s',
   async (sandbox) => {
     await runTask({
       ref,
-      dir: await temp(),
+      dir: await prepareTask(await temp()),
       command: async () => '',
-      env: { WORKLING_EFFORT: 'medium', WORKLING_CODEX_SANDBOX: sandbox },
+      env: { WORKLING_CODEX_SANDBOX: sandbox },
       signal: new AbortController().signal,
       wait: async (args) => {
         expect(args.at(-1)).toContain(
-          `默认 codex 推理强度：medium\ncodex 沙箱模式：${sandbox ?? 'workspace-write'}\nworkling 命令：`,
+          `默认 codex 推理强度：high\ncodex 沙箱模式：${sandbox ?? 'workspace-write'}\n`,
         )
         return { code: 0, signal: null }
       },
@@ -242,12 +291,11 @@ test.each([undefined, 'danger-full-access'])(
 )
 
 test('runTask 自定义接口生成受限配置且密钥只经环境变量传递', async () => {
-  const options = await setupTask()
+  const options = await setupTask({ pi: 'custom/pi-model' })
   const fakeKey = 'distinctive-fake-key-9f2c'
   options.env.WORKLING_LLM_BASE_URL = 'https://llm.example/v1\\path"quoted'
   options.env.WORKLING_LLM_API_KEY = fakeKey
   options.env.WORKLING_LLM_API = 'openai-completions'
-  options.env.WORKLING_PI_MODEL = 'custom/pi-model'
   let launchArgs: string[] = []
   let launchEnv: Environment | undefined
   await runTask({
@@ -281,7 +329,7 @@ test('runTask 自定义接口生成受限配置且密钥只经环境变量传递
     )}\n`,
   )
   expect(configText).toBe(
-    `model_provider = "workling"\nmodel = "gpt-6.1-terra"\n\n[model_providers.workling]\nname = "workling"\nbase_url = "https://llm.example/v1\\\\path\\"quoted"\nwire_api = "chat"\nenv_key = "WORKLING_LLM_API_KEY"\n`,
+    `model_provider = "workling"\nmodel = "spec-codex"\n\n[model_providers.workling]\nname = "workling"\nbase_url = "https://llm.example/v1\\\\path\\"quoted"\nwire_api = "chat"\nenv_key = "WORKLING_LLM_API_KEY"\n`,
   )
   expect(modelsText).not.toContain(fakeKey)
   expect(configText).not.toContain(fakeKey)
@@ -290,6 +338,13 @@ test('runTask 自定义接口生成受限配置且密钥只经环境变量传递
   expect((await stat(modelsPath)).mode & 0o777).toBe(0o600)
   expect((await stat(configPath)).mode & 0o777).toBe(0o600)
   expect(launchArgs.slice(-4, -2)).toEqual(['--model', 'workling/custom/pi-model'])
+  expect(launchArgs.at(-1)).toContain(`Issue 内容：${join(options.dir, 'input', 'issue.md')}`)
+  expect(launchArgs.at(-1)).toContain('默认 codex 模型：spec-codex\n默认 codex 推理强度：high')
+  expect(launchArgs.at(-1)).not.toContain('workling 命令')
+  expect(options.calls.slice(-2)).toEqual([
+    ['git', 'config', '--local', 'user.name', 'spec-bot'],
+    ['git', 'config', '--local', 'user.email', 'spec-bot@example.com'],
+  ])
   expect(launchArgs.join(' ')).not.toContain(fakeKey)
   expect(launchEnv).toMatchObject({
     PI_CODING_AGENT_DIR: piDir,
@@ -298,11 +353,10 @@ test('runTask 自定义接口生成受限配置且密钥只经环境变量传递
   })
 })
 
-test('runTask 自定义接口的 Pi 模型回退至 WORKLING_MODEL，未配置时保持原行为', async () => {
+test('runTask 自定义接口的 Pi 模型回退至契约中的 codex 模型，未配置时保持原行为', async () => {
   const configured = await setupTask()
   configured.env.WORKLING_LLM_BASE_URL = 'http://localhost:8080/v1/'
   configured.env.WORKLING_LLM_API_KEY = 'distinctive-fake-key'
-  delete configured.env.WORKLING_PI_MODEL
   let args: string[] = []
   await runTask({
     ...configured,
@@ -311,7 +365,7 @@ test('runTask 自定义接口的 Pi 模型回退至 WORKLING_MODEL，未配置�
       return { code: 0, signal: null }
     },
   })
-  expect(args.slice(-4, -2)).toEqual(['--model', 'workling/gpt-6.1-terra'])
+  expect(args.slice(-4, -2)).toEqual(['--model', 'workling/spec-codex'])
 
   const normal = await setupTask()
   let normalArgs: string[] = []
@@ -350,15 +404,18 @@ test('runTask 中止时结束假 Pi 与其子进程并返回信号', async () =>
   }
 })
 
-// docs/ 是本地设计文档，不随仓库发布；CI 检出代码中没有它时跳过对照。
-test.skipIf(!existsSync(join(ROOT, 'docs/M1实现说明.md')))(
-  'Pi 工作约定与规格 4.4 代码块逐字一致',
-  async () => {
-    const spec = await readFile(join(ROOT, 'docs/M1实现说明.md'), 'utf8')
-    const expected = spec.split('````md\n')[1]!.split('````')[0]!
-    expect(await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')).toBe(expected)
-  },
-)
+test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
+  const prompt = await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')
+  expect(prompt).toContain('<任务目录>/input/issue.md')
+  expect(prompt).toContain('<任务目录>/input/attachments/')
+  for (const removed of [
+    'workling 命令',
+    'read <Issue 引用>',
+    '<任务目录>/issue.md',
+    '<任务目录>/attachments/',
+  ])
+    expect(prompt).not.toContain(removed)
+})
 
 test('runTask 保存原始事件并输出脱敏的步骤与 Pi 进度', async () => {
   const options = await setupTask()
@@ -381,7 +438,7 @@ test('workling-events 写入全部 step 与 pi_exit，保留退出码和信号�
     { code: 7, signal: null },
     { code: null, signal: 'SIGTERM' as const },
   ]) {
-    const dir = await temp()
+    const dir = await prepareTask(await temp())
     let clock = 0
     const lines: string[] = []
     const result = await runTask({

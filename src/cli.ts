@@ -8,7 +8,6 @@ import { runTask } from './task/index.ts'
 import { assertTaskDir, writeResult } from './task/dir.ts'
 import { resetPassword } from './web/auth.ts'
 import { openDatabase } from './db/index.ts'
-import { readIssue } from './issue/read.ts'
 import { parseIssueRef } from './issue/reference.ts'
 import { run, withShutdown } from './runtime/process.ts'
 import { readExecutorSettings } from './config/executor.ts'
@@ -23,9 +22,8 @@ const usage = `用法：bun src/cli.ts <命令>
   serve                  启动服务：轮询 Issue、拉起任务、对账、管理页
   cancel <issue 引用>    取消运行中的任务
   reset-password         重置管理密码
-内部命令（由 watch 与 Pi 调用，不要手动运行）：
+内部命令（由 watch 调用，不要手动运行）：
   task <issue 引用> <任务目录>
-  read <issue 引用> <任务目录>
 支持的引用格式：
   github:owner/repo#12
   gitlab:group/sub/proj#3
@@ -91,15 +89,6 @@ export async function main(args: string[]): Promise<number> {
     await withShutdown((signal) => serve({ settings: readSettings(), signal }))
     return 0
   }
-  if (command === 'read') {
-    if (!ref || !args[2] || args.length !== 3)
-      throw new Error('用法：bun src/cli.ts read <issue 引用> <任务目录>')
-    const issue = parseIssueRef(ref, process.env.WORKLING_GITLAB_HOST || 'gitlab.com')
-    if (issue.platform !== 'github') throw new Error('read 目前只支持 GitHub')
-    const dir = args[2]
-    console.log(await readIssue({ ref: issue, dir, command: run, env: process.env }))
-    return 0
-  }
   if (command === 'task') {
     if (!ref || !args[2] || args.length !== 3)
       throw new Error('用法：bun src/cli.ts task <issue 引用> <任务目录>')
@@ -110,13 +99,6 @@ export async function main(args: string[]): Promise<number> {
       let exitCode = 1
       let result: Parameters<typeof writeResult>[1]
       try {
-        const env = {
-          ...process.env,
-          WORKLING_MODEL: process.env.WORKLING_MODEL ?? 'gpt-6.1-terra',
-          WORKLING_EFFORT: process.env.WORKLING_EFFORT ?? 'medium',
-          WORKLING_GIT_NAME: process.env.WORKLING_GIT_NAME ?? 'workling',
-          WORKLING_GIT_EMAIL: process.env.WORKLING_GIT_EMAIL ?? 'workling@users.noreply.github.com',
-        }
         const out =
           process.env.WORKLING_TASK_TEE === '1'
             ? (line: string) => {
@@ -124,7 +106,14 @@ export async function main(args: string[]): Promise<number> {
                 appendFileSync(join(dir, 'task.log'), `${line}\n`)
               }
             : undefined
-        const status = await runTask({ ref: issue, dir, command: run, env, signal, out })
+        const status = await runTask({
+          ref: issue,
+          dir,
+          command: run,
+          env: process.env,
+          signal,
+          out,
+        })
         result = {
           exitCode: status.code,
           signal: status.signal,

@@ -1,9 +1,12 @@
 import { type ExecutorSettings } from '../config/executor.ts'
 import { and, count, eq } from 'drizzle-orm'
+import { join } from 'node:path'
+import { CONTRACT_VERSION, writeSpec } from '../contract/spec.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
+import { readIssue } from '../issue/read.ts'
 import { parseIssueRef } from '../issue/reference.ts'
 import { createTaskDir } from '../task/dir.ts'
 import { type PiSettings } from '../config/pi.ts'
@@ -62,7 +65,8 @@ export async function launchQueued({
     let record: typeof runs.$inferSelect | undefined
     try {
       const startedAt = now()
-      const ref = parseIssueRef(`github:${repo.path}#${issue.number}`)
+      const issueRef = `github:${repo.path}#${issue.number}`
+      const ref = parseIssueRef(issueRef)
       const taskDir = await createTaskDir(settings.workspace, ref, startedAt)
       record = db
         .insert(runs)
@@ -70,8 +74,29 @@ export async function launchQueued({
         .returning()
         .get()
       const inherited = ghEnv(repo.token, repo.host)
-      // 清空可选配置后，不能让旧环境变量重新进入 task。
+      const { title } = await readIssue({
+        ref,
+        dir: join(taskDir, 'input'),
+        command,
+        env: inherited,
+      })
+      await writeSpec(taskDir, {
+        contract: CONTRACT_VERSION,
+        kind: 'implement',
+        issue: { ref: issueRef, title },
+        model: {
+          codex: pi.model,
+          effort: pi.effort,
+          ...(pi.piModel !== null ? { pi: pi.piModel } : {}),
+        },
+        git: { name: pi.gitName, email: pi.gitEmail },
+      })
+      // 模型和提交身份来自契约；LLM 接入只使用当前配置。
       for (const name of [
+        'WORKLING_MODEL',
+        'WORKLING_EFFORT',
+        'WORKLING_GIT_NAME',
+        'WORKLING_GIT_EMAIL',
         'WORKLING_PI_MODEL',
         'WORKLING_LLM_BASE_URL',
         'WORKLING_LLM_API_KEY',
@@ -81,11 +106,6 @@ export async function launchQueued({
       const env = {
         ...inherited,
         WORKLING_WORKSPACE: settings.workspace,
-        WORKLING_MODEL: pi.model,
-        WORKLING_EFFORT: pi.effort,
-        WORKLING_GIT_NAME: pi.gitName,
-        WORKLING_GIT_EMAIL: pi.gitEmail,
-        ...(pi.piModel !== null ? { WORKLING_PI_MODEL: pi.piModel } : {}),
         ...(pi.llmBaseUrl !== null
           ? {
               WORKLING_LLM_BASE_URL: pi.llmBaseUrl,
@@ -96,7 +116,7 @@ export async function launchQueued({
       }
       const handle = await executor.start({
         runId: record.id,
-        ref: `github:${repo.path}#${issue.number}`,
+        ref: issueRef,
         taskDir,
         env,
       })

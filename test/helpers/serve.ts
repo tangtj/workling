@@ -50,6 +50,18 @@ export async function scenario() {
     .get()
   const command: Command = async (args, options) => {
     calls.push({ args, options })
+    if (args[0] === 'gh' && args[1] === 'issue' && args[2] === 'view')
+      return JSON.stringify({
+        number: Number(args[3]),
+        title: '测试 Issue',
+        body: '测试正文',
+        state: 'OPEN',
+        url: `https://github.com/${args[5]}/issues/${args[3]}`,
+        createdAt: clock.toISOString(),
+        author: { login: 'author' },
+        labels: [],
+        comments: [],
+      })
     return args[1] === 'pr'
       ? JSON.stringify([
           { url: 'wrong', headRefName: 'workling/420-task', state: 'OPEN' },
