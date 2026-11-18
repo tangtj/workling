@@ -17,6 +17,7 @@ import { pollOnce } from './poll.ts'
 import { launchQueued } from './launch.ts'
 import { reconcile } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
+import { retryOnCommand, type RetryState } from './retry.ts'
 type Log = (message: string) => void
 
 export type ServeStatus = {
@@ -128,6 +129,7 @@ export async function serve({
     markHealthy()
     log(`workling 管理接口：http://${settings.host}:${server.port}`)
     const labeledRepos = new Set<number>()
+    const retryState: RetryState = { accounts: new Map(), triggers: new Map() }
     let wasPaused = false
     while (!signal.aborted) {
       const pi = readPiSettings(db)
@@ -155,10 +157,26 @@ export async function serve({
       }
       if (!signal.aborted) {
         try {
+          await retryOnCommand({ db, command, log, signal, state: retryState })
+        } catch (error) {
+          if (!signal.aborted) log(`指令重试失败：${errorMessage(error)}`)
+        }
+      }
+      if (!signal.aborted) {
+        try {
           const paused = launchPaused()
           if (paused && !wasPaused) log('在线更新进行中，暂停拉起新任务')
           wasPaused = paused
-          if (!paused) await launchQueued({ db, command, log, settings, pi, executorSettings })
+          if (!paused)
+            await launchQueued({
+              db,
+              command,
+              log,
+              settings,
+              pi,
+              executorSettings,
+              triggers: retryState.triggers,
+            })
         } catch (error) {
           log(`拉起任务失败：${errorMessage(error)}`)
         }

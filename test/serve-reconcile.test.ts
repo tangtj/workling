@@ -345,7 +345,7 @@ test.each(['有报告', '无报告'])(
           ? Array.from({ length: 20 }, (_, i) => `> line ${i + 1}`).join('\n') + '\n\n'
           : ''
       expect(s.calls[1]!.options!.input).toBe(
-        `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready 即可重试。`,
+        `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。`,
       )
       expect(s.logs.filter((line) => line.includes('更新 GitHub 失败'))).toHaveLength(2)
       expect(s.db.select().from(issues).get()?.status).toBe('failed')

@@ -364,3 +364,26 @@ test('并发名额已满不拉起，保存新上限后下一轮使用数据库�
     await s.dispose()
   }
 })
+
+test('指令触发的重试在领取评论中注明链接', async () => {
+  const s = await scenario()
+  try {
+    const issue = await s.issue(42, 'queued')
+    const triggers = new Map([[issue.id, 'https://github.com/a/b/issues/42#issuecomment-1']])
+    await launchQueued({
+      ...s.options,
+      triggers,
+      executor: fakeExecutor({
+        async start() {
+          return { pid: 123 }
+        },
+      }),
+    })
+    expect(s.calls.find((call) => call.args[2] === 'comment')?.options?.input).toContain(
+      '\n- 触发：https://github.com/a/b/issues/42#issuecomment-1',
+    )
+    expect(triggers.size).toBe(0)
+  } finally {
+    await s.dispose()
+  }
+})

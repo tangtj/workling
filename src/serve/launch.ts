@@ -20,6 +20,7 @@ export async function launchQueued({
   settings,
   pi,
   executorSettings,
+  triggers,
   now = () => new Date(),
   executor = createExecutor(executorSettings, command, log),
 }: {
@@ -29,6 +30,7 @@ export async function launchQueued({
   settings: Settings
   pi: PiSettings
   executorSettings: ExecutorSettings
+  triggers?: Map<number, string>
   now?: () => Date
   executor?: Executor
 }): Promise<void> {
@@ -138,13 +140,16 @@ export async function launchQueued({
       log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
     }
     try {
-      const body = `workling：已领取，开始执行。\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}`
+      const trigger = triggers?.get(issue.id)
+      const body = `workling：已领取，开始执行。\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}${trigger ? `\n- 触发：${trigger}` : ''}`
       await command(
         ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
         { env: ghEnv(repo.token, repo.host), input: body },
       )
     } catch (error) {
       log(`${repo.ref} #${issue.number} 发送领取评论失败：${errorMessage(error)}`)
+    } finally {
+      triggers?.delete(issue.id)
     }
   }
 }
