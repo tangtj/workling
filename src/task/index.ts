@@ -30,6 +30,14 @@ export async function runTask(options: {
   if (!(await stat(issuePath, { throwIfNoEntry: false }))?.isFile())
     throw new Error('缺少 Issue 内容文件 input/issue.md')
   const env: Environment = { ...options.env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1' }
+  const repo = join(dir, 'repo')
+  const git = (args: string[]) => command(['git', ...args], { cwd: repo, env, signal })
+  if (!(await stat(repo, { throwIfNoEntry: false }))?.isDirectory())
+    throw new Error('缺少任务工作副本 repo')
+  if ((await git(['rev-parse', '--is-inside-work-tree', '--show-prefix'])) !== 'true')
+    throw new Error('repo 不是 Git 工作副本的根目录')
+  if ((await git(['symbolic-ref', '--quiet', 'HEAD'])) !== `refs/heads/${spec.repo.branch}`)
+    throw new Error(`任务工作副本未检出分支 ${spec.repo.branch}`)
   const now = options.now ?? (() => new Date())
   const secrets = [options.env.GH_TOKEN, options.env.WORKLING_LLM_API_KEY].filter(
     (value): value is string => Boolean(value),
@@ -45,19 +53,12 @@ export async function runTask(options: {
     for (const secret of secrets) formatted = formatted.replaceAll(secret, '***')
     out(formatted)
   }
-  const repo = join(dir, 'repo')
-  log(`克隆 ${ref.project}`)
-  await command(['gh', 'repo', 'clone', ref.project, repo, '--', '--depth', '50'], { env, signal })
-  log('配置 git 凭证与提交身份')
+  log('配置 git 凭证')
   for (const args of [
-    // 浅克隆只跟踪默认分支，push 后缺少 origin/<分支> 会使 gh pr create 误判未推送。
-    ['remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'],
     ['credential.helper', ''],
     ['--add', 'credential.helper', '!gh auth git-credential'],
-    ['user.name', spec.git.name],
-    ['user.email', spec.git.email],
   ]) {
-    await command(['git', 'config', '--local', ...args], { cwd: repo, env, signal })
+    await git(['config', '--local', ...args])
   }
   const llmBaseUrl = env.WORKLING_LLM_BASE_URL
   const piModel = spec.model.pi ?? spec.model.codex
@@ -99,6 +100,7 @@ export async function runTask(options: {
   }
   const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（${issueRef}）
 仓库目录：${repo}
+任务分支：${spec.repo.branch}（已检出，基于 ${spec.repo.baseRef}）${spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''}
 任务目录：${dir}
 Issue 内容：${issuePath}
 默认 codex 模型：${spec.model.codex}

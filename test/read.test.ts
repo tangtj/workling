@@ -67,9 +67,15 @@ test('评论按时间排序并完整渲染无标签和附件的 issue.md，保�
       })
       return raw
     }
-    const { path, title } = await readIssue({ ref, dir, command, env: { GH_TOKEN: 'secret' } })
+    const { path, title, body } = await readIssue({
+      ref,
+      dir,
+      command,
+      env: { GH_TOKEN: 'secret' },
+    })
     expect(path).toBe(join(dir, 'issue.md'))
     expect(title).toBe('标题')
+    expect(body).toBe('正文')
     expect(await readFile(join(dir, 'issue.json'), 'utf8')).toBe(raw)
     expect(await readFile(path, 'utf8')).toBe(
       '# 标题\n\n- 链接：https://github.com/a/b/issues/12\n- 状态：OPEN\n- 作者：作者\n- 标签：无\n- 创建时间：2026-01-01\n\n## 正文\n\n正文\n\n## 评论\n\n### 先 · 2026-02-01\n\n第一条\n\n### 后 · 2026-02-02\n\n第二条\n\n## 附件\n\n无\n',

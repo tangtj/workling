@@ -6,13 +6,16 @@ import {
 import { eq } from 'drizzle-orm'
 import type { StartSpec } from '../src/executor/index.ts'
 import { expect, test } from 'bun:test'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readSpec } from '../src/contract/spec.ts'
 import { issues, repos, runs } from '../src/db/schema.ts'
 import { parsePiSettings, readPiSettings, updatePiSettings } from '../src/config/pi.ts'
 import { launchQueued } from '../src/serve/launch.ts'
-import { fakeExecutor, clock, scenario } from './helpers/serve.ts'
+import { reconcile } from '../src/serve/reconcile.ts'
+import { readResult } from '../src/task/dir.ts'
+import { localRemote } from './helpers/git.ts'
+import { baseRef, fakeExecutor, clock, scenario } from './helpers/serve.ts'
 
 test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占名额，参数环境和库标签一致', async () => {
   const s = await scenario()
@@ -78,6 +81,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
             contract: 1,
             kind: 'implement',
             issue: { ref: 'github:a/b#2', title: '测试 Issue' },
+            repo: { baseRef, branch: 'workling/2-issue' },
             model: { codex: pi.model, effort: pi.effort, pi: 'pi-model' },
             git: { name: pi.gitName, email: pi.gitEmail },
           })
@@ -436,6 +440,158 @@ test('指令触发的重试在领取评论中注明链接', async () => {
       '\n- 触发：https://github.com/a/b/issues/42#issuecomment-1',
     )
     expect(triggers.size).toBe(0)
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([
+  ['默认分支', '没有文档分支', undefined, 'latest default'],
+  ['文档分支', '分支：docs/design', 'docs/design', 'design'],
+] as const)('真实 Git：主体从%s检出任务分支并写好契约', async (_kind, body, docBranch, content) => {
+  const s = await scenario({ body })
+  try {
+    const remote = await localRemote(s.workspace)
+    // bare 远端 HEAD 指向 main；应以 API 返回的 trunk 为准。
+    const initial = await remote.commit('refs/heads/main', 'initial')
+    const design = await remote.commit('refs/heads/docs/design', 'design', initial)
+    const latest = await remote.commit('refs/heads/trunk', 'latest default', initial)
+    const baseRef = docBranch ? design : latest
+    const baseRequests: string[][] = []
+    await s.issue(42, 'queued')
+    await launchQueued({
+      ...s.options,
+      command: (args, options) => {
+        if (args[0] === 'git') return remote.git(args, options)
+        if (args[1] === 'api') {
+          baseRequests.push(args)
+          return Promise.resolve('trunk')
+        }
+        return s.command(args, options)
+      },
+      executor: fakeExecutor({
+        async start({ taskDir }) {
+          const cwd = join(taskDir, 'repo')
+          const git = (args: string[]) => remote.git(['git', ...args], { cwd })
+          expect(await git(['branch', '--show-current'])).toBe('workling/42-issue')
+          expect(await git(['rev-parse', 'HEAD'])).toBe(baseRef)
+          expect(await git(['config', '--local', 'remote.origin.url'])).toBe(
+            'https://github.com/a/b.git',
+          )
+          expect(await git(['config', '--local', 'remote.origin.fetch'])).toBe(
+            '+refs/heads/*:refs/remotes/origin/*',
+          )
+          expect(await git(['config', '--local', 'user.name'])).toBe(s.pi.gitName)
+          expect(await git(['config', '--local', 'user.email'])).toBe(s.pi.gitEmail)
+          expect(await readFile(join(cwd, 'content.txt'), 'utf8')).toBe(content)
+          expect(await Bun.file(join(cwd, '.git/objects/info/alternates')).exists()).toBe(false)
+          const object = join('objects', baseRef.slice(0, 2), baseRef.slice(2))
+          const mirrorObject = join(s.workspace, 'mirrors/github.com/a/b.git', object)
+          expect((await stat(join(cwd, '.git', object))).ino).not.toBe(
+            (await stat(mirrorObject)).ino,
+          )
+          expect((await readSpec(taskDir)).repo).toEqual({
+            baseRef,
+            branch: 'workling/42-issue',
+            ...(docBranch ? { docBranch } : {}),
+          })
+          return { pid: 123 }
+        },
+      }),
+    })
+    expect(baseRequests).toEqual(
+      docBranch ? [] : [['gh', 'api', 'repos/a/b', '--jq', '.default_branch']],
+    )
+    expect(s.db.select().from(runs).get()?.pid).toBe(123)
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([
+  ['真实 Git：', '分支：docs/missing', '文档分支「docs/missing」不存在'],
+  ['', '分支：docs/missing', '文档分支「docs/missing」不存在'],
+  ['', '分支：docs/with space', 'Issue 正文的「分支：」行未填写有效的文档分支名'],
+] as const)('%s主体将 %j 写为待对账的输入错误，不启动执行器', async (realGit, body, error) => {
+  const s = await scenario({ body })
+  try {
+    const remote = realGit ? await localRemote(s.workspace) : undefined
+    if (remote) {
+      const main = await remote.commit('refs/heads/main', 'initial')
+      // 同前缀分支也不能匹配缺失的文档分支。
+      await remote.commit('refs/heads/docs/missing/nested', 'nested design', main)
+    }
+    const issue = await s.issue(42, 'queued')
+    await launchQueued({
+      ...s.options,
+      command: (args, options) =>
+        remote && args[0] === 'git' ? remote.git(args, options) : s.command(args, options),
+      executor: fakeExecutor({
+        async start() {
+          throw new Error('不应拉起')
+        },
+      }),
+    })
+    const run = s.db.select().from(runs).get()!
+    expect(run).toMatchObject({ pid: null, container: null, endedAt: null, error: null })
+    expect(s.db.select().from(issues).get()).toMatchObject({ status: 'running', lastRunId: run.id })
+    expect(await readResult(run.taskDir!)).toEqual({
+      exitCode: null,
+      signal: null,
+      finishedAt: clock.toISOString(),
+      error,
+    })
+    expect(await Bun.file(join(run.taskDir!, 'spec.json')).exists()).toBe(false)
+    expect(s.calls.find(({ args }) => args[2] === 'edit')?.args.at(-1)).toBe('workling:running')
+
+    await reconcile(s.options)
+    expect(s.db.select().from(issues).where(eq(issues.id, issue.id)).get()?.status).toBe('failed')
+    expect(s.db.select().from(runs).get()).toMatchObject({ error, endedAt: clock, exitCode: null })
+    expect(
+      s.calls
+        .filter(({ args }) => args[2] === 'edit')
+        .at(-1)
+        ?.args.at(-1),
+    ).toBe('workling:failed')
+    expect(s.calls.filter(({ args }) => args[2] === 'comment').at(-1)?.options?.input).toContain(
+      error,
+    )
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([
+  ['fetch', undefined],
+  ['默认分支查询', undefined],
+  ['文档分支查询', '分支：docs/design'],
+] as const)('%s命令失败时保留 queued，下轮可重试', async (kind, body) => {
+  const s = await scenario({ body })
+  try {
+    await s.issue(42, 'queued')
+    const failure = `${kind}失败`
+    await launchQueued({
+      ...s.options,
+      command: async (args, options) => {
+        if (
+          (kind === 'fetch' && args.includes('fetch')) ||
+          (kind === '默认分支查询' && args[1] === 'api') ||
+          (kind === '文档分支查询' && args[1] === 'for-each-ref')
+        )
+          throw new Error(failure)
+        return s.command(args, options)
+      },
+      executor: fakeExecutor({
+        async start() {
+          throw new Error('不应拉起')
+        },
+      }),
+    })
+    expect(s.db.select().from(issues).get()).toMatchObject({ status: 'queued', lastRunId: null })
+    const run = s.db.select().from(runs).get()!
+    expect(run).toMatchObject({ error: `拉起失败：${failure}`, endedAt: clock, pid: null })
+    expect(await readResult(run.taskDir!)).toBeUndefined()
+    expect(s.calls.map(({ args }) => args[2])).toEqual(['view'])
   } finally {
     await s.dispose()
   }

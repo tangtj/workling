@@ -175,6 +175,7 @@ export async function serve({
               settings,
               pi,
               executorSettings,
+              signal,
               triggers: retryState.triggers,
             })
         } catch (error) {

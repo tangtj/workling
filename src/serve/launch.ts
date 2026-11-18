@@ -1,20 +1,78 @@
 import { type ExecutorSettings } from '../config/executor.ts'
 import { and, count, eq } from 'drizzle-orm'
 import { join } from 'node:path'
-import { CONTRACT_VERSION, writeSpec } from '../contract/spec.ts'
+import { CONTRACT_VERSION, writeSpec, type Spec } from '../contract/spec.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
+import { docBranch, taskBranch } from '../issue/branch.ts'
 import { readIssue } from '../issue/read.ts'
 import { parseIssueRef } from '../issue/reference.ts'
-import { createTaskDir } from '../task/dir.ts'
+import { createTaskDir, writeResult } from '../task/dir.ts'
 import { type PiSettings } from '../config/pi.ts'
 import type { Command } from '../runtime/types.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
+import { syncMirror } from './mirror.ts'
 type Log = (message: string) => void
+
+async function prepareCheckout({
+  workspace,
+  taskDir,
+  repo,
+  issue,
+  pi,
+  command,
+  signal,
+}: {
+  workspace: string
+  taskDir: string
+  repo: typeof repos.$inferSelect
+  issue: { number: number; title: string; body: string }
+  pi: PiSettings
+  command: Command
+  signal: AbortSignal
+}): Promise<Spec['repo'] | { error: string }> {
+  const mirror = await syncMirror({ workspace, repo, command, signal })
+  const doc = docBranch(issue.body)
+  if (doc && 'error' in doc) return doc
+  const mirrorOptions = { cwd: mirror, signal }
+  const base =
+    doc?.name ??
+    (await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
+      env: ghEnv(repo.token, repo.host),
+      signal,
+    }))
+  const ref = `refs/heads/${base}`
+  if (doc) {
+    // 查询不到引用与 Git 命令失败是两类结果；只在前者报告输入错误。
+    const refs = await command(['git', 'for-each-ref', '--format=%(refname)', ref], mirrorOptions)
+    if (!refs.split('\n').includes(ref)) return { error: `文档分支「${doc.name}」不存在` }
+  } else {
+    await command(['git', 'check-ref-format', ref], mirrorOptions)
+  }
+  const baseRef = await command(
+    ['git', 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`],
+    mirrorOptions,
+  )
+  const branch = taskBranch(issue.number, issue.title)
+  const cwd = join(taskDir, 'repo')
+  await command(['git', 'clone', '--no-hardlinks', '--no-checkout', '--dissociate', mirror, cwd], {
+    signal,
+  })
+  // 克隆保留默认的远端跟踪规则，Pi 推送后 gh pr create 需要 origin/<分支>。
+  const options = { cwd, signal }
+  await command(
+    ['git', 'remote', 'set-url', 'origin', `https://${repo.host}/${repo.path}.git`],
+    options,
+  )
+  await command(['git', 'config', '--local', 'user.name', pi.gitName], options)
+  await command(['git', 'config', '--local', 'user.email', pi.gitEmail], options)
+  await command(['git', 'switch', '-c', branch, baseRef], options)
+  return { baseRef, branch, ...(doc ? { docBranch: doc.name } : {}) }
+}
 
 export async function launchQueued({
   db,
@@ -23,6 +81,7 @@ export async function launchQueued({
   settings,
   pi,
   executorSettings,
+  signal,
   triggers,
   now = () => new Date(),
   executor = createExecutor(executorSettings, command, log),
@@ -33,6 +92,7 @@ export async function launchQueued({
   settings: Settings
   pi: PiSettings
   executorSettings: ExecutorSettings
+  signal: AbortSignal
   triggers?: Map<number, string>
   now?: () => Date
   executor?: Executor
@@ -56,7 +116,7 @@ export async function launchQueued({
   }
   if (slots <= 0) return
   for (const { issue, repo } of rows) {
-    if (slots <= 0) break
+    if (slots <= 0 || signal.aborted) break
     if (repo.host !== 'github.com') {
       log(`${repo.ref} #${issue.number} 跳过：M1 只支持 github.com`)
       continue
@@ -74,58 +134,75 @@ export async function launchQueued({
         .returning()
         .get()
       const inherited = ghEnv(repo.token, repo.host)
-      const { title } = await readIssue({
+      const { title, body } = await readIssue({
         ref,
         dir: join(taskDir, 'input'),
         command,
         env: inherited,
       })
-      await writeSpec(taskDir, {
-        contract: CONTRACT_VERSION,
-        kind: 'implement',
-        issue: { ref: issueRef, title },
-        model: {
-          codex: pi.model,
-          effort: pi.effort,
-          ...(pi.piModel !== null ? { pi: pi.piModel } : {}),
-        },
-        git: { name: pi.gitName, email: pi.gitEmail },
-      })
-      // 模型和提交身份来自契约；LLM 接入只使用当前配置。
-      for (const name of [
-        'WORKLING_MODEL',
-        'WORKLING_EFFORT',
-        'WORKLING_GIT_NAME',
-        'WORKLING_GIT_EMAIL',
-        'WORKLING_PI_MODEL',
-        'WORKLING_LLM_BASE_URL',
-        'WORKLING_LLM_API_KEY',
-        'WORKLING_LLM_API',
-      ])
-        delete inherited[name]
-      const env = {
-        ...inherited,
-        WORKLING_WORKSPACE: settings.workspace,
-        ...(pi.llmBaseUrl !== null
-          ? {
-              WORKLING_LLM_BASE_URL: pi.llmBaseUrl,
-              WORKLING_LLM_API_KEY: pi.llmApiKey!,
-              WORKLING_LLM_API: pi.llmApi,
-            }
-          : {}),
-      }
-      const handle = await executor.start({
-        runId: record.id,
-        ref: issueRef,
+      const checkout = await prepareCheckout({
+        workspace: settings.workspace,
         taskDir,
-        env,
+        repo,
+        issue: { number: issue.number, title, body },
+        pi,
+        command,
+        signal,
       })
+      let handle: Awaited<ReturnType<Executor['start']>> | undefined
+      if ('error' in checkout) {
+        await writeResult(taskDir, {
+          exitCode: null,
+          signal: null,
+          finishedAt: now().toISOString(),
+          error: checkout.error,
+        })
+      } else {
+        await writeSpec(taskDir, {
+          contract: CONTRACT_VERSION,
+          kind: 'implement',
+          issue: { ref: issueRef, title },
+          repo: checkout,
+          model: {
+            codex: pi.model,
+            effort: pi.effort,
+            ...(pi.piModel !== null ? { pi: pi.piModel } : {}),
+          },
+          git: { name: pi.gitName, email: pi.gitEmail },
+        })
+        // 模型和提交身份来自契约；LLM 接入只使用当前配置。
+        for (const name of [
+          'WORKLING_MODEL',
+          'WORKLING_EFFORT',
+          'WORKLING_GIT_NAME',
+          'WORKLING_GIT_EMAIL',
+          'WORKLING_PI_MODEL',
+          'WORKLING_LLM_BASE_URL',
+          'WORKLING_LLM_API_KEY',
+          'WORKLING_LLM_API',
+        ])
+          delete inherited[name]
+        const env = {
+          ...inherited,
+          WORKLING_WORKSPACE: settings.workspace,
+          ...(pi.llmBaseUrl !== null
+            ? {
+                WORKLING_LLM_BASE_URL: pi.llmBaseUrl,
+                WORKLING_LLM_API_KEY: pi.llmApiKey!,
+                WORKLING_LLM_API: pi.llmApi,
+              }
+            : {}),
+        }
+        signal.throwIfAborted()
+        handle = await executor.start({ runId: record.id, ref: issueRef, taskDir, env })
+      }
       const runId = record.id
       db.transaction((tx) => {
-        tx.update(runs)
-          .set({ pid: handle.pid, container: handle.container })
-          .where(eq(runs.id, runId))
-          .run()
+        if (handle)
+          tx.update(runs)
+            .set({ pid: handle.pid, container: handle.container })
+            .where(eq(runs.id, runId))
+            .run()
         tx.update(issueStates)
           .set({ status: 'running', lastRunId: runId, updatedAt: now() })
           .where(eq(issueStates.id, issue.id))

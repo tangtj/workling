@@ -24,8 +24,9 @@ export function fakeExecutor(overrides: Partial<Executor> = {}): Executor {
 }
 
 export const clock = new Date('2026-11-14T10:30:00Z')
+export const baseRef = 'a'.repeat(40)
 
-export async function scenario() {
+export async function scenario({ body = '测试正文' }: { body?: string } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), 'workling-watch-'))
   const { db, close } = await openDatabase(workspace)
   const settings = readSettings({
@@ -49,12 +50,14 @@ export async function scenario() {
     .returning()
     .get()
   const command: Command = async (args, options) => {
+    if (args[0] === 'git') return args[1] === 'rev-parse' ? baseRef : ''
+    if (args[0] === 'gh' && args[1] === 'api' && args[4] === '.default_branch') return 'main'
     calls.push({ args, options })
     if (args[0] === 'gh' && args[1] === 'issue' && args[2] === 'view')
       return JSON.stringify({
         number: Number(args[3]),
         title: '测试 Issue',
-        body: '测试正文',
+        body,
         state: 'OPEN',
         url: `https://github.com/${args[5]}/issues/${args[3]}`,
         createdAt: clock.toISOString(),
@@ -117,6 +120,7 @@ export async function scenario() {
     settings,
     pi: readPiSettings(db),
     executorSettings: parseExecutorSettings({}),
+    signal: new AbortController().signal,
     command,
     log: (line: string) => logs.push(line),
     now: () => clock,
