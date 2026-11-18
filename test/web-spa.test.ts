@@ -9,6 +9,7 @@ import { createApp } from '../src/web/app.ts'
 import { hashToken } from '../src/web/auth.ts'
 import { buildWebBundle, getWebBundle } from '../src/web/bundle.ts'
 import { shellSchema } from '../src/web/shell.ts'
+import { issueListSchema } from '../src/web/issue-list.ts'
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'workling-spa-'))
@@ -125,6 +126,10 @@ test('七个页面片段仅返回原有主体并带标题、高亮、刷新头�
     for (const [index, path] of f.paths.entries()) {
       const response = await f.request(path, true)
       expect(response.status).toBe(200)
+      if (path === '/issues' || path === `/repos/${f.repo.id}`) {
+        expect(await response.text()).toContain('id="root"')
+        continue
+      }
       expect(response.headers.get('X-Workling-Title')).toBe(encodeURIComponent(titles[index]!))
       expect(response.headers.get('X-Workling-Active')).toBe(active[index]!)
       expect(response.headers.get('X-Workling-Refresh')).toBe(index === 0 ? '15' : '')
@@ -155,7 +160,7 @@ test('不存在或非法的详情 ID 在外壳与片段模式都返回 404', asy
         const response = await f.request(path, fragment)
         expect(response.status).toBe(404)
         const body = await response.text()
-        if (fragment) {
+        if (fragment && !path.startsWith('/repos/')) {
           expect(body).toContain('页面不存在')
           expect(body).not.toContain('<html')
         } else expect(body).toContain('id="root"')
@@ -257,6 +262,24 @@ test('带哈希的资源可匿名读取且长期缓存并保留 CSP，未知资�
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(file.body))
     }
     expect((await f.request('/assets/does-not-exist.js', false, false)).status).toBe(404)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('任务列表接口校验数据并隐藏 token，匿名返回 401', async () => {
+  const f = await fixture()
+  try {
+    const response = await f.request('/api/issue-list')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const body: unknown = await response.json()
+    expect(Value.Check(issueListSchema, body)).toBe(true)
+    expect(JSON.stringify(body)).not.toContain('never-return-this-token')
+    if (!Value.Check(issueListSchema, body)) throw new Error('invalid issue list')
+    expect(body.repos[0]?.tokenMask).toBe('****oken')
+    expect(body.issues[0]?.runCount).toBe(1)
+    expect((await f.request('/api/issue-list', false, false)).status).toBe(401)
   } finally {
     await f.cleanup()
   }

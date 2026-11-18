@@ -189,12 +189,6 @@ export function init(root, ctx) {
     .querySelectorAll('[data-close]')
     .forEach((button) => on(button, 'click', () => button.closest('dialog').close()))
   if (location.hash === '#add') root.querySelector('#add-dialog')?.showModal()
-  const issueFilter = root.querySelector('#issue-filter')
-  on(issueFilter, 'submit', (event) => {
-    event.preventDefault()
-    navigate(`/issues?${new URLSearchParams(new FormData(issueFilter))}`)
-  })
-  on(issueFilter?.querySelector('select'), 'change', () => issueFilter.requestSubmit())
   root.querySelectorAll('[data-copy]').forEach((button) =>
     on(button, 'click', async () => {
       await navigator.clipboard.writeText(button.dataset.copy)

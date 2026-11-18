@@ -9,16 +9,15 @@ import { readVersion } from '../../runtime/version.ts'
 import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
 import { OverviewPage } from '../views/overview.tsx'
-import { IssuesPage } from '../views/issues.tsx'
 import { SettingsPage } from '../views/settings.tsx'
 import { ReposPage } from '../views/repos.tsx'
-import { RepoPage } from '../views/repo.tsx'
 import { IssuePage } from '../views/issue.tsx'
 import { RunLogPage } from '../views/run-log.tsx'
 import { LoginPage } from '../views/login.tsx'
 import { NotFoundPage } from '../views/not-found.tsx'
 
-import { pageData } from '../data.ts'
+import { pageData, maskToken } from '../data.ts'
+import { issueListSchema, type IssueListData } from '../issue-list.ts'
 import type { AppDeps } from '../app.ts'
 import { responsePi, repoId, html, headers } from '../response.ts'
 
@@ -82,6 +81,44 @@ export function pagesRoutes(deps: AppDeps): Hono {
     if (!Value.Check(shellSchema, body)) throw new Error('侧栏数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
+  app.get('/api/issue-list', (c) => {
+    const page = data()
+    const body: IssueListData = {
+      now: new Date(page.now).toISOString(),
+      repos: page.repos.map(({ id, ref, platform, host, path, enabled, token }) => ({
+        id,
+        ref,
+        platform,
+        host,
+        path,
+        enabled,
+        tokenMask: maskToken(token),
+      })),
+      issues: page.issues.map(
+        ({ id, repoId, number, title, status, prUrl, prState, updatedAt, runs, lastRun }) => ({
+          id,
+          repoId,
+          number,
+          title,
+          status,
+          prUrl,
+          prState,
+          updatedAt: updatedAt.toISOString(),
+          runCount: runs.length,
+          lastRun: lastRun && {
+            startedAt: lastRun.startedAt.toISOString(),
+            endedAt: lastRun.endedAt?.toISOString() ?? null,
+            exitCode: lastRun.exitCode,
+            error: lastRun.error,
+          },
+        }),
+      ),
+    }
+    if (!Value.Check(issueListSchema, body)) throw new Error('任务列表数据无效')
+    return c.json(body, 200, { 'Cache-Control': 'no-store' })
+  })
+  const shell = async (c: Context, status: 200 | 404) =>
+    c.body(html(Shell(await getWebBundle())), status, { ...headers, Vary: 'X-Workling-Fragment' })
   app.get('/', (c) => {
     const sidebar = data()
     return render(
@@ -96,24 +133,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
       200,
     )
   })
-  app.get('/issues', (c) => {
-    const sidebar = data()
-    return render(
-      c,
-      {
-        title: '任务',
-        active: 'issues',
-        sidebar,
-        children: IssuesPage({
-          data: sidebar,
-          filter: c.req.query('status') ?? 'all',
-          repo: c.req.query('repo') ?? '',
-          q: (c.req.query('q') ?? '').trim(),
-        }),
-      },
-      200,
-    )
-  })
+  app.get('/issues', (c) => shell(c, 200))
   app.get('/login', (c) => c.body(html(LoginPage()), 200, headers))
   app.get('/settings', (c) => {
     const sidebar = data()
@@ -148,21 +168,8 @@ export function pagesRoutes(deps: AppDeps): Hono {
     )
   })
   app.get('/repos/:id', (c) => {
-    const sidebar = data()
     const id = repoId(c.req.param('id'))
-    const found = id !== undefined && sidebar.repos.some((r) => r.id === id)
-    return render(
-      c,
-      {
-        title: found ? '仓库详情' : '页面不存在',
-        active: found ? 'repos' : '',
-        sidebar,
-        children: found
-          ? RepoPage({ data: sidebar, id, filter: c.req.query('status') ?? 'all' })
-          : NotFoundPage(),
-      },
-      found ? 200 : 404,
-    )
+    return shell(c, id !== undefined && data().repos.some((r) => r.id === id) ? 200 : 404)
   })
   app.get('/issues/:id', (c) => {
     const sidebar = data()
