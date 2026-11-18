@@ -7,6 +7,8 @@ import { LegacyPage, NotFound } from './legacy-page.tsx'
 import { fragmentOptions } from './legacy.ts'
 import { issueListOptions } from './issue-list.ts'
 import { IssuesPage } from './pages/issues.tsx'
+import { overviewOptions } from './overview.ts'
+import { OverviewPage } from './pages/overview.tsx'
 import { RepoPage } from './pages/repo.tsx'
 
 const queryClient = new QueryClient()
@@ -14,7 +16,7 @@ const router = createBrowserRouter([
   {
     Component: Layout,
     children: [
-      ...['/', '/issues/:id', '/repos', '/settings', '/runs/:id/log'].map((path) => ({
+      ...['/issues/:id', '/repos', '/settings', '/runs/:id/log'].map((path) => ({
         path,
         Component: LegacyPage,
         async loader({ request }: { request: Request }) {
@@ -40,6 +42,16 @@ const router = createBrowserRouter([
           return null
         },
       })),
+      {
+        path: '/',
+        Component: OverviewPage,
+        async loader() {
+          try {
+            await queryClient.fetchQuery(overviewOptions)
+          } catch {}
+          return null
+        },
+      },
       { path: '*', Component: NotFound },
     ],
   },

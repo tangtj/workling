@@ -10,6 +10,8 @@ import { hashToken } from '../src/web/auth.ts'
 import { buildWebBundle, getWebBundle } from '../src/web/bundle.ts'
 import { shellSchema } from '../src/web/shell.ts'
 import { issueListSchema } from '../src/web/issue-list.ts'
+import { overviewSchema } from '../src/web/overview.ts'
+import { eq } from 'drizzle-orm'
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'workling-spa-'))
@@ -66,6 +68,7 @@ async function fixture() {
   })
   return {
     app,
+    db,
     now,
     repo,
     paths: [
@@ -126,7 +129,7 @@ test('七个页面片段仅返回原有主体并带标题、高亮、刷新头�
     for (const [index, path] of f.paths.entries()) {
       const response = await f.request(path, true)
       expect(response.status).toBe(200)
-      if (path === '/issues' || path === `/repos/${f.repo.id}`) {
+      if (path === '/' || path === '/issues' || path === `/repos/${f.repo.id}`) {
         expect(await response.text()).toContain('id="root"')
         continue
       }
@@ -280,6 +283,50 @@ test('任务列表接口校验数据并隐藏 token，匿名返回 401', async (
     expect(body.repos[0]?.tokenMask).toBe('****oken')
     expect(body.issues[0]?.runCount).toBe(1)
     expect((await f.request('/api/issue-list', false, false)).status).toBe(401)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('概览接口仅包含活动任务、近期运行与最后运行，隐藏凭证并要求登录', async () => {
+  const f = await fixture()
+  try {
+    const old = new Date(f.now.getTime() - 86400001)
+    const recent = new Date(f.now.getTime() - 1000)
+    const insert = (number: number) =>
+      f.db
+        .insert(issues)
+        .values({ repoId: f.repo.id, number, status: 'done', createdAt: old, updatedAt: old })
+        .returning()
+        .get()
+    const excluded = insert(50)
+    const included = insert(51)
+    const addRun = (issueId: number, endedAt: Date) =>
+      f.db
+        .insert(runs)
+        .values({ issueId, worker: 'worker', startedAt: old, endedAt })
+        .returning()
+        .get()
+    addRun(excluded.id, old)
+    const latest = addRun(included.id, old)
+    const within = addRun(included.id, recent)
+    addRun(included.id, old)
+    f.db.update(issues).set({ lastRunId: latest.id }).where(eq(issues.id, included.id)).run()
+    const response = await f.request('/api/overview')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const body: unknown = await response.json()
+    expect(Value.Check(overviewSchema, body)).toBe(true)
+    expect(JSON.stringify(body)).not.toContain('never-return-this-token')
+    if (!Value.Check(overviewSchema, body)) throw new Error('invalid overview')
+    expect(body.issues.map((i) => i.id)).not.toContain(excluded.id)
+    expect(
+      body.issues
+        .find((i) => i.id === included.id)
+        ?.runs.map((r) => r.id)
+        .sort(),
+    ).toEqual([latest.id, within.id].sort())
+    expect(body.issues.find((i) => i.id === included.id)?.runCount).toBe(3)
+    expect((await f.request('/api/overview', false, false)).status).toBe(401)
   } finally {
     await f.cleanup()
   }

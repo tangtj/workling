@@ -1,3 +1,4 @@
+import { runResult } from '../overview-view.ts'
 import type { Issue, Run } from '../data.ts'
 import { githubUrl } from '../data.ts'
 import { formatTime, prLabel } from './format.ts'
@@ -70,8 +71,7 @@ export const PR = ({ url, state }: { url: string | null; state: Issue['prState']
       <PRState state={state} />
     </span>
   )
-export const result = (run: Run): keyof typeof labels =>
-  !run.endedAt ? 'running' : run.exitCode === 0 && !run.error ? 'done' : 'failed'
+export const result = runResult
 export const resultText = (run: Run) => (run.error === '进程中断' ? '中断' : labels[result(run)])
 export const count = (items: Issue[], status: Issue['status']) =>
   items.filter((i) => i.status === status).length
