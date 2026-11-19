@@ -7,6 +7,7 @@ export interface RunOptions {
   input?: string
   signal?: AbortSignal
   inherit?: boolean
+  quietStderr?: boolean
 }
 
 export type Command = (args: string[], options?: RunOptions) => Promise<string>

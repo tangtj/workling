@@ -9,6 +9,7 @@ import { issues, repos, runs } from '../../src/db/schema.ts'
 import type { Command, RunOptions } from '../../src/runtime/types.ts'
 import { readPiSettings } from '../../src/config/pi.ts'
 import { readSettings } from '../../src/config/env.ts'
+import { tip, writeDeliveryFixture } from './delivery.ts'
 export function fakeExecutor(overrides: Partial<Executor> = {}): Executor {
   return {
     async start() {
@@ -50,7 +51,16 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
     .returning()
     .get()
   const command: Command = async (args, options) => {
-    if (args[0] === 'git') return args[1] === 'rev-parse' ? baseRef : ''
+    if (args[0] === 'git') {
+      if (args[1] === 'init' && options?.cwd)
+        await mkdir(join(options.cwd, 'objects/info'), { recursive: true })
+      if (args[1] === 'rev-parse')
+        return args[args.length - 1]!.startsWith('refs/heads/workling/') ? tip : baseRef
+      if (args[1] === 'bundle') return `${tip} refs/heads/workling/42-issue`
+      if (args[1] === 'rev-list') return '1'
+      if (args.includes('ls-remote')) return `${tip}\t${args.at(-1)}`
+      return ''
+    }
     if (args[0] === 'gh' && args[1] === 'api' && args[4] === '.default_branch') return 'main'
     calls.push({ args, options })
     if (args[0] === 'gh' && args[1] === 'issue' && args[2] === 'view')
@@ -65,13 +75,9 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
         labels: [],
         comments: [],
       })
-    return args[1] === 'pr'
-      ? JSON.stringify([
-          { url: 'wrong', headRefName: 'workling/420-task', state: 'OPEN' },
-          { url: 'https://github.com/a/b/pull/1', headRefName: 'workling/42-task', state: 'OPEN' },
-          { url: 'second', headRefName: 'workling/42-other', state: 'OPEN' },
-        ])
-      : ''
+    if (args[1] === 'pr' && args[2] === 'list')
+      return JSON.stringify([{ url: 'https://github.com/a/b/pull/1', state: 'OPEN' }])
+    return ''
   }
   async function issue(
     number = 42,
@@ -91,6 +97,7 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
       container?: string
       taskDir?: string | null
       startedAt?: Date
+      delivery?: boolean
     } = {},
   ) {
     const row = await issue()
@@ -108,11 +115,13 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
         pid: options.pid === undefined ? 123 : options.pid,
         container: options.container,
         error: options.error,
+        ...(options.delivery ? { branch: 'workling/42-issue', baseRef } : {}),
         startedAt: options.startedAt ?? new Date(clock.getTime() - 61_000),
       })
       .returning()
       .get()
     db.update(issues).set({ lastRunId: run.id }).where(eq(issues.id, row.id)).run()
+    if (dir && run.branch) await writeDeliveryFixture(dir, run.branch)
     return { issue: row, run, dir: dir! }
   }
   const options = {

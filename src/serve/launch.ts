@@ -62,10 +62,11 @@ async function prepareCheckout({
   await command(['git', 'clone', '--no-hardlinks', '--no-checkout', '--dissociate', mirror, cwd], {
     signal,
   })
-  // 克隆保留默认的远端跟踪规则，Pi 推送后 gh pr create 需要 origin/<分支>。
   const options = { cwd, signal }
+  // 本机进程仍可写镜像；禁用 push 只防误操作，镜像隔离留给 M4。
+  await command(['git', 'remote', 'set-url', 'origin', mirror], options)
   await command(
-    ['git', 'remote', 'set-url', 'origin', `https://${repo.host}/${repo.path}.git`],
+    ['git', 'config', '--local', 'remote.origin.pushurl', 'no-push://disabled'],
     options,
   )
   await command(['git', 'config', '--local', 'user.name', pi.gitName], options)
@@ -158,6 +159,10 @@ export async function launchQueued({
           error: checkout.error,
         })
       } else {
+        db.update(runs)
+          .set({ branch: checkout.branch, baseRef: checkout.baseRef })
+          .where(eq(runs.id, record.id))
+          .run()
         await writeSpec(taskDir, {
           contract: CONTRACT_VERSION,
           kind: 'implement',

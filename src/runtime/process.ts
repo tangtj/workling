@@ -11,7 +11,11 @@ export const run: Command = (args, options = {}) =>
       cwd: options.cwd,
       env: options.env ?? process.env,
       detached: true,
-      stdio: ['pipe', options.inherit ? 'inherit' : 'pipe', 'inherit'],
+      stdio: [
+        'pipe',
+        options.inherit ? 'inherit' : 'pipe',
+        options.quietStderr ? 'ignore' : 'inherit',
+      ],
     })
     let output = ''
     let force: ReturnType<typeof setTimeout> | undefined

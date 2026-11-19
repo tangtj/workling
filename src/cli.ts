@@ -118,6 +118,7 @@ export async function main(args: string[]): Promise<number> {
           exitCode: status.code,
           signal: status.signal,
           finishedAt: new Date().toISOString(),
+          error: status.error,
         }
         exitCode = signal.aborted ? 1 : (status.code ?? 1)
       } catch (error) {

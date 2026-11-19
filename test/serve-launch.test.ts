@@ -476,7 +476,10 @@ test.each([
           expect(await git(['branch', '--show-current'])).toBe('workling/42-issue')
           expect(await git(['rev-parse', 'HEAD'])).toBe(baseRef)
           expect(await git(['config', '--local', 'remote.origin.url'])).toBe(
-            'https://github.com/a/b.git',
+            join(s.workspace, 'mirrors/github.com/a/b.git'),
+          )
+          expect(await git(['config', '--local', 'remote.origin.pushurl'])).toBe(
+            'no-push://disabled',
           )
           expect(await git(['config', '--local', 'remote.origin.fetch'])).toBe(
             '+refs/heads/*:refs/remotes/origin/*',
@@ -502,7 +505,11 @@ test.each([
     expect(baseRequests).toEqual(
       docBranch ? [] : [['gh', 'api', 'repos/a/b', '--jq', '.default_branch']],
     )
-    expect(s.db.select().from(runs).get()?.pid).toBe(123)
+    expect(s.db.select().from(runs).get()).toMatchObject({
+      pid: 123,
+      branch: 'workling/42-issue',
+      baseRef,
+    })
   } finally {
     await s.dispose()
   }
