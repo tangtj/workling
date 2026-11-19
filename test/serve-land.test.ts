@@ -80,7 +80,7 @@ async function scenario(taskBranch = branch) {
     extraRef,
     prerequisite = base,
   }: {
-    outcome?: 'completed' | 'incomplete'
+    outcome?: 'completed' | 'incomplete' | 'partial'
     extraRef?: string
     prerequisite?: string | null
   } = {}) {
@@ -159,6 +159,31 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
     ['pr', 'Checked by `@reviewer`.'],
     ['issue', `workling：已创建 PR ${prUrl}（1 个提交）`],
   ])
+})
+
+test('部分完成结果会替换关闭关键字并标记 PR 标题', async () => {
+  const s = await scenario()
+  await s.commit()
+  await s.deliver({ outcome: 'partial' })
+  await writeFile(join(s.out, 'pr-body.md'), 'Closes #42 done')
+
+  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  const create = s.calls.find(({ args }) => args[2] === 'create')
+  expect(create?.args[create.args.indexOf('--title') + 1]).toBe('[部分完成] Ship this')
+  expect(create?.options?.input).not.toContain('Closes #42')
+  expect(create?.options?.input).toContain('Refs #42')
+})
+
+test('正文以 Refs 开头时按部分完成处理且不前置 Closes', async () => {
+  const s = await scenario()
+  await s.commit()
+  await s.deliver()
+  await writeFile(join(s.out, 'pr-body.md'), 'Refs #42\n> 部分完成：后续处理')
+
+  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  const create = s.calls.find(({ args }) => args[2] === 'create')
+  expect(create?.args[create.args.indexOf('--title') + 1]).toBe('[部分完成] Ship this')
+  expect(create?.options?.input).toBe('Refs #42\n> 部分完成：后续处理')
 })
 
 test.each([

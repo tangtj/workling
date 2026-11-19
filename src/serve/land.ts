@@ -97,10 +97,12 @@ export async function landRun({
     let bundle: Buffer
     let body: string
     let comment: string | undefined
+    let outcome: string | undefined
     try {
       if (!(await lstat(run.taskDir)).isDirectory() || !(await lstat(out)).isDirectory())
         return failed('任务目录或 out/ 不是普通目录')
       const result = await readOutResult(out)
+      outcome = result.outcome
       if (result.outcome === 'incomplete' || result.commits === 0)
         return failed(`没有可交付的提交（outcome: ${result.outcome}）`)
       bundle = await readOutputFile(out, 'commits.bundle', maxBundleBytes).catch(
@@ -220,7 +222,7 @@ export async function landRun({
 
     const base = await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch'])
     if (!base) throw new Error('无法读取仓库默认分支')
-    const title =
+    let title =
       issue.title ??
       (await gh([
         'issue',
@@ -234,10 +236,22 @@ export async function landRun({
         '.title',
       ]))
     body = neutralizeMentions(redactSecrets(body, secrets))
-    if (
-      !new RegExp(`\\b(?:closes|fixes|resolves)[ \\t]+#${issue.number}(?![\\w/-])`, 'i').test(body)
+    const closing = new RegExp(
+      `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \\t]*:?[ \\t]+#${issue.number}(?![\\w/-])`,
+      'i',
     )
+    const refs = new RegExp(`^\\s*Refs[ \\t]+#${issue.number}(?![\\w/-])`, 'i')
+    const partial = outcome === 'partial' || (!closing.test(body) && refs.test(body))
+    if (partial) {
+      // 合入部分完成的 PR 不能自动关闭 Issue。
+      const closingGlobal = new RegExp(closing.source, 'gi')
+      body = body.replace(closingGlobal, `Refs #${issue.number}`)
+      if (!refs.test(body))
+        body = `Refs #${issue.number}\n> 部分完成：合入本 PR 不会关闭 #${issue.number}，剩余工作见「未完成与存疑」。\n\n${body}`
+      if (!title.startsWith('[部分完成]')) title = `[部分完成] ${title}`
+    } else if (!closing.test(body)) {
       body = `Closes #${issue.number}\n\n${body}`
+    }
     const prUrl = await gh(
       [
         'pr',
