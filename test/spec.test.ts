@@ -8,6 +8,7 @@ const spec: Spec = {
   contract: CONTRACT_VERSION,
   kind: 'implement',
   issue: { ref: 'github:a/b#12', title: '测试 Issue' },
+  repo: { baseRef: 'a'.repeat(40), branch: 'workling/12-issue' },
   model: { codex: 'test-codex', effort: 'high', pi: 'test-pi' },
   git: { name: 'test-bot', email: 'bot@example.com' },
 }
@@ -31,6 +32,7 @@ test.each([
   ['文件缺失', undefined, '缺少 spec.json'],
   ['不是 JSON', '{"contract":', 'spec.json 不是有效的 JSON'],
   ['字段缺失', JSON.stringify({ ...spec, git: undefined }), 'spec.json 的结构无效'],
+  ['工作副本字段缺失', JSON.stringify({ ...spec, repo: undefined }), 'spec.json 的结构无效'],
   ['版本不支持', JSON.stringify({ ...spec, contract: 2 }), 'spec.json 的契约版本不受支持'],
 ] as const)('readSpec 在%s时报告原因', async (_kind, raw, error) => {
   if (raw !== undefined) await writeFile(join(dir, 'spec.json'), raw)

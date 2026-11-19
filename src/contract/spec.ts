@@ -9,6 +9,11 @@ export const specSchema = Type.Object({
   contract: Type.Literal(CONTRACT_VERSION),
   kind: Type.Literal('implement'),
   issue: Type.Object({ ref: Type.String(), title: Type.String() }),
+  repo: Type.Object({
+    baseRef: Type.String(),
+    branch: Type.String(),
+    docBranch: Type.Optional(Type.String()),
+  }),
   model: Type.Object({
     codex: Type.String(),
     effort: Type.Union([
