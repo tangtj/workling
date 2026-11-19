@@ -1,4 +1,6 @@
 import '../assets/style.css'
+import { SettingsPage } from './pages/settings.tsx'
+import { settingsOptions } from './settings.ts'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -18,7 +20,7 @@ const router = createBrowserRouter([
   {
     Component: Layout,
     children: [
-      ...['/issues/:id', '/settings', '/runs/:id/log'].map((path) => ({
+      ...['/issues/:id', '/runs/:id/log'].map((path) => ({
         path,
         Component: LegacyPage,
         async loader({ request }: { request: Request }) {
@@ -44,6 +46,16 @@ const router = createBrowserRouter([
           return null
         },
       })),
+      {
+        path: '/settings',
+        Component: SettingsPage,
+        async loader() {
+          try {
+            await queryClient.fetchQuery(settingsOptions)
+          } catch {}
+          return null
+        },
+      },
       {
         path: '/repos',
         Component: ReposPage,

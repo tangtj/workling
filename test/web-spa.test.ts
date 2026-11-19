@@ -132,6 +132,7 @@ test('七个页面片段仅返回原有主体并带标题、高亮、刷新头�
       if (
         path === '/' ||
         path === '/issues' ||
+        path === '/settings' ||
         path === '/repos' ||
         path === `/repos/${f.repo.id}`
       ) {

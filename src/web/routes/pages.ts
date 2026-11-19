@@ -1,6 +1,4 @@
-import { readExecutorSettings } from '../../config/executor.ts'
 import { Hono } from 'hono'
-import { readPiSettings } from '../../config/pi.ts'
 import type { Context } from 'hono'
 import type { Child } from 'hono/jsx'
 import { Shell } from '../views/shell.tsx'
@@ -9,7 +7,6 @@ import { readVersion } from '../../runtime/version.ts'
 import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
 import { overviewSchema, type OverviewData } from '../overview.ts'
-import { SettingsPage } from '../views/settings.tsx'
 import { IssuePage } from '../views/issue.tsx'
 import { RunLogPage } from '../views/run-log.tsx'
 import { LoginPage } from '../views/login.tsx'
@@ -18,7 +15,7 @@ import { NotFoundPage } from '../views/not-found.tsx'
 import { pageData, maskToken } from '../data.ts'
 import { issueListSchema, type IssueListData } from '../issue-list.ts'
 import type { AppDeps } from '../app.ts'
-import { responsePi, repoId, html, headers } from '../response.ts'
+import { repoId, html, headers } from '../response.ts'
 
 async function render(
   c: Context,
@@ -166,25 +163,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
   app.get('/', (c) => shell(c, 200))
   app.get('/issues', (c) => shell(c, 200))
   app.get('/login', (c) => c.body(html(LoginPage()), 200, headers))
-  app.get('/settings', (c) => {
-    const sidebar = data()
-    return render(
-      c,
-      {
-        title: '设置',
-        active: 'settings',
-        sidebar,
-        children: SettingsPage({
-          data: sidebar,
-          pi: responsePi(readPiSettings(db)),
-          executor: readExecutorSettings(db),
-          notice: c.req.query('notice') ?? '',
-          startup: options.startup,
-        }),
-      },
-      200,
-    )
-  })
+  app.get('/settings', (c) => shell(c, 200))
   app.get('/repos', (c) => shell(c, 200))
   app.get('/repos/:id', (c) => {
     const id = repoId(c.req.param('id'))
