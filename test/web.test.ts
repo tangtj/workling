@@ -1,7 +1,7 @@
 import { readExecutorSettings, updateExecutorSettings } from '../src/config/executor.ts'
 import { eq } from 'drizzle-orm'
 import { createHash } from 'node:crypto'
-import { assetUrl, type AssetName } from '../src/web/assets.ts'
+import { assetUrl } from '../src/web/assets.ts'
 import { themeScript } from '../src/web/views/theme.ts'
 import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -173,14 +173,7 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
     expect(response.headers.get('content-security-policy')).toContain(
       `'sha256-${createHash('sha256').update(themeScript).digest('base64')}'`,
     )
-    for (const name of [
-      'style.css',
-      'app.js',
-      'version.js',
-      'timeline.js',
-      'run-log.js',
-      'login.js',
-    ] as AssetName[]) {
+    for (const name of ['style.css', 'version.js', 'login.js'] as const) {
       const url = assetUrl(name)
       expect(url).toMatch(/\?v=[0-9a-f]{12}$/)
       const asset = await app.request(url, { headers })
@@ -193,13 +186,11 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
       expect(
         (await app.request(`/${name}?v=wrong`, { headers })).headers.get('cache-control'),
       ).toBe('no-cache')
-      if (name === 'run-log.js') expect(body).toContain(`from '${assetUrl('timeline.js')}'`)
     }
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
     for (const [path, type] of [
-      ['/app.js', 'text/javascript; charset=utf-8'],
       ['/version.js', 'text/javascript; charset=utf-8'],
       ['/style.css', 'text/css; charset=utf-8'],
       ['/login.js', 'text/javascript; charset=utf-8'],
@@ -262,7 +253,7 @@ test('登录鉴权、会话过期、限流窗口和退出登录', async () => {
       expect(response.status).toBe(401)
       expect(await response.json()).toEqual({ error: '未登录' })
     }
-    for (const path of ['/', '/repos/1', '/issues/1', '/app.js']) {
+    for (const path of ['/', '/repos/1', '/issues/1', '/version.js']) {
       const redirect = await request(path)
       expect(redirect.status).toBe(302)
       expect(redirect.headers.get('location')).toBe('/login')
@@ -282,7 +273,7 @@ test('登录鉴权、会话过期、限流窗口和退出登录', async () => {
     expect(html).toContain(assetUrl('login.js'))
     expect((await request(assetUrl('style.css'))).status).toBe(200)
     expect((await request(assetUrl('login.js'))).status).toBe(200)
-    expect((await request(assetUrl('app.js'))).status).toBe(302)
+    expect((await request(assetUrl('version.js'))).status).toBe(302)
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
@@ -558,7 +549,7 @@ test.each([false, true])('状态接口在提供 status=%s 时返回当前轮询�
   }
 })
 
-test('服务端页面渲染真实数据并转义外部内容', async () => {
+test('服务端页面沿用 CSP，且不把查询参数渲染至外壳', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-pages-'))
   const { db, close } = await openDatabase(dir)
   const time = new Date(2026, 10, 14, 12)
@@ -589,42 +580,11 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
       })
       .returning()
       .get()
-    const records = (['running', 'queued', 'failed', 'done'] as const).map((status, n) =>
-      db
-        .insert(issues)
-        .values({
-          repoId: repo.id,
-          number: n + 1,
-          title: n === 2 ? '<script>alert(1)</script>' : `标题${n}`,
-          status,
-          prUrl: n === 2 ? 'javascript:alert(1)' : n === 3 ? 'https://github.com/a/b/pull/3' : null,
-          prState: n === 3 ? 'merged' : null,
-          createdAt: time,
-          updatedAt: time,
-        })
-        .returning()
-        .get(),
-    )
-    const gitlab = db
-      .insert(repos)
-      .values({
-        ref: 'gitlab:c/d',
-        platform: 'gitlab',
-        host: 'gitlab.com',
-        path: 'c/d',
-        token: 'secret1234',
-        enabled: true,
-        createdAt: time,
-        updatedAt: time,
-      })
-      .returning()
-      .get()
-    const gitlabIssue = db
+    const issue = db
       .insert(issues)
       .values({
-        repoId: gitlab.id,
+        repoId: repo.id,
         number: 7,
-        title: 'GitLab issue',
         status: 'queued',
         createdAt: time,
         updatedAt: time,
@@ -638,30 +598,10 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
     expect(home.status).toBe(200)
     expect(home.headers.get('content-security-policy')).toContain("style-src 'self'")
     expect(html).toContain('id="root"')
-    for (const path of [
-      '/',
-      '/repos',
-      `/repos/${repo.id}`,
-      `/issues/${records[2]!.id}`,
-      '/login',
-    ]) {
+    for (const path of ['/', '/repos', `/repos/${repo.id}`, `/issues/${issue.id}`, '/login']) {
       const page = await request(path)
       expect(await page.text()).not.toContain(' style="')
     }
-    const gitlabPage = await (await request(`/issues/${gitlabIssue.id}`)).text()
-    expect(gitlabPage).toContain('在 GitLab 打开')
-    expect(gitlabPage).toContain('aria-label="在 GitLab 打开"')
-    expect(gitlabPage).toContain('m23.6004')
-    const donePage = await (await request(`/issues/${records[3]!.id}`)).text()
-    expect(donePage).toContain('已合并')
-    expect(donePage).toContain('查看 PR ↗')
-    expect(donePage).toContain(
-      'href="https://github.com/a/b/pull/3" target="_blank" rel="noopener noreferrer" aria-label="查看 PR"',
-    )
-    const emptyPage = await (await request(`/issues/${records[0]!.id}`)).text()
-    expect(emptyPage).toContain('暂无 PR')
-    const unsafePage = await (await request(`/issues/${records[2]!.id}`)).text()
-    expect(unsafePage).not.toContain('href="javascript:alert(1)"')
     for (const path of [
       '/repos/invalid',
       '/repos/999',
@@ -680,7 +620,7 @@ test('服务端页面渲染真实数据并转义外部内容', async () => {
   }
 })
 
-test('执行日志接口鉴权、路径校验、截断和打码，页面转义摘要', async () => {
+test('执行日志接口鉴权、路径校验、截断和打码，运行历史保留摘要', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-log-api-'))
   const { db, close } = await openDatabase(dir)
   const app = createApp(db, { workspace: dir, secrets: () => ['repo-secret', 'llm-secret'] })
@@ -775,12 +715,6 @@ test('执行日志接口鉴权、路径校验、截断和打码，页面转义�
       reportResult: '完成',
       logTail: '末尾',
     })
-    const html = await (await request(`/issues/${issue.id}`)).text()
-    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
-    expect(html).toContain(`href="/runs/${run.id}/log"`)
-    expect(html).toContain('codex：完成')
-    expect(html).not.toContain('日志末尾')
-    expect(html).toContain('完整时间线')
     db.update(issues)
       .set({ lastRunId: run.id, status: 'running' })
       .where(eq(issues.id, issue.id))
@@ -797,15 +731,13 @@ test('执行日志接口鉴权、路径校验、截断和打码，页面转义�
   }
 })
 
-test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB、脱敏和结束状态，精简时间线资源可用', async () => {
+test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB、脱敏和结束状态', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-events-api-'))
   const { db, close } = await openDatabase(dir)
   const app = createApp(db, { workspace: dir, secrets: () => ['repo-secret', 'llm-secret', ''] })
   const host = { host: 'localhost' }
   try {
     expect((await app.request('/api/runs/1/events', { headers: host })).status).toBe(401)
-    for (const path of ['/timeline.js', '/run-log.js'])
-      expect((await app.request(path, { headers: host })).status).toBe(302)
     db.insert(sessions)
       .values({
         id: hashToken('events-session'),
@@ -924,29 +856,8 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
       offset: Buffer.byteLength(oversized + '\n' + first),
       lines: ['{"text":"中文 ***"}'],
     })
-    for (const asset of ['/timeline.js', '/run-log.js']) {
-      const response = await request(asset)
-      expect(response.status).toBe(200)
-      expect(response.headers.get('content-type')).toBe('text/javascript; charset=utf-8')
-      const source = await response.text()
-      expect(source).not.toContain('innerHTML')
-      if (asset === '/run-log.js') {
-        for (const part of [
-          'timeline-icon',
-          'timeline-body',
-          'timeline-row',
-          'timeline-command',
-          'timeline-status',
-          'timeline-codex-card',
-          'timeline-model',
-          'timeline-latest',
-          '展开 codex 输出',
-        ])
-          expect(source).toContain(part)
-        expect(source).not.toContain('timeline.scrollTop')
-        expect(source).not.toContain('完整命令与输出')
-      }
-    }
+    for (const asset of ['/timeline.js', '/run-log.js', '/app.js'])
+      expect((await request(asset)).status).toBe(404)
     const css = await (await request('/style.css')).text()
     expect(css).toMatch(/\.run-timeline\s*\{\s*padding: 0;\s*\}/)
     expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
@@ -1032,7 +943,8 @@ test('旧日志 fallback 仅在首次且没有结构化事件时返回，扫描�
     await rm(join(taskDir, 'pi-events.jsonl'))
     await Bun.write(join(taskDir, 'workling-events.jsonl'), '')
     expect((await (await request(path)).json()).fallback).toBeNull()
-    db.insert(runs)
+    const old = db
+      .insert(runs)
       .values({
         issueId: issue.id,
         worker: 'old',
@@ -1040,20 +952,16 @@ test('旧日志 fallback 仅在首次且没有结构化事件时返回，扫描�
         endedAt: now,
         logTail: 'old-tail',
       })
-      .run()
-    const html = await (await request(`/issues/${issue.id}`)).text()
-    expect(html).toContain('<details class="run-process" open="">')
-    expect(html).toContain('<details class="run-process"><summary>执行过程</summary>')
-    expect(html.match(/class="run-timeline compact"/g)).toHaveLength(2)
-    expect(html).toContain('data-limit="8"')
-    expect(html).toContain('data-ended="true" data-status="failed"')
-    expect(html).toContain('data-log-tail="&lt;script&gt;tail&lt;/script&gt;"')
-    expect(html).not.toContain('<pre>&lt;script&gt;tail')
-    expect(html).not.toContain('日志末尾')
-    expect(html).toContain(`href="/runs/${run.id}/log">完整时间线`)
-    expect(html).toContain(`href="/runs/${run.id}/log">查看完整时间线`)
-    expect(html).not.toContain('<script')
-    expect(html).not.toContain('data-autorefresh="15"')
+      .returning()
+      .get()
+    const detail = await (await request(`/api/issues/${issue.id}/detail`)).json()
+    expect(detail.runs).toMatchObject([
+      { id: run.id, logTail: '<script>tail</script>' },
+      { id: old.id, logTail: 'old-tail' },
+    ])
+    const cleared = await request(`/api/runs/${old.id}/events`)
+    expect(cleared.status).toBe(404)
+    expect(await cleared.json()).toEqual({ error: '日志已清理' })
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })

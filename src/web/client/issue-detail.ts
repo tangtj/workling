@@ -2,18 +2,26 @@ import * as Value from 'typebox/value'
 import { issueDetailSchema } from '../issue-detail.ts'
 import { readResponse } from './legacy.ts'
 
-export function parseRunId(value: string | undefined) {
+export function parseDetailId(value: string | undefined) {
   if (!value || !/^[1-9]\d*$/.test(value)) return undefined
   const id = Number(value)
   return Number.isSafeInteger(id) ? id : undefined
 }
 
 export function runDetailOptions(runId: number | undefined) {
+  return detailOptions('run-detail', 'runs', runId)
+}
+
+export function issueDetailOptions(issueId: number | undefined) {
+  return detailOptions('issue-detail', 'issues', issueId)
+}
+
+function detailOptions(key: string, resource: 'issues' | 'runs', id: number | undefined) {
   return {
-    queryKey: ['run-detail', runId],
+    queryKey: [key, id],
     queryFn: async ({ signal }: { signal: AbortSignal }) => {
-      if (runId === undefined) return null
-      const response = await readResponse(`/api/runs/${runId}/detail`, { signal })
+      if (id === undefined) return null
+      const response = await readResponse(`/api/${resource}/${id}/detail`, { signal })
       if (response.status === 404) return null
       if (!response.ok) throw new Error('加载页面失败')
       const body: unknown = await response.json()

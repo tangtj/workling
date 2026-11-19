@@ -1,4 +1,3 @@
-// 6a：React 日志页使用本文件；旧 Issue 详情仍用 timeline.js，待 6b 移除。
 // Pi 工具事件没有时间戳；使用最近的 workling/session/message 时间作为可用基准。
 type ToolFields = { status: 'running' | 'ok' | 'error'; durationMs: number }
 type ItemFields = {

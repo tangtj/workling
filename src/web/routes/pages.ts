@@ -1,15 +1,12 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import type { Child } from 'hono/jsx'
 import { Shell } from '../views/shell.tsx'
 import { getWebBundle } from '../bundle.ts'
 import { readVersion } from '../../runtime/version.ts'
 import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
 import { overviewSchema, type OverviewData } from '../overview.ts'
-import { IssuePage } from '../views/issue.tsx'
 import { LoginPage } from '../views/login.tsx'
-import { NotFoundPage } from '../views/not-found.tsx'
 
 import { pageData, maskToken } from '../data.ts'
 import { issueListSchema, type IssueListData } from '../issue-list.ts'
@@ -17,32 +14,6 @@ import { issueDetailSchema, type IssueDetailData } from '../issue-detail.ts'
 import type { Issue } from '../data.ts'
 import type { AppDeps } from '../app.ts'
 import { repoId, html, headers } from '../response.ts'
-
-async function render(
-  c: Context,
-  page: {
-    title: string
-    active: string
-    sidebar: unknown
-    children: Child
-    refresh?: boolean
-  },
-  status: 200 | 404,
-) {
-  if (c.req.header('X-Workling-Fragment') === '1') {
-    return c.body(String(page.children), status, {
-      ...headers,
-      Vary: 'X-Workling-Fragment',
-      'X-Workling-Title': encodeURIComponent(page.title),
-      'X-Workling-Active': page.active,
-      'X-Workling-Refresh': page.refresh ? '15' : '',
-    })
-  }
-  return c.body(html(Shell(await getWebBundle())), status, {
-    ...headers,
-    Vary: 'X-Workling-Fragment',
-  })
-}
 
 export function pagesRoutes(deps: AppDeps): Hono {
   const { db, options } = deps
@@ -223,19 +194,8 @@ export function pagesRoutes(deps: AppDeps): Hono {
     return shell(c, id !== undefined && data().repos.some((r) => r.id === id) ? 200 : 404)
   })
   app.get('/issues/:id', (c) => {
-    const sidebar = data()
     const id = repoId(c.req.param('id'))
-    const issue = sidebar.issues.find((i) => i.id === id)
-    return render(
-      c,
-      {
-        title: issue ? 'Issue 详情' : '页面不存在',
-        active: issue ? 'issues' : '',
-        sidebar,
-        children: issue ? IssuePage({ data: sidebar, issue }) : NotFoundPage(),
-      },
-      issue ? 200 : 404,
-    )
+    return shell(c, id !== undefined && data().issues.some((i) => i.id === id) ? 200 : 404)
   })
   app.get('/runs/:id/log', (c) => {
     const id = repoId(c.req.param('id'))

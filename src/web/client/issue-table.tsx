@@ -29,14 +29,27 @@ export function Badge({ status, text }: { status: IssueRow['status']; text?: str
     </span>
   )
 }
-export function PR({ url, state }: { url: Issue['prUrl']; state: Issue['prState'] }) {
-  return !url ? (
-    <span>—</span>
-  ) : (
-    <span>
+export function PR({
+  url,
+  state,
+  variant = 'table',
+}: {
+  url: Issue['prUrl']
+  state: Issue['prState']
+  variant?: 'table' | 'detail'
+}) {
+  if (!url) return variant === 'detail' ? <span className="muted">暂无 PR</span> : <span>—</span>
+  const link = (
+    <>
       {url.startsWith('https://') ? (
-        <a href={url} target="_blank" rel="noopener noreferrer" aria-label="查看 PR">
-          {prLabel(url)}
+        <a
+          className={variant === 'detail' ? 'button' : undefined}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="查看 PR"
+        >
+          {variant === 'detail' ? '查看 PR ↗' : prLabel(url)}
         </a>
       ) : (
         <span>{url}</span>
@@ -46,8 +59,9 @@ export function PR({ url, state }: { url: Issue['prUrl']; state: Issue['prState'
           {{ open: '打开中', merged: '已合并', closed: '已关闭' }[state]}
         </span>
       )}
-    </span>
+    </>
   )
+  return variant === 'detail' ? link : <span>{link}</span>
 }
 export function StatusChips({
   selected,
