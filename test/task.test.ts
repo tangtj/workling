@@ -402,6 +402,15 @@ test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
     expect(prompt).not.toContain(removed)
 })
 
+test('Pi 工作约定对部分完成的 PR 使用 Refs，不写关闭关键字', async () => {
+  const prompt = await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')
+  expect(prompt).toContain('正文第一行为 `Closes #<号>`')
+  expect(prompt).toContain('标题为 `[部分完成] <Issue 标题>`')
+  expect(prompt).toContain('正文第一行为 `Refs #<号>`')
+  expect(prompt).toContain('合入本 PR 不会关闭 #<号>')
+  expect(prompt).not.toContain('正文包含：`Closes #<号>`')
+})
+
 test('runTask 保存原始事件并输出脱敏的步骤与 Pi 进度', async () => {
   const options = await setupTask()
   const raw = `${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'private-token' }] } })}\n`
