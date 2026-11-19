@@ -1,3 +1,4 @@
+// 6a：旧 Issue 详情仍使用本文件；React 日志页已切到 timeline.ts，待 6b 删除本文件。
 // Pi 工具事件没有时间戳；使用最近的 workling/session/message 时间作为可用基准。
 export function createTimeline() {
   return { items: [], calls: new Map(), phase: 0, ts: null }

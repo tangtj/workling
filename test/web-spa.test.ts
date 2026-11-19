@@ -121,27 +121,22 @@ test('七个页面普通请求返回同一外壳，引用带哈希的 JS 与 CSS
   }
 })
 
-test('七个页面片段仅返回原有主体并带标题、高亮、刷新头，片段不含脚本', async () => {
+test('只有 Issue 详情返回带标题与高亮的旧片段，其他页面返回与普通请求一致的外壳', async () => {
   const f = await fixture()
   try {
-    const titles = ['概览', '任务', 'Issue 详情', '仓库', '仓库详情', '设置', '执行日志']
-    const active = ['overview', 'issues', 'issues', 'repos', 'repos', 'settings', 'issues']
-    for (const [index, path] of f.paths.entries()) {
+    for (const path of f.paths) {
       const response = await f.request(path, true)
       expect(response.status).toBe(200)
-      if (
-        path === '/' ||
-        path === '/issues' ||
-        path === '/settings' ||
-        path === '/repos' ||
-        path === `/repos/${f.repo.id}`
-      ) {
-        expect(await response.text()).toContain('id="root"')
+      if (!path.startsWith('/issues/')) {
+        expect(response.headers.has('X-Workling-Title')).toBe(false)
+        const shell = await response.text()
+        expect(shell).toContain('id="root"')
+        expect(shell).toBe(await (await f.request(path)).text())
         continue
       }
-      expect(response.headers.get('X-Workling-Title')).toBe(encodeURIComponent(titles[index]!))
-      expect(response.headers.get('X-Workling-Active')).toBe(active[index]!)
-      expect(response.headers.get('X-Workling-Refresh')).toBe(index === 0 ? '15' : '')
+      expect(response.headers.get('X-Workling-Title')).toBe(encodeURIComponent('Issue 详情'))
+      expect(response.headers.get('X-Workling-Active')).toBe('issues')
+      expect(response.headers.get('X-Workling-Refresh')).toBe('')
       expect(response.headers.get('vary')).toContain('X-Workling-Fragment')
       const body = await response.text()
       expect(body).not.toMatch(/<html|<!doctype|<script/i)
@@ -169,7 +164,7 @@ test('不存在或非法的详情 ID 在外壳与片段模式都返回 404', asy
         const response = await f.request(path, fragment)
         expect(response.status).toBe(404)
         const body = await response.text()
-        if (fragment && !path.startsWith('/repos/')) {
+        if (fragment && path.startsWith('/issues/')) {
           expect(body).toContain('页面不存在')
           expect(body).not.toContain('<html')
         } else expect(body).toContain('id="root"')

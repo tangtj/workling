@@ -8,7 +8,6 @@ import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
 import { overviewSchema, type OverviewData } from '../overview.ts'
 import { IssuePage } from '../views/issue.tsx'
-import { RunLogPage } from '../views/run-log.tsx'
 import { LoginPage } from '../views/login.tsx'
 import { NotFoundPage } from '../views/not-found.tsx'
 
@@ -239,20 +238,10 @@ export function pagesRoutes(deps: AppDeps): Hono {
     )
   })
   app.get('/runs/:id/log', (c) => {
-    const sidebar = data()
     const id = repoId(c.req.param('id'))
-    const issue = sidebar.issues.find((item) => item.runs.some((run) => run.id === id))
-    const run = issue?.runs.find((item) => item.id === id)
-    return render(
-      c,
-      {
-        title: run ? '执行日志' : '页面不存在',
-        active: run ? 'issues' : '',
-        sidebar,
-        children: issue && run ? RunLogPage({ data: sidebar, issue, run }) : NotFoundPage(),
-      },
-      run ? 200 : 404,
-    )
+    const exists =
+      id !== undefined && data().issues.some((issue) => issue.runs.some((run) => run.id === id))
+    return shell(c, exists ? 200 : 404)
   })
   return app
 }

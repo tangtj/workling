@@ -781,12 +781,6 @@ test('执行日志接口鉴权、路径校验、截断和打码，页面转义�
     expect(html).toContain('codex：完成')
     expect(html).not.toContain('日志末尾')
     expect(html).toContain('完整时间线')
-    const logPage = await (await request(`/runs/${run.id}/log`)).text()
-    expect(logPage).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
-    expect(logPage).toContain('Pi 结论')
-    expect(logPage).toContain('codex：完成')
-    expect(logPage).toContain('跟随最新')
-    expect(logPage).toContain('download')
     db.update(issues)
       .set({ lastRunId: run.id, status: 'running' })
       .where(eq(issues.id, issue.id))
@@ -803,7 +797,7 @@ test('执行日志接口鉴权、路径校验、截断和打码，页面转义�
   }
 })
 
-test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB、脱敏和结束状态，页面与时间线图标、单行展开和卡片结构可用', async () => {
+test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB、脱敏和结束状态，精简时间线资源可用', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-events-api-'))
   const { db, close } = await openDatabase(dir)
   const app = createApp(db, { workspace: dir, secrets: () => ['repo-secret', 'llm-secret', ''] })
@@ -947,7 +941,6 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
           'timeline-model',
           'timeline-latest',
           '展开 codex 输出',
-          'scrollIntoView',
         ])
           expect(source).toContain(part)
         expect(source).not.toContain('timeline.scrollTop')
@@ -959,28 +952,6 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
     expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
     expect(css).toContain('border-bottom: 0.5px solid')
     expect(css).toContain('--pro-bg:')
-    const html = await (await request(`/runs/${run.id}/log`)).text()
-    expect(html.match(/<li data-phase="[0-4]"/g)).toHaveLength(5)
-    expect(html).toContain('<ol class="run-phases" aria-label="执行阶段">')
-    expect(html).toContain('class="row log-toolbar"')
-    for (const text of [
-      '执行阶段',
-      '准备',
-      '读取 Issue',
-      'codex 实现',
-      '核对',
-      '交付 PR',
-      '全部',
-      '命令',
-      '文件',
-      '说明',
-      '错误',
-      '原始日志',
-      'id="run-timeline"',
-      'data-status=',
-      '<pre id="run-log" hidden',
-    ])
-      expect(html).toContain(text)
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })

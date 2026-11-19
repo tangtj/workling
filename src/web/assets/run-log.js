@@ -1,51 +1,26 @@
-import {
-  createTimeline,
-  applyWorklingLine,
-  applyPiLine,
-  applyLogLine,
-  phaseOf,
-  counts,
-  shouldReload,
-} from '/timeline.js'
+import { createTimeline, applyWorklingLine, applyPiLine, applyLogLine, phaseOf } from '/timeline.js'
 
-function initTimeline(timeline, root, ctx, lifetime) {
-  const compact = timeline.classList.contains('compact')
-  const scope = compact ? timeline : root
-  if (compact) {
-    const phases = document.createElement('ol')
-    phases.className = 'run-phases'
-    phases.setAttribute('aria-label', '执行阶段')
-    for (const [index, label] of [
-      '准备',
-      '读取 Issue',
-      'codex 实现',
-      '核对',
-      '交付 PR',
-    ].entries()) {
-      const phase = document.createElement('li')
-      phase.dataset.phase = index
-      phase.textContent = label
-      phases.append(phase)
-    }
-    timeline.append(phases)
-    lifetime.cleanup.push(() => phases.remove())
-  }
+function initTimeline(timeline, lifetime) {
+  const phases = element('ol', 'run-phases')
+  phases.setAttribute('aria-label', '执行阶段')
+  const labels = ['准备', '读取 Issue', 'codex 实现', '核对', '交付 PR']
+  const phaseNodes = labels.map((label, index) => {
+    const phase = element('li', '', label)
+    phase.dataset.phase = index
+    phases.append(phase)
+    return phase
+  })
+  timeline.append(phases)
+  lifetime.cleanup.push(() => phases.remove())
   const state = createTimeline()
   const nodes = new Map()
-  const raw = root.querySelector('#run-log')
-  const follow = root.querySelector('#log-follow')
-  const live = root.querySelector('#log-live')
-  const errorBox = compact ? element('p', 'error-box') : root.querySelector('#log-error')
-  if (compact) {
-    errorBox.hidden = true
-    timeline.append(errorBox)
-    lifetime.cleanup.push(() => errorBox.remove())
-  }
-  let filter = 'all'
+  const errorBox = element('p', 'error-box')
+  errorBox.hidden = true
+  timeline.append(errorBox)
+  lifetime.cleanup.push(() => errorBox.remove())
   let workling = 0
   let pi = 0
   let ended = false
-  const initiallyEnded = timeline.dataset.ended === 'true'
   let exitSeen = false
   const finalWorkling = []
   const url = `/api/runs/${timeline.dataset.runId}`
@@ -73,14 +48,6 @@ function initTimeline(timeline, root, ctx, lifetime) {
   function duration(ms) {
     const seconds = Math.floor(Math.max(0, ms) / 1000)
     return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
-  }
-  function visible(item) {
-    return (
-      filter === 'all' ||
-      (filter === 'command' && ['command', 'codex'].includes(item.kind)) ||
-      item.kind === filter ||
-      (filter === 'error' && (item.status === 'error' || item.kind === 'warning'))
-    )
   }
   function elapsed(item) {
     return duration(
@@ -176,17 +143,14 @@ function initTimeline(timeline, root, ctx, lifetime) {
     return { root, icon, heading, metaTime, status, model, output, latest }
   }
   function render() {
-    let added = false
     for (const [index, item] of state.items.entries()) {
       let view = nodes.get(item.id)
       if (!view) {
         view = createEntry(item)
         nodes.set(item.id, view)
-        added = true
       }
       timeline.append(view.root)
-      view.root.hidden =
-        !visible(item) || (compact && index < state.items.length - Number(timeline.dataset.limit))
+      view.root.hidden = index < state.items.length - Number(timeline.dataset.limit)
       if (item.kind === 'output') {
         view.output.textContent = item.lines.slice(0, 6).join('\n')
         view.rest.textContent = item.lines.slice(6).join('\n')
@@ -222,10 +186,6 @@ function initTimeline(timeline, root, ctx, lifetime) {
         view.output.textContent = item.output
       if (view.latest) view.latest.textContent = `最新：${item.latest || '等待输出'}`
     }
-    const totals = counts(state)
-    scope.querySelectorAll('[data-count]').forEach((node) => {
-      node.textContent = totals[node.dataset.count]
-    })
     const phase = phaseOf(state)
     const failed =
       ended &&
@@ -233,29 +193,17 @@ function initTimeline(timeline, root, ctx, lifetime) {
         state.items.some(
           (i) => i.kind === 'exit' && (i.signal || (i.code !== undefined && i.code !== 0)),
         ))
-    scope.querySelectorAll('[data-phase]').forEach((node) => {
-      const index = Number(node.dataset.phase)
+    phaseNodes.forEach((node, index) => {
       const complete = index < phase || (index === phase && ended && !failed)
       const current = index === phase
       const badge = complete ? 'done' : current ? (failed ? 'failed' : 'running') : ''
       node.className = `badge${badge ? ` badge--${badge}` : ''}`
-      const label = ['准备', '读取 Issue', 'codex 实现', '核对', '交付 PR'][index]
+      const label = labels[index]
       node.textContent = `${complete ? '✓ ' : current ? (failed ? '✗ ' : '● ') : ''}${label}`
       if (current) node.setAttribute('aria-current', 'step')
       else node.removeAttribute('aria-current')
     })
-    if (added && !compact && follow.checked && !timeline.hidden)
-      timeline.scrollIntoView({ block: 'end' })
   }
-  scope.querySelectorAll('[data-filter]').forEach((button) => {
-    lifetime.on(button, 'click', () => {
-      filter = button.dataset.filter
-      root
-        .querySelectorAll('[data-filter]')
-        .forEach((b) => b.setAttribute('aria-pressed', String(b === button)))
-      for (const item of state.items) nodes.get(item.id).root.hidden = !visible(item)
-    })
-  })
   const timer = setInterval(() => {
     for (const item of state.items) {
       if (item.kind === 'codex' && item.status === 'running') {
@@ -322,20 +270,17 @@ function initTimeline(timeline, root, ctx, lifetime) {
       const finished = response.ended
       if (!progressed) finalWorkling.splice(0).forEach((line) => applyWorklingLine(state, line))
       const stop = finished && ended && !progressed
-      const reload = shouldReload(initiallyEnded, finished, ended, progressed)
       ended = finished
       render()
       if (stop) {
         clearInterval(timer)
-        if (live) live.hidden = true
-        if (!compact && reload) ctx.refresh()
         return
       }
       lifetime.later(loadEvents, finished ? 0 : 3000)
     } catch (error) {
       if (lifetime.disposed) return
       clearInterval(timer)
-      if (compact && error.message === '日志已清理' && timeline.dataset.logTail) {
+      if (error.message === '日志已清理' && timeline.dataset.logTail) {
         Object.assign(state, createTimeline())
         for (const view of nodes.values()) view.root.remove()
         nodes.clear()
@@ -346,47 +291,6 @@ function initTimeline(timeline, root, ctx, lifetime) {
       } else showError(error)
     }
   }
-  let rawStarted = false
-  let rawOffset = 0
-  let rawEnded = false
-  let rawHasContent = false
-  const decoder = new TextDecoder()
-  async function loadRaw() {
-    try {
-      const response = await request(`${url}/log?offset=${rawOffset}`)
-      const content = decoder.decode(await response.arrayBuffer(), { stream: true })
-      if (lifetime.disposed) return
-      if (content) {
-        if (!rawHasContent) raw.textContent = ''
-        rawHasContent = true
-        raw.append(document.createTextNode(content))
-      } else if (!rawHasContent) raw.textContent = '暂无原始日志'
-      const next = Number(response.headers.get('X-Log-Offset'))
-      const progressed = next !== rawOffset
-      rawOffset = next
-      if (follow.checked) raw.scrollTop = raw.scrollHeight
-      const finished = response.headers.get('X-Run-Ended') === 'true'
-      if (finished && rawEnded && !progressed) {
-        raw.append(document.createTextNode(decoder.decode()))
-        return
-      }
-      rawEnded = finished
-      lifetime.later(loadRaw, progressed || finished ? 0 : 3000)
-    } catch (error) {
-      if (lifetime.disposed) return
-      raw.textContent = error.message
-    }
-  }
-  if (!compact)
-    lifetime.on(root.querySelector('#log-raw-toggle'), 'click', (event) => {
-      raw.hidden = !raw.hidden
-      timeline.hidden = !raw.hidden
-      event.currentTarget.setAttribute('aria-pressed', String(!raw.hidden))
-      if (!rawStarted) {
-        rawStarted = true
-        loadRaw()
-      }
-    })
   lifetime.cleanup.push(() => {
     for (const view of nodes.values()) view.root.remove()
     fallbackNotice?.remove()
@@ -394,7 +298,7 @@ function initTimeline(timeline, root, ctx, lifetime) {
   loadEvents()
 }
 
-export function init(root, ctx = { refresh() {} }) {
+export function init(root) {
   const lifetime = {
     controller: new AbortController(),
     disposed: false,
@@ -415,12 +319,12 @@ export function init(root, ctx = { refresh() {} }) {
   }
   for (const timeline of root.querySelectorAll('.run-timeline')) {
     const details = timeline.closest('.run-process')
-    if (!details || details.open) initTimeline(timeline, root, ctx, lifetime)
+    if (!details || details.open) initTimeline(timeline, lifetime)
     else {
       const load = () => {
         if (!details.open) return
         details.removeEventListener('toggle', load)
-        initTimeline(timeline, root, ctx, lifetime)
+        initTimeline(timeline, lifetime)
       }
       lifetime.on(details, 'toggle', load)
     }
