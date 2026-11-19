@@ -7,7 +7,7 @@ import {
   phaseOf,
   counts,
   shouldReload,
-} from '../src/web/assets/timeline.js'
+} from '../src/web/timeline.ts'
 
 const ts = '2026-11-14T00:00:00.000Z'
 const workling = (s: ReturnType<typeof createTimeline>, e: object) =>
@@ -237,7 +237,7 @@ test('Issue #3 真实日志得到三个步骤、两个输出块及失败结束�
     expect.stringContaining('配置 git'),
     expect.stringContaining('拉起 Pi'),
   ])
-  const texts = s.items.flatMap((i) => (i.text === undefined ? [] : [i.text]))
+  const texts = s.items.flatMap((i) => ('text' in i && i.text !== undefined ? [i.text] : []))
   expect(new Set(texts).size).toBe(texts.length)
   const outputs = s.items.filter((i) => ['output'].includes(i.kind))
   expect(outputs).toHaveLength(2)

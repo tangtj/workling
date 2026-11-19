@@ -14,16 +14,18 @@ import { OverviewPage } from './pages/overview.tsx'
 import { reposOptions } from './repos.ts'
 import { ReposPage } from './pages/repos.tsx'
 import { RepoPage } from './pages/repo.tsx'
+import { parseRunId, runDetailOptions } from './issue-detail.ts'
+import { RunLogPage } from './pages/run-log.tsx'
 
 const queryClient = new QueryClient()
 const router = createBrowserRouter([
   {
     Component: Layout,
     children: [
-      ...['/issues/:id', '/runs/:id/log'].map((path) => ({
-        path,
+      {
+        path: '/issues/:id',
         Component: LegacyPage,
-        async loader({ request }: { request: Request }) {
+        async loader({ request }) {
           const url = new URL(request.url)
           // Finish loading before React Router restores scroll positions against the new content.
           try {
@@ -33,7 +35,19 @@ const router = createBrowserRouter([
           }
           return null
         },
-      })),
+      },
+      {
+        path: '/runs/:id/log',
+        Component: RunLogPage,
+        async loader({ params }) {
+          try {
+            await queryClient.fetchQuery(runDetailOptions(parseRunId(params.id)))
+          } catch {
+            /* RunLogPage renders the retry action. */
+          }
+          return null
+        },
+      },
       ...[
         { path: '/issues', Component: IssuesPage },
         { path: '/repos/:id', Component: RepoPage },
