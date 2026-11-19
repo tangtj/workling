@@ -133,9 +133,9 @@ type Spec = {
 | `result.json`      | 必有：`contract: 1`、`outcome: 'completed' \| 'partial' \| 'incomplete'`、`branch: string`、`head: string \| null`（与 `baseRef` 相同时为 `null`）、`commits: number`（`baseRef..head` 的提交数） |
 | `commits.bundle`   | 相对 `baseRef` 的新提交（`git bundle`）；`commits > 0` 时产出                                                                                                                                     |
 | `pr-body.md`       | 有提交时由 Pi 写入的 PR 正文（`implement`）                                                                                                                                                       |
-| `issue-comment.md` | Issue 回复                                                                                                                                                                                        |
+| `issue-comment.md` | 可选：Issue 结果说明（改动、检查结果，或没有提交的原因）；超过 60000 字符时截断                                                                                                                   |
 | `pr-comment.md`    | 可选：PR 下的核对结论                                                                                                                                                                             |
-| `checklist.json`   | 待办项的勾选变更：`[{ line, checked, evidence }]`                                                                                                                                                 |
+| `checklist.json`   | 可选：`[{ line, checked, evidence }]`，`line` 是 Issue 正文中的原文行（不含换行，最多 500 字符），`checked` 为目标布尔状态，`evidence` 最多 1000 字符；最多 50 项                                 |
 | `replies.json`     | 对反馈的逐条回复：`[{ feedbackId, body }]`（`rework`）                                                                                                                                            |
 | `review.json`      | review 意见：总体意见 + 行内意见（`review`）                                                                                                                                                      |
 
@@ -183,7 +183,8 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 - **改动范围**：bundle 里只要有提交改到 `.github/workflows/`，默认拒绝（可以按仓库放开），防止借 CI 拿到仓库 Secrets。
 - **大小与内容**：限制 bundle 和各个文本文件的大小；推送前扫描已知密钥，命中就拒绝。
 - **文本**：PR 正文和评论由主体发出，去掉其中的 `@` 提及，避免被注入后去打扰别人。
-- **待办勾选**：主体按 `checklist.json` 执行现在 Pi 做的那套流程（先评论，再按原文行替换），原文行对不上的跳过。
+- **Issue 回复**：落地成功时，主体把 PR 链接、提交数和 `issue-comment.md` 合并成一条 Issue 评论；落地或运行失败时，把 Pi 的说明附在失败评论末尾。
+- **待办勾选**：只在落地成功后处理 `checklist.json`。主体先评论说明计划与依据，再重读最新正文，只更新仍能唯一匹配原文的待办标记。评论失败时不编辑正文。Issue 评论和勾选失败只记日志，不改变终态。
 - 任何一项校验失败，整次运行判为失败并评论说明原因，不做部分落地。
 
 ### 6.3 反馈返工

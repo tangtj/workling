@@ -13,7 +13,7 @@ import { extractSummary } from '../task/summary.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
-import { landRun } from './land.ts'
+import { landRun, neutralizeMentions, publishIssueResult, readRunIssueComment } from './land.ts'
 import { mirrorPath } from './mirror.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
@@ -84,6 +84,12 @@ export async function reconcile({
       let exitCode: number | null = null
       let prUrl: string | undefined
       let prState: typeof issue.prState | undefined
+      let delivery:
+        | {
+            taskDir: string
+            landed: Extract<Awaited<ReturnType<typeof landRun>>, { status: 'done' }>
+          }
+        | undefined
       if (!run?.taskDir) error = '缺少任务目录'
       else {
         const result = await readResult(run.taskDir)
@@ -99,18 +105,21 @@ export async function reconcile({
             if (!run.branch) error = '缺少分支记录'
             else {
               // 落地遇到暂时错误时保留 running，下轮重试。
+              const taskDir = assertTaskDir(settings.workspace, run.taskDir)
               const landed = await landRun({
                 workspace: settings.workspace,
                 repo,
                 issue,
-                run: { ...run, taskDir: assertTaskDir(settings.workspace, run.taskDir) },
+                run: { ...run, taskDir },
                 mirror: mirrorPath(settings.workspace, repo),
                 command,
                 log,
                 llmApiKey: pi.llmApiKey,
               })
-              if (landed.status === 'done') ({ status, prUrl, prState } = landed)
-              else error = landed.error
+              if (landed.status === 'done') {
+                ;({ status, prUrl, prState } = landed)
+                delivery = { taskDir, landed }
+              } else error = landed.error
             }
           } else {
             error =
@@ -170,14 +179,25 @@ export async function reconcile({
           '--add-label',
           status === 'done' ? 'workling:done' : 'workling:failed',
         ])
-        if (status !== 'done') {
+        if (delivery) {
+          await publishIssueResult({
+            ...delivery,
+            repo,
+            issue,
+            command,
+            llmApiKey: pi.llmApiKey,
+            log,
+          })
+        } else if (status !== 'done') {
           let report = ''
+          let explanation = ''
+          const secrets = [repo.token, pi.llmApiKey ?? '']
           if (run?.taskDir) {
+            const warn = (step: string) => log(`${repo.ref} #${issue.number} ${step}失败`)
             try {
-              report = redactSecrets(await readFile(join(run.taskDir, 'report.md'), 'utf8'), [
-                repo.token,
-                pi.llmApiKey ?? '',
-              ])
+              const taskDir = assertTaskDir(settings.workspace, run.taskDir)
+              explanation = await readRunIssueComment(taskDir, warn)
+              report = redactSecrets(await readFile(join(taskDir, 'report.md'), 'utf8'), secrets)
                 .split(/\r?\n/)
                 .slice(0, 20)
                 .map((line) => `> ${line}`)
@@ -190,10 +210,10 @@ export async function reconcile({
           const minutes = run
             ? Math.ceil((endedAt.getTime() - run.startedAt.getTime()) / 60_000)
             : 0
-          const body = `workling：执行未完成（${error}）。\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。`
+          const body = `workling：执行未完成（${error}）。\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。${explanation ? `\n\n### Pi 的说明\n\n${explanation}` : ''}`
           await sync(
             ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-            body,
+            neutralizeMentions(redactSecrets(body, secrets)),
           )
         }
       }

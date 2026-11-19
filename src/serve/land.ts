@@ -2,7 +2,15 @@ import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
-import { readOutputFile, readOutResult } from '../contract/out.ts'
+import {
+  missingOutput,
+  readChecklist,
+  readIssueComment,
+  readOutputFile,
+  readOutResult,
+  truncateComment,
+} from '../contract/out.ts'
+import { applyChecklist, planChecklist } from '../issue/checklist.ts'
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
@@ -18,15 +26,19 @@ const prsSchema = Type.Array(
   }),
 )
 
-type LandResult =
-  | { status: 'done'; prUrl: string; prState: (typeof prStates)[keyof typeof prStates] }
-  | { status: 'failed'; error: string }
+type Landed = {
+  status: 'done'
+  prUrl: string
+  prState: (typeof prStates)[keyof typeof prStates]
+  commits: number
+}
+type LandResult = Landed | { status: 'failed'; error: string }
 
 function failed(error: string): LandResult {
   return { status: 'failed', error }
 }
 
-function neutralizeMentions(text: string): string {
+export function neutralizeMentions(text: string): string {
   // 现有反引号可能和新插入的反引号配对，使提及落到代码之外。
   const useHtml = text.includes('`') || /\\@|@[A-Za-z0-9_/-]*@/.test(text)
   return text.replace(/\\?@([A-Za-z0-9-]+(?:\/[A-Za-z0-9_-]+)?)/g, (_, name: string) =>
@@ -40,8 +52,93 @@ async function readMarkdown(dir: string, name: string): Promise<string> {
   return text
 }
 
-function missing(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+async function runOutDir(taskDir: string): Promise<string> {
+  const out = join(taskDir, 'out')
+  if (!(await lstat(taskDir)).isDirectory() || !(await lstat(out)).isDirectory())
+    throw new Error('任务目录或 out/ 不是普通目录')
+  return out
+}
+
+export async function readRunIssueComment(
+  taskDir: string,
+  warn: (step: string) => void,
+): Promise<string> {
+  try {
+    return await readIssueComment(await runOutDir(taskDir))
+  } catch (error) {
+    if (!missingOutput(error)) warn('读取 Issue 说明')
+    return ''
+  }
+}
+
+const issueBodySchema = Type.Object({ body: Type.String() })
+
+export async function publishIssueResult({
+  repo,
+  issue,
+  taskDir,
+  landed,
+  command,
+  llmApiKey,
+  log,
+}: {
+  repo: { host: string; path: string; token: string }
+  issue: { number: number }
+  taskDir: string
+  landed: Landed
+  command: Command
+  llmApiKey: string | null
+  log: (message: string) => void
+}): Promise<void> {
+  const env = ghEnv(repo.token, repo.host)
+  const args = [String(issue.number), '-R', repo.path]
+  const warn = (step: string) => log(`${repo.path} #${issue.number} ${step}失败`)
+  const gh = (operation: string, flags: string[], input?: string) =>
+    command(['gh', 'issue', operation, ...args, ...flags], { env, input, quietStderr: true })
+  const comment = (text: string) =>
+    gh(
+      'comment',
+      ['--body-file', '-'],
+      neutralizeMentions(redactSecrets(text, [repo.token, llmApiKey ?? ''])),
+    )
+  const explanation = await readRunIssueComment(taskDir, warn)
+  const header = `workling：已创建 PR ${landed.prUrl}（${landed.commits} 个提交）`
+  try {
+    await comment(explanation ? truncateComment(`${header}\n\n${explanation}`) : header)
+  } catch {
+    warn('发送 Issue 评论')
+  }
+
+  let step = '读取待办变更'
+  try {
+    const items = await readChecklist(await runOutDir(taskDir))
+    if (!items.length) return
+    const readBody = async () => {
+      const value: unknown = JSON.parse(await gh('view', ['--json', 'body']))
+      if (!Value.Check(issueBodySchema, value)) throw new Error('Issue 正文格式无效')
+      return value.body
+    }
+    step = '读取 Issue 正文'
+    const { changes, skipped } = planChecklist(await readBody(), items)
+    if (!changes.length) return
+    const reasons = { missing: '找不到原文行', ambiguous: '匹配多行', unchanged: '已是目标状态' }
+    const details = changes.map(
+      ({ line, checked, evidence }) =>
+        `- ${checked ? '勾选' : '取消勾选'}：${line}\n  - 依据：${evidence}`,
+    )
+    for (const { item, reason } of skipped)
+      details.push(`- 跳过：${item.line}（${reasons[reason]}）`)
+    step = '发送待办变更评论'
+    await comment(`workling：即将更新 Issue 待办\n\n${details.join('\n')}`)
+    step = '重新读取 Issue 正文'
+    const latest = await readBody()
+    const updated = applyChecklist(latest, changes)
+    if (updated === latest) return
+    step = '更新 Issue 待办'
+    await gh('edit', ['--body-file', '-'], updated)
+  } catch (error) {
+    if (step !== '读取待办变更' || !missingOutput(error)) warn(step)
+  }
 }
 
 export async function landRun({
@@ -93,32 +190,30 @@ export async function landRun({
     if (!baseRef || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(baseRef))
       return failed('缺少有效的基点记录')
 
-    const out = join(run.taskDir, 'out')
     let bundle: Buffer
     let body: string
     let comment: string | undefined
     let outcome: string | undefined
     try {
-      if (!(await lstat(run.taskDir)).isDirectory() || !(await lstat(out)).isDirectory())
-        return failed('任务目录或 out/ 不是普通目录')
+      const out = await runOutDir(run.taskDir)
       const result = await readOutResult(out)
       outcome = result.outcome
       if (result.outcome === 'incomplete' || result.commits === 0)
         return failed(`没有可交付的提交（outcome: ${result.outcome}）`)
       bundle = await readOutputFile(out, 'commits.bundle', maxBundleBytes).catch(
         (error: unknown) => {
-          if (missing(error)) throw new Error('缺少 out/commits.bundle')
+          if (missingOutput(error)) throw new Error('缺少 out/commits.bundle')
           throw error
         },
       )
       body = await readMarkdown(out, 'pr-body.md').catch((error: unknown) => {
-        if (missing(error)) throw new Error('缺少 out/pr-body.md')
+        if (missingOutput(error)) throw new Error('缺少 out/pr-body.md')
         throw error
       })
       try {
         comment = await readMarkdown(out, 'pr-comment.md')
       } catch (error) {
-        if (!missing(error)) warn('读取 PR 评论')
+        if (!missingOutput(error)) warn('读取 PR 评论')
       }
     } catch (error) {
       return failed(redactSecrets(errorMessage(error), secrets))
@@ -218,7 +313,8 @@ export async function landRun({
     )
     if (!Value.Check(prsSchema, prs)) throw new Error('PR 列表格式无效')
     const existing = prs[0]
-    if (existing) return { status: 'done', prUrl: existing.url, prState: prStates[existing.state] }
+    if (existing)
+      return { status: 'done', prUrl: existing.url, prState: prStates[existing.state], commits }
 
     const base = await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch'])
     if (!base) throw new Error('无法读取仓库默认分支')
@@ -271,16 +367,17 @@ export async function landRun({
     )
     if (!prUrl) throw new Error('创建 PR 未返回链接')
     // 已有 PR 的重试直接返回，避免重复发送评论。
-    if (comment)
-      await gh(
-        ['pr', 'comment', prUrl, '--body-file', '-'],
-        neutralizeMentions(redactSecrets(comment, secrets)),
-      ).catch(() => warn('发送 PR 评论'))
-    await gh(
-      ['issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-      `workling：已创建 PR ${prUrl}（${commits} 个提交）`,
-    ).catch(() => warn('发送 Issue 评论'))
-    return { status: 'done', prUrl, prState: 'open' }
+    if (comment) {
+      try {
+        await gh(
+          ['pr', 'comment', prUrl, '--body-file', '-'],
+          neutralizeMentions(redactSecrets(`workling：${comment}`, secrets)),
+        )
+      } catch {
+        warn('发送 PR 评论')
+      }
+    }
+    return { status: 'done', prUrl, prState: 'open', commits }
   } finally {
     await rm(landing, { recursive: true, force: true })
   }

@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeOutResult } from '../src/contract/out.ts'
 import type { Command, RunOptions } from '../src/runtime/types.ts'
-import { landRun } from '../src/serve/land.ts'
+import { landRun, publishIssueResult } from '../src/serve/land.ts'
 import { localRemote } from './helpers/git.ts'
 
 const issue = { number: 42, title: 'Ship this' }
 const repo = { host: 'github.com', path: 'a/b', token: 'configured-test-secret' }
 const prUrl = 'https://github.com/a/b/pull/3'
+const landed = { status: 'done', prUrl, prState: 'open', commits: 1 } as const
 const branch = 'workling/42-task'
 const dirs: string[] = []
 afterEach(async () => {
@@ -127,9 +128,12 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
     await writeFile(path, `#!/bin/sh\ntouch '${marker}'\n`)
     await chmod(path, 0o700)
   }
-  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  const result = await landRun(s.options)
+  expect(result).toEqual(landed)
+  await writeFile(join(s.out, 'issue-comment.md'), '@someone: checks passed.')
+  await publishIssueResult({ ...s.options, taskDir: s.options.run.taskDir, landed })
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
-  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  expect(await landRun(s.options)).toEqual(landed)
   expect(await Bun.file(marker).exists()).toBe(false)
   expect(await Bun.file(join(s.landing, 'HEAD')).exists()).toBe(false)
   expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
@@ -156,8 +160,8 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
       .filter(({ args }) => args[2] === 'comment')
       .map(({ args, options }) => [args[1], options?.input]),
   ).toEqual([
-    ['pr', 'Checked by `@reviewer`.'],
-    ['issue', `workling：已创建 PR ${prUrl}（1 个提交）`],
+    ['pr', 'workling：Checked by `@reviewer`.'],
+    ['issue', `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.`],
   ])
 })
 
@@ -167,7 +171,7 @@ test('部分完成结果会替换关闭关键字并标记 PR 标题', async () =
   await s.deliver({ outcome: 'partial' })
   await writeFile(join(s.out, 'pr-body.md'), 'Closes #42 done')
 
-  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  expect(await landRun(s.options)).toEqual(landed)
   const create = s.calls.find(({ args }) => args[2] === 'create')
   expect(create?.args[create.args.indexOf('--title') + 1]).toBe('[部分完成] Ship this')
   expect(create?.options?.input).not.toContain('Closes #42')
@@ -180,7 +184,7 @@ test('正文以 Refs 开头时按部分完成处理且不前置 Closes', async (
   await s.deliver()
   await writeFile(join(s.out, 'pr-body.md'), 'Refs #42\n> 部分完成：后续处理')
 
-  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  expect(await landRun(s.options)).toEqual(landed)
   const create = s.calls.find(({ args }) => args[2] === 'create')
   expect(create?.args[create.args.indexOf('--title') + 1]).toBe('[部分完成] Ship this')
   expect(create?.options?.input).toBe('Refs #42\n> 部分完成：后续处理')
@@ -261,7 +265,7 @@ test('PR 查询抛错后清理落地仓库，下轮使用已推送的分支', as
   ).rejects.toThrow('API unavailable')
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
   expect(await Bun.file(join(s.landing, 'HEAD')).exists()).toBe(false)
-  expect(await landRun(s.options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  expect(await landRun(s.options)).toEqual(landed)
   expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
     'fIxEs #42 by `@someone`',
@@ -284,11 +288,12 @@ test('有原文反引号时转义提及；两条评论失败只记录，不影�
       return s.options.command(args, opts)
     }) satisfies Command,
   }
-  expect(await landRun(options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  expect(await landRun(options)).toEqual(landed)
+  await publishIssueResult({ ...options, taskDir: options.run.taskDir, landed })
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
     'Closes #42\n\n`example <code>&#64;inside</code>` thanks <code>&#64;someone</code>',
   )
-  expect(await landRun(options)).toEqual({ status: 'done', prUrl, prState: 'open' })
+  expect(await landRun(options)).toEqual(landed)
   expect(s.logs).toEqual(['a/b #42 发送 PR 评论失败', 'a/b #42 发送 Issue 评论失败'])
   expect(attempts).toBe(2)
 })

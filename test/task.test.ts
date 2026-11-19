@@ -467,10 +467,12 @@ test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
   expect(prompt).toContain('<任务目录>/input/issue.md')
   expect(prompt).toContain('<任务目录>/input/attachments/')
   const [steps, prohibitions] = prompt.split('## 禁止')
-  for (const command of ['git push', 'gh pr create']) {
-    expect(steps).not.toContain(command)
-    expect(prohibitions).toContain(command)
-  }
+  expect(steps).not.toContain('git push')
+  expect(prohibitions).toContain('git push')
+  expect(prohibitions).toContain('运行任何 `gh` 命令')
+  expect(prompt).not.toContain('gh ')
+  expect(steps).toContain('<任务目录>/out/issue-comment.md')
+  expect(steps).toContain('<任务目录>/out/checklist.json')
   expect(steps).not.toContain('在 PR 下评论')
   for (const removed of [
     'workling 命令',
