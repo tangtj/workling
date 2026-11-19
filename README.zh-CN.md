@@ -2,10 +2,10 @@
 
 [English](README.md) | 中文
 
-监听 GitHub Issue，自动交给 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 处理：Pi 组装提示词并调用 codex 改代码，再由 Pi 提交、推送、建 PR 并在 Issue 下回复。workling 负责轮询、排队、拉起任务、对账和更新标签，并提供一个管理页。
+监听 GitHub Issue，自动交给 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 处理：Pi 组装提示词并调用 codex 改代码，在任务分支上本地提交并回复 Issue。workling 负责轮询、排队、拉起任务、校验提交、推送并建 PR、更新状态标签，并提供一个管理页。
 
 ```text
-Issue 打上 workling:ready → serve 入队 → 拉起 task → Pi 调用 codex 改代码 → Pi 建 PR → serve 对账，标签改为 workling:done / workling:failed
+Issue 打上 workling:ready → serve 入队 → 拉起 task → Pi 调用 codex 并本地提交 → serve 校验提交并建 PR，标签改为 workling:done / workling:failed
 ```
 
 ## 前置依赖

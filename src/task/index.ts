@@ -1,12 +1,15 @@
 import { appendFileSync } from 'node:fs'
-import { chmod, mkdir, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { readSpec } from '../contract/spec.ts'
+import { writeOutResult } from '../contract/out.ts'
+import { CONTRACT_VERSION, readSpec } from '../contract/spec.ts'
 import type { IssueRef } from '../issue/reference.ts'
+import { errorMessage } from '../runtime/errors.ts'
 import { PI_CLI, ROOT } from '../runtime/paths.ts'
 import { streamProcess } from '../runtime/process.ts'
 import { createPiEventFormatter, duration, time } from '../task/pi-events.ts'
 import type { Command, Environment, ExitStatus } from '../runtime/types.ts'
+import { redact, reportResultLine } from './summary.ts'
 
 export async function runTask(options: {
   ref: IssueRef
@@ -18,7 +21,7 @@ export async function runTask(options: {
   wait?: typeof streamProcess
   out?: (line: string) => void
   now?: () => Date
-}): Promise<ExitStatus> {
+}): Promise<ExitStatus & { error?: string }> {
   const { ref, dir, command, signal } = options
   if (ref.platform !== 'github' || ref.host !== 'github.com')
     throw new Error('task 目前只支持 github.com')
@@ -44,22 +47,17 @@ export async function runTask(options: {
   )
   const out = options.out ?? ((line: string) => process.stdout.write(`${line}\n`))
   const log = (line: string) => {
+    line = redact(line, secrets)
     const ts = now()
     appendFileSync(
       join(dir, 'workling-events.jsonl'),
       `${JSON.stringify({ type: 'step', ts: ts.toISOString(), text: line })}\n`,
     )
-    let formatted = `[workling ${time(ts)}] ${line}`
-    for (const secret of secrets) formatted = formatted.replaceAll(secret, '***')
-    out(formatted)
+    out(`[workling ${time(ts)}] ${line}`)
   }
-  log('配置 git 凭证')
-  for (const args of [
-    ['credential.helper', ''],
-    ['--add', 'credential.helper', '!gh auth git-credential'],
-  ]) {
-    await git(['config', '--local', ...args])
-  }
+  const outDir = join(dir, 'out')
+  await mkdir(outDir, { recursive: true, mode: 0o700 })
+  await chmod(outDir, 0o700)
   const llmBaseUrl = env.WORKLING_LLM_BASE_URL
   const piModel = spec.model.pi ?? spec.model.codex
   let piEnv: Environment = { ...options.env, GH_PROMPT_DISABLED: '1' }
@@ -151,5 +149,34 @@ codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
       ? `Pi 被信号 ${status.signal} 结束，用时 ${elapsed}`
       : `Pi 结束：退出码 ${status.code}，用时 ${elapsed}`,
   )
+  try {
+    // Pi 即使因信号退出，也保留已经完成的本地提交和实际退出状态。
+    const outputGit = (args: string[]) => command(['git', ...args], { cwd: repo, env })
+    const { baseRef, branch } = spec.repo
+    const ref = `refs/heads/${branch}`
+    const range = `${baseRef}..${ref}`
+    const count = await outputGit(['rev-list', '--count', range])
+    const commits = Number(count)
+    if (!/^\d+$/.test(count) || !Number.isSafeInteger(commits)) throw new Error('提交数量无效')
+    const bundle = join(outDir, 'commits.bundle')
+    const head = await outputGit(['rev-parse', '--verify', ref])
+    if (commits > 0) await outputGit(['bundle', 'create', bundle, range])
+    else await rm(bundle, { force: true })
+    const report = await readFile(join(dir, 'report.md'), 'utf8').catch(() => '')
+    const result = reportResultLine(report)
+    const outcome =
+      result === '完成' ? 'completed' : result === '部分完成' ? 'partial' : 'incomplete'
+    await writeOutResult(outDir, {
+      contract: CONTRACT_VERSION,
+      outcome,
+      branch,
+      head: head === baseRef ? null : head,
+      commits,
+    })
+  } catch (cause) {
+    const error = `生成任务产出失败：${redact(errorMessage(cause), secrets)}`
+    log(error)
+    return { ...status, error }
+  }
   return status
 }

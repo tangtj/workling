@@ -19,6 +19,10 @@ export function redact(value: string, secrets: string[]): string {
     .reduce((text, secret) => text.split(secret).join('***'), value)
 }
 
+export function reportResultLine(report: string): string | undefined {
+  return report.match(/^[ \t]*[-*]?[ \t]*结果[ \t]*[:：][ \t]*(.+)$/m)?.[1]?.trim()
+}
+
 export async function extractSummary(taskDir: string, secrets: string[]) {
   let summary: string | null = null
   let reportResult: string | null = null
@@ -46,8 +50,8 @@ export async function extractSummary(taskDir: string, secrets: string[]) {
   }
   try {
     const report = await readFile(join(taskDir, 'report.md'), 'utf8')
-    const match = report.match(/^\s*[-*]?\s*结果\s*[:：]\s*(.+)$/m)
-    if (match) reportResult = redact(match[1]!.trim(), secrets).slice(0, 50)
+    const result = reportResultLine(report)
+    if (result) reportResult = redact(result, secrets).slice(0, 50)
   } catch {
     /* 文件不可读时保留 null。 */
   }

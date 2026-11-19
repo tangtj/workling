@@ -128,16 +128,16 @@ type Spec = {
 
 `out/`：
 
-| 文件               | 内容                                                         |
-| ------------------ | ------------------------------------------------------------ |
-| `result.json`      | `contract`、结果（完成 / 部分完成 / 未完成）、提交标题、错误 |
-| `commits.bundle`   | 相对 `baseRef` 的新提交（`git bundle`）；没有改动时不产出    |
-| `pr-body.md`       | PR 正文（`implement`）                                       |
-| `issue-comment.md` | Issue 回复                                                   |
-| `pr-comment.md`    | PR 下的核对结论                                              |
-| `checklist.json`   | 待办项的勾选变更：`[{ line, checked, evidence }]`            |
-| `replies.json`     | 对反馈的逐条回复：`[{ feedbackId, body }]`（`rework`）       |
-| `review.json`      | review 意见：总体意见 + 行内意见（`review`）                 |
+| 文件               | 内容                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `result.json`      | 必有：`contract: 1`、`outcome: 'completed' \| 'partial' \| 'incomplete'`、`branch: string`、`head: string \| null`（与 `baseRef` 相同时为 `null`）、`commits: number`（`baseRef..head` 的提交数） |
+| `commits.bundle`   | 相对 `baseRef` 的新提交（`git bundle`）；`commits > 0` 时产出                                                                                                                                     |
+| `pr-body.md`       | 有提交时由 Pi 写入的 PR 正文（`implement`）                                                                                                                                                       |
+| `issue-comment.md` | Issue 回复                                                                                                                                                                                        |
+| `pr-comment.md`    | 可选：PR 下的核对结论                                                                                                                                                                             |
+| `checklist.json`   | 待办项的勾选变更：`[{ line, checked, evidence }]`                                                                                                                                                 |
+| `replies.json`     | 对反馈的逐条回复：`[{ feedbackId, body }]`（`rework`）                                                                                                                                            |
+| `review.json`      | review 意见：总体意见 + 行内意见（`review`）                                                                                                                                                      |
 
 ## 6. 主体
 
@@ -176,6 +176,8 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 3. 写入 `spec.json`、`input/`、`secrets/`。现在 `workling read` 负责的 Issue 与附件下载，搬到这一步来做。
 
 **落地**（确定性代码，逐项校验）：
+
+主体不在 worker 的工作副本中运行 Git。主体在独立的 bare 仓库中导入并校验提交包，分支和基点以数据库中准备工作副本时记录的值为准。
 
 - **推送**：只能推到 `workling/<号>-*` 命名空间。`implement` 新建分支；`rework` 只允许快进，如果运行期间有人往 PR 分支推了提交，快进会失败，这时重新排队。禁止推送默认分支和文档分支。
 - **改动范围**：bundle 里只要有提交改到 `.github/workflows/`，默认拒绝（可以按仓库放开），防止借 CI 拿到仓库 Secrets。

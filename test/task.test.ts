@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseIssueRef } from '../src/issue/reference.ts'
+import { readOutResult } from '../src/contract/out.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../src/contract/spec.ts'
 import { ROOT } from '../src/runtime/paths.ts'
 import { isAlive } from '../src/runtime/process.ts'
@@ -15,6 +16,7 @@ import {
   writeResult,
 } from '../src/task/dir.ts'
 import { runTask } from '../src/task/index.ts'
+import { localRemote } from './helpers/git.ts'
 
 const ref = parseIssueRef('github:a/b#12')
 const spec: Spec = {
@@ -48,8 +50,9 @@ async function prepareTask(dir: string, pi?: string, docBranch?: string) {
 }
 
 const preparedGit: Command = async (args) => {
-  if (args[1] === 'rev-parse') return 'true'
+  if (args[1] === 'rev-parse') return args[2] === '--verify' ? spec.repo.baseRef : 'true'
   if (args[1] === 'symbolic-ref') return `refs/heads/${spec.repo.branch}`
+  if (args[1] === 'rev-list') return '0'
   return ''
 }
 
@@ -169,9 +172,81 @@ test('runTask 使用已准备的工作副本，假 Pi 收到两个分支和正�
   expect(options.calls).toEqual([
     ['git', 'rev-parse', '--is-inside-work-tree', '--show-prefix'],
     ['git', 'symbolic-ref', '--quiet', 'HEAD'],
-    ['git', 'config', '--local', 'credential.helper', ''],
-    ['git', 'config', '--local', '--add', 'credential.helper', '!gh auth git-credential'],
+    ['git', 'rev-list', '--count', `${spec.repo.baseRef}..refs/heads/${spec.repo.branch}`],
+    ['git', 'rev-parse', '--verify', `refs/heads/${spec.repo.branch}`],
   ])
+})
+
+test('Pi 退出后 worker 打包两个本地提交，保留退出码和部分完成结果', async () => {
+  const dir = await prepareTask(await temp())
+  const remote = await localRemote(dir)
+  const baseRef = await remote.commit('refs/heads/main', 'base')
+  const branch = spec.repo.branch
+  const cwd = join(dir, 'repo')
+  await remote.git(['git', 'clone', remote.path, cwd])
+  const git = (...args: string[]) => remote.git(['git', ...args], { cwd })
+  await git('switch', '-c', branch)
+  await writeSpec(dir, { ...spec, repo: { baseRef, branch } })
+  const out = join(dir, 'out')
+  const status = await runTask({
+    ref,
+    dir,
+    command: remote.git,
+    env: {},
+    signal: new AbortController().signal,
+    wait: async () => {
+      expect((await stat(out)).mode & 0o777).toBe(0o700)
+      for (const message of ['first', 'second']) await git('commit', '--allow-empty', '-m', message)
+      await writeFile(join(dir, 'report.md'), '- 结果：部分完成\n')
+      return { code: 7, signal: null }
+    },
+  })
+  const head = await git('rev-parse', 'HEAD')
+  expect(status).toEqual({ code: 7, signal: null })
+  expect(await readOutResult(out)).toEqual({
+    contract: 1,
+    outcome: 'partial',
+    branch,
+    head,
+    commits: 2,
+  })
+  expect(await git('bundle', 'list-heads', join(out, 'commits.bundle'))).toBe(
+    `${head} refs/heads/${branch}`,
+  )
+  await expect(git('config', '--local', '--get', 'credential.helper')).rejects.toThrow()
+})
+
+test.each([
+  ['- 结果：完成\n', 'completed'],
+  ['结果: 部分完成\n', 'partial'],
+  ['结果：未完成\n', 'incomplete'],
+  [undefined, 'incomplete'],
+] as const)('无提交时仍根据回报 %j 写结果，并且不生成 bundle', async (report, outcome) => {
+  const options = await setupTask()
+  if (report !== undefined) await writeFile(join(options.dir, 'report.md'), report)
+  await runTask({ ...options, wait: async () => ({ code: 0, signal: null }) })
+  const out = join(options.dir, 'out')
+  expect(await readOutResult(out)).toEqual({
+    contract: 1,
+    outcome,
+    branch: spec.repo.branch,
+    head: null,
+    commits: 0,
+  })
+  expect(await Bun.file(join(out, 'commits.bundle')).exists()).toBe(false)
+})
+
+test('worker 生成产出失败时报告错误，仍保留 Pi 的退出码', async () => {
+  const options = await setupTask()
+  const status = await runTask({
+    ...options,
+    command: async (args) => {
+      if (args[1] === 'rev-list') throw new Error('Git error')
+      return preparedGit(args)
+    },
+    wait: async () => ({ code: 7, signal: null }),
+  })
+  expect(status).toEqual({ code: 7, signal: null, error: '生成任务产出失败：Git error' })
 })
 
 test('runTask 使用指定的 Pi 模型和默认入口，拒绝不支持的引用', async () => {
@@ -391,6 +466,12 @@ test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
   const prompt = await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')
   expect(prompt).toContain('<任务目录>/input/issue.md')
   expect(prompt).toContain('<任务目录>/input/attachments/')
+  const [steps, prohibitions] = prompt.split('## 禁止')
+  for (const command of ['git push', 'gh pr create']) {
+    expect(steps).not.toContain(command)
+    expect(prohibitions).toContain(command)
+  }
+  expect(steps).not.toContain('在 PR 下评论')
   for (const removed of [
     'workling 命令',
     'read <Issue 引用>',
@@ -419,7 +500,6 @@ test('runTask 保存原始事件并输出脱敏的步骤与 Pi 进度', async ()
   await runTask({ ...options, out: (line) => lines.push(line), now: () => new Date(2026, 0, 1) })
   expect(await readFile(join(options.dir, 'pi-events.jsonl'), 'utf8')).toBe(raw)
   expect(lines).toEqual([
-    '[workling 00:00:00] 配置 git 凭证',
     '[workling 00:00:00] 拉起 Pi',
     '[pi 00:00:00] ***',
     '[workling 00:00:00] Pi 结束：退出码 0，用时 0 秒',
@@ -453,7 +533,7 @@ test('workling-events 写入全部 step 与 pi_exit，保留退出码和信号�
       lines.map((line) => line.replace(/^\[workling [\d:]+\] /, '')),
     )
     expect(events.filter((e) => e.type === 'pi_exit')).toEqual([
-      { type: 'pi_exit', ts: new Date(3000).toISOString(), ...status, durationMs: 1000 },
+      { type: 'pi_exit', ts: new Date(2000).toISOString(), ...status, durationMs: 1000 },
     ])
   }
 })

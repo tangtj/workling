@@ -2,10 +2,10 @@
 
 English | [中文](README.zh-CN.md)
 
-workling watches GitHub Issues and hands them to [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Pi builds the prompt and calls codex to change the code, then commits, pushes, opens a PR and replies on the Issue. workling handles polling, queueing, launching tasks, reconciliation and status labels, and ships a small admin UI.
+workling watches GitHub Issues and hands them to [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Pi builds the prompt, calls codex, commits locally and replies on the Issue. workling queues and launches tasks, validates commits before pushing and opening a PR, and updates status labels. It also ships a small admin UI.
 
 ```text
-Issue labeled workling:ready → serve queues it → launches a task → Pi calls codex → Pi opens a PR → serve reconciles and sets workling:done / workling:failed
+Issue labeled workling:ready → serve queues it → launches a task → Pi calls codex and commits locally → serve validates commits, opens a PR and sets workling:done / workling:failed
 ```
 
 ## Requirements

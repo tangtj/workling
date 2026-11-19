@@ -9,10 +9,10 @@ import { writeResult } from '../src/task/dir.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
 import { fakeExecutor, clock, scenario } from './helpers/serve.ts'
 
-test('对账退出码 0 查询首个匹配 PR 后 done，保存链接与结果时间并安全删除 repo', async () => {
+test('对账退出码 0 落地成功后标记 done，保存链接与结果时间并安全删除 repo', async () => {
   const s = await scenario()
   try {
-    const { dir } = await s.running()
+    const { dir } = await s.running({ delivery: true })
     await mkdir(join(dir, 'repo'))
     await writeFile(join(dir, 'report.md'), '保留')
     await writeResult(dir, { exitCode: 0, signal: null, finishedAt: '2026-11-14T10:29:59Z' })
@@ -27,7 +27,7 @@ test('对账退出码 0 查询首个匹配 PR 后 done，保存链接与结果�
       exitCode: 0,
       error: null,
     })
-    expect((await readdir(dir)).sort()).toEqual(['report.md', 'result.json'])
+    expect((await readdir(dir)).sort()).toEqual(['out', 'report.md', 'result.json'])
     expect(s.calls.map((call) => call.args)).toEqual([
       [
         'gh',
@@ -35,14 +35,12 @@ test('对账退出码 0 查询首个匹配 PR 后 done，保存链接与结果�
         'list',
         '-R',
         'a/b',
+        '--head',
+        'workling/42-issue',
         '--state',
         'all',
-        '--search',
-        'head:workling/42-',
         '--json',
-        'url,headRefName,state',
-        '--limit',
-        '20',
+        'url,state',
       ],
       [
         'gh',
@@ -62,26 +60,19 @@ test('对账退出码 0 查询首个匹配 PR 后 done，保存链接与结果�
   }
 })
 
-test('对账退出码 0 无匹配 PR 判为未找到 PR，不能只按退出码判成功', async () => {
+test('对账退出码 0 但旧运行缺少分支记录时判失败', async () => {
   const s = await scenario()
   try {
     const { dir } = await s.running()
     await writeResult(dir, { exitCode: 0, signal: null, finishedAt: 'invalid date' })
-    await reconcile({
-      ...s.options,
-      command: async (args, options) => {
-        s.calls.push({ args, options })
-        return args[1] === 'pr'
-          ? '[{"url":"wrong","headRefName":"workling/420-task","state":"OPEN"}]'
-          : ''
-      },
-    })
+    await reconcile(s.options)
     expect(s.db.select().from(issues).get()?.status).toBe('failed')
     expect(s.db.select().from(runs).get()).toMatchObject({
-      error: '未找到 PR',
+      error: '缺少分支记录',
       endedAt: clock,
       exitCode: 0,
     })
+    expect(s.calls.some(({ args }) => args[1] === 'pr')).toBe(false)
   } finally {
     await s.dispose()
   }
@@ -92,11 +83,12 @@ test.each(['命令失败', 'JSON 无效', '形状无效'])(
   async (kind) => {
     const s = await scenario()
     try {
-      const { dir } = await s.running()
+      const { dir } = await s.running({ delivery: true })
       await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
       await reconcile({
         ...s.options,
-        command: async () => {
+        command: async (args, options) => {
+          if (args[0] === 'git') return s.command(args, options)
           if (kind === '命令失败') throw new Error('API failed')
           return kind === 'JSON 无效' ? '{' : '[{"url":1,"headRefName":"workling/42-task"}]'
         },
@@ -393,7 +385,7 @@ test('done 删除 repo 前校验任务目录，拒绝删除工作区外路径', 
   const s = await scenario()
   const outside = await mkdtemp(join(tmpdir(), 'workling-outside-'))
   try {
-    await s.running({ taskDir: outside })
+    await s.running({ taskDir: outside, delivery: true })
     await mkdir(join(outside, 'repo'))
     await writeResult(outside, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
     await reconcile(s.options)
@@ -447,6 +439,7 @@ test.each(['done', '非零结果', 'invalid', '丢失', 'canceled'])(
         pid: null,
         container: 'workling-run-1',
         error: kind === 'canceled' ? '已取消' : undefined,
+        delivery: kind === 'done',
       })
       await mkdir(join(dir, 'repo'))
       if (kind === 'done' || kind === '非零结果')

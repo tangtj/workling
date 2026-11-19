@@ -2,8 +2,6 @@ import { type ExecutorSettings } from '../config/executor.ts'
 import { eq } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import * as Type from 'typebox'
-import * as Value from 'typebox/value'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
@@ -15,15 +13,10 @@ import { extractSummary } from '../task/summary.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
+import { landRun } from './land.ts'
+import { mirrorPath } from './mirror.ts'
+import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
-
-const prsSchema = Type.Array(
-  Type.Object({
-    url: Type.String(),
-    headRefName: Type.String(),
-    state: Type.Union([Type.Literal('OPEN'), Type.Literal('MERGED'), Type.Literal('CLOSED')]),
-  }),
-)
 
 async function cleanTaskDirs(
   db: WorklingDatabase,
@@ -103,33 +96,22 @@ export async function reconcile({
             status = 'canceled'
             error = '已取消'
           } else if (result.exitCode === 0 && !result.error) {
-            // 查询失败时保留 running，下轮重试，不能把暂时的 API 错误判为任务失败。
-            const output = await command(
-              [
-                'gh',
-                'pr',
-                'list',
-                '-R',
-                repo.path,
-                '--state',
-                'all',
-                '--search',
-                `head:workling/${issue.number}-`,
-                '--json',
-                'url,headRefName,state',
-                '--limit',
-                '20',
-              ],
-              { env: ghEnv(repo.token, repo.host) },
-            )
-            const prs: unknown = JSON.parse(output)
-            if (!Value.Check(prsSchema, prs)) throw new Error('PR 列表格式无效')
-            const pr = prs.find((pr) => pr.headRefName.startsWith(`workling/${issue.number}-`))
-            if (pr) {
-              status = 'done'
-              prUrl = pr.url
-              prState = pr.state.toLowerCase() as NonNullable<typeof issue.prState>
-            } else error = '未找到 PR'
+            if (!run.branch) error = '缺少分支记录'
+            else {
+              // 落地遇到暂时错误时保留 running，下轮重试。
+              const landed = await landRun({
+                workspace: settings.workspace,
+                repo,
+                issue,
+                run: { ...run, taskDir: assertTaskDir(settings.workspace, run.taskDir) },
+                mirror: mirrorPath(settings.workspace, repo),
+                command,
+                log,
+                llmApiKey: pi.llmApiKey,
+              })
+              if (landed.status === 'done') ({ status, prUrl, prState } = landed)
+              else error = landed.error
+            }
           } else {
             error =
               run.error ??
@@ -192,7 +174,10 @@ export async function reconcile({
           let report = ''
           if (run?.taskDir) {
             try {
-              report = (await readFile(join(run.taskDir, 'report.md'), 'utf8'))
+              report = redactSecrets(await readFile(join(run.taskDir, 'report.md'), 'utf8'), [
+                repo.token,
+                pi.llmApiKey ?? '',
+              ])
                 .split(/\r?\n/)
                 .slice(0, 20)
                 .map((line) => `> ${line}`)
