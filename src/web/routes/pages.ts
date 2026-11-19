@@ -14,6 +14,8 @@ import { NotFoundPage } from '../views/not-found.tsx'
 
 import { pageData, maskToken } from '../data.ts'
 import { issueListSchema, type IssueListData } from '../issue-list.ts'
+import { issueDetailSchema, type IssueDetailData } from '../issue-detail.ts'
+import type { Issue } from '../data.ts'
 import type { AppDeps } from '../app.ts'
 import { repoId, html, headers } from '../response.ts'
 
@@ -111,6 +113,58 @@ export function pagesRoutes(deps: AppDeps): Hono {
       ),
     }
     if (!Value.Check(issueListSchema, body)) throw new Error('任务列表数据无效')
+    return c.json(body, 200, { 'Cache-Control': 'no-store' })
+  })
+  const detail = (issue: Issue, time: number): IssueDetailData => ({
+    now: new Date(time).toISOString(),
+    issue: {
+      id: issue.id,
+      repoId: issue.repoId,
+      repo: {
+        ref: issue.repo.ref,
+        platform: issue.repo.platform,
+        host: issue.repo.host,
+        path: issue.repo.path,
+      },
+      number: issue.number,
+      title: issue.title,
+      status: issue.status,
+      prUrl: issue.prUrl,
+      prState: issue.prState,
+      createdAt: issue.createdAt.toISOString(),
+      updatedAt: issue.updatedAt.toISOString(),
+    },
+    runs: issue.runs.map((run) => ({
+      id: run.id,
+      worker: run.worker,
+      startedAt: run.startedAt.toISOString(),
+      endedAt: run.endedAt?.toISOString() ?? null,
+      exitCode: run.exitCode,
+      error: run.error,
+      summary: run.summary,
+      reportResult: run.reportResult,
+      logTail: run.logTail,
+      taskDir: run.taskDir,
+      pid: run.pid,
+      container: run.container,
+    })),
+  })
+  app.get('/api/issues/:id/detail', (c) => {
+    const page = data()
+    const id = repoId(c.req.param('id'))
+    const issue = page.issues.find((item) => item.id === id)
+    if (!issue) return c.json({ error: 'Issue 不存在' }, 404)
+    const body = detail(issue, page.now)
+    if (!Value.Check(issueDetailSchema, body)) throw new Error('Issue 详情数据无效')
+    return c.json(body, 200, { 'Cache-Control': 'no-store' })
+  })
+  app.get('/api/runs/:id/detail', (c) => {
+    const page = data()
+    const id = repoId(c.req.param('id'))
+    const issue = page.issues.find((item) => item.runs.some((run) => run.id === id))
+    if (!issue) return c.json({ error: '执行记录不存在' }, 404)
+    const body = detail(issue, page.now)
+    if (!Value.Check(issueDetailSchema, body)) throw new Error('Issue 详情数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
   app.get('/api/overview', (c) => {
