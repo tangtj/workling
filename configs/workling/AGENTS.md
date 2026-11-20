@@ -54,6 +54,12 @@
 
 7. 交付（仅当交付结果是「完成」或「部分完成」）：
    - 在当前任务分支上按仓库规范本地提交，可以有多个提交；没有规范时提交信息写 `<Issue 标题> (#<号>)`。
+   - 署名：`git config user.email` 不是 `359148021+workling-agent@users.noreply.github.com`（即作者不是 Workling）时，每个提交信息末尾空一行后加上下面的 trailer，原样照抄、只加一次（仓库规范要求的其他 trailer 放在同一段）；作者已是 Workling 时不加：
+
+     ```text
+     Co-authored-by: Workling <359148021+workling-agent@users.noreply.github.com>
+     ```
+
    - 把 PR 正文写到 `<任务目录>/out/pr-body.md`。PR 由 workling 校验后创建，标题由 workling 按正文第一行决定，正文按交付结果区分：
      - 完成：正文第一行为 `Closes #<号>`；workling 建 PR 时标题为 `<Issue 标题>`。
      - 部分完成：正文第一行为 `Refs #<号>`，第二行为 `> 部分完成：合入本 PR 不会关闭 #<号>，剩余工作见「未完成与存疑」。`；workling 建 PR 时标题为 `[部分完成] <Issue 标题>`。正文任何位置都不能出现关闭关键字（`close`、`closes`、`closed`、`fix`、`fixes`、`fixed`、`resolve`、`resolves`、`resolved`，不区分大小写）紧跟 `#<号>` 的写法：GitHub 会在 PR 合入时据此自动关闭 Issue，把部分完成误显示为已完成。

@@ -70,6 +70,7 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 
 ## 状态与返工
 
+- workling 的提交署名为 Workling（GitHub 机器账号 [workling-agent](https://github.com/workling-agent)），作者或 `Co-authored-by` 指向它。
 - 进度看 Issue 标签：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`。
 - 领取时 workling 会在 Issue 下评论；运行中亲自确认的待办项会勾选，修改勾选状态前先评论说明。
 - 失败或要返工：修改 Issue 正文或文档分支上的文档（推送到文档分支），再重新打上 `workling:ready`。
