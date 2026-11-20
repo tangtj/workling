@@ -220,7 +220,7 @@ test('端到端真实 task 子进程写 result 后对账完成，记录 pid 和 
       executor: processExecutor({
         launch(args, options) {
           pid = launch(
-            [process.execPath, resolve('test/fixtures/watch-task.ts'), args[4]!],
+            [process.execPath, resolve('test/fixtures/watch-task.ts'), args.at(-1)!],
             options,
           )
           return pid

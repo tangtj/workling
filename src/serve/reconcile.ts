@@ -2,6 +2,7 @@ import { type ExecutorSettings } from '../config/executor.ts'
 import { eq } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
@@ -84,6 +85,7 @@ export async function reconcile({
       let exitCode: number | null = null
       let prUrl: string | undefined
       let prState: typeof issue.prState | undefined
+      let readyToLand = false
       let delivery:
         | {
             taskDir: string
@@ -103,24 +105,7 @@ export async function reconcile({
             error = '已取消'
           } else if (result.exitCode === 0 && !result.error) {
             if (!run.branch) error = '缺少分支记录'
-            else {
-              // 落地遇到暂时错误时保留 running，下轮重试。
-              const taskDir = assertTaskDir(settings.workspace, run.taskDir)
-              const landed = await landRun({
-                workspace: settings.workspace,
-                repo,
-                issue,
-                run: { ...run, taskDir },
-                mirror: mirrorPath(settings.workspace, repo),
-                command,
-                log,
-                llmApiKey: pi.llmApiKey,
-              })
-              if (landed.status === 'done') {
-                ;({ status, prUrl, prState } = landed)
-                delivery = { taskDir, landed }
-              } else error = landed.error
-            }
+            else readyToLand = true
           } else {
             error =
               run.error ??
@@ -143,7 +128,33 @@ export async function reconcile({
           error = run.error ?? (state.oom ? '内存不足（OOM）' : '进程丢失')
         }
       }
-      if (run?.taskDir) await executor.finish({ ...run, taskDir: run.taskDir })
+      if (run?.taskDir) {
+        const taskDir = assertTaskDir(settings.workspace, run.taskDir)
+        try {
+          await executor.finish({ ...run, taskDir })
+        } finally {
+          await removeSecrets(taskDir).catch(() => {
+            log(`${repo.ref} #${issue.number} 删除任务密钥失败`)
+          })
+        }
+        if (readyToLand) {
+          // 落地遇到暂时错误时保留 running，下轮重试；此时 worker 已不再需要密钥。
+          const landed = await landRun({
+            workspace: settings.workspace,
+            repo,
+            issue,
+            run: { ...run, taskDir },
+            mirror: mirrorPath(settings.workspace, repo),
+            command,
+            log,
+            llmApiKey: pi.llmApiKey,
+          })
+          if (landed.status === 'done') {
+            ;({ status, prUrl, prState } = landed)
+            delivery = { taskDir, landed }
+          } else error = landed.error
+        }
+      }
       const summary = run?.taskDir
         ? await extractSummary(run.taskDir, [repo.token, pi.llmApiKey ?? ''])
         : { summary: null, reportResult: null, logTail: null }

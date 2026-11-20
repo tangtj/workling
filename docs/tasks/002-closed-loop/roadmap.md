@@ -47,7 +47,7 @@
 | 1.2  | **主体负责代码**：每个仓库维护镜像缓存，主体检出工作副本（包括文档分支），并新建任务分支；task 不再克隆仓库                                                                                                     | 同一仓库第二次运行明显变快；`分支：` 写错时由主体直接判失败并评论原因 | [#42](https://github.com/tangtj/workling/issues/42) |
 | 1.3  | **主体推送并建 PR**：Pi 只做本地提交，产出 `out/commits.bundle`、`out/pr-body.md`、`out/result.json`；主体校验后推送、建 PR（分支命名空间、拒绝改动 workflows、扫描密钥）。工作副本的 `origin` 改为指向本地镜像 | PR 由主体创建；在 Issue 里写入"修改 workflow"之类的注入内容会被拒绝   | [#53](https://github.com/tangtj/workling/issues/53) |
 | 1.4  | **主体负责回复与勾选**：Pi 产出 `issue-comment.md`、`checklist.json`，由主体发评论、勾选待办项                                                                                                                  | 评论和勾选的效果与现在一致，但都由主体发出                            | [#55](https://github.com/tangtj/workling/issues/55) |
-| 1.5  | **收回凭证**：不再向 worker 传 `GH_TOKEN`；LLM Key 改为通过 `secrets/llm.json` 文件下发；删除 Pi 提示词中所有 `gh` 相关步骤                                                                                     | worker 的环境变量里看不到 GitHub token                                | —                                                   |
+| 1.5  | **收回凭证**：不再向 worker 传 `GH_TOKEN`；LLM Key 改为通过 `secrets/llm.json` 文件下发；删除 Pi 提示词中所有 `gh` 相关步骤                                                                                     | worker 的环境变量里看不到 GitHub token                                | [#64](https://github.com/tangtj/workling/issues/64) |
 
 ## M2 反馈返工
 

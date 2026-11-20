@@ -25,9 +25,13 @@ export function dockerExecutor({
         WORKLING_CODEX_SANDBOX: 'danger-full-access',
         WORKLING_TASK_TEE: '1',
       }
-      const variables = Object.keys(env).filter(
-        (key) => env[key] !== undefined && /^(GH_|WORKLING_|HOME$)/.test(key),
-      )
+      const variables = [
+        'HOME',
+        'WORKLING_WORKSPACE',
+        'WORKLING_CODEX_SANDBOX',
+        'WORKLING_TASK_TEE',
+        'WORKLING_GITLAB_HOST',
+      ].filter((key) => env[key])
       await command(
         [
           'docker',
@@ -58,6 +62,7 @@ export function dockerExecutor({
           ...variables.flatMap((key) => ['-e', key]),
           config.taskImage,
           'bun',
+          '--no-env-file',
           'src/cli.ts',
           'task',
           spec.ref,

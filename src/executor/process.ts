@@ -8,7 +8,8 @@ export function processExecutor(options: { launch?: Launch } = {}): Executor {
   return {
     async start(spec) {
       const pid = (options.launch ?? launch)(
-        [process.execPath, CLI, 'task', spec.ref, spec.taskDir],
+        // 禁止 Bun 从共享工作目录的 .env 重新载入主体配置。
+        [process.execPath, '--no-env-file', CLI, 'task', spec.ref, spec.taskDir],
         { env: spec.env, log: join(spec.taskDir, 'task.log') },
       )
       return { pid }
