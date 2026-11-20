@@ -1,3 +1,4 @@
+import { markComment } from './comment.ts'
 import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
@@ -99,7 +100,7 @@ export async function publishIssueResult({
     gh(
       'comment',
       ['--body-file', '-'],
-      neutralizeMentions(redactSecrets(text, [repo.token, llmApiKey ?? ''])),
+      markComment(neutralizeMentions(redactSecrets(text, [repo.token, llmApiKey ?? '']))),
     )
   const explanation = await readRunIssueComment(taskDir, warn)
   const header = `workling：已创建 PR ${landed.prUrl}（${landed.commits} 个提交）`
@@ -371,7 +372,7 @@ export async function landRun({
       try {
         await gh(
           ['pr', 'comment', prUrl, '--body-file', '-'],
-          neutralizeMentions(redactSecrets(`workling：${comment}`, secrets)),
+          markComment(neutralizeMentions(redactSecrets(`workling：${comment}`, secrets))),
         )
       } catch {
         warn('发送 PR 评论')

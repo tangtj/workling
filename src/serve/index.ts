@@ -18,6 +18,7 @@ import { launchQueued } from './launch.ts'
 import { reconcile } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { retryOnCommand, type RetryState } from './retry.ts'
+import { observeFeedback, type FeedbackState } from './feedback.ts'
 type Log = (message: string) => void
 
 export type ServeStatus = {
@@ -130,6 +131,7 @@ export async function serve({
     log(`workling 管理接口：http://${settings.host}:${server.port}`)
     const labeledRepos = new Set<number>()
     const retryState: RetryState = { accounts: new Map(), triggers: new Map() }
+    const feedbackState: FeedbackState = { accounts: new Map(), permissions: new Map() }
     let wasPaused = false
     while (!signal.aborted) {
       const pi = readPiSettings(db)
@@ -157,6 +159,7 @@ export async function serve({
       }
       if (!signal.aborted) {
         try {
+          await observeFeedback({ db, command, log, signal, state: feedbackState })
           await retryOnCommand({ db, command, log, signal, state: retryState })
         } catch (error) {
           if (!signal.aborted) log(`指令重试失败：${errorMessage(error)}`)

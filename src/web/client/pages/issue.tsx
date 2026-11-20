@@ -8,6 +8,7 @@ import { issueDetailOptions, parseDetailId } from '../issue-detail.ts'
 import { Badge, PlatformIcon, PR } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
 import { NotFound } from '../not-found.tsx'
+import { loadFeedback } from '../feedback.ts'
 import { RunTimeline } from '../run-timeline.tsx'
 
 type Detail = NonNullable<Awaited<ReturnType<ReturnType<typeof issueDetailOptions>['queryFn']>>>
@@ -113,6 +114,39 @@ function RunCard({
   )
 }
 
+function FeedbackList({ id }: { id: number }) {
+  const list = useQuery({
+    queryKey: ['feedback', id],
+    queryFn: ({ signal }) => loadFeedback(id, signal),
+  })
+  return (
+    <section className="card">
+      <h2>反馈</h2>
+      {list.isPending && <p>加载中…</p>}
+      {list.isError && <p className="error-box">加载反馈失败</p>}
+      {list.data?.length === 0 && <p className="muted">暂无反馈</p>}
+      {list.data?.map((item) => (
+        <div className="item" key={item.id}>
+          <p>
+            {item.source} · {item.authorLogin} · {item.trust} ·{' '}
+            {item.status === 'observed' ? '指令（仅观察）' : '非指令'} · {item.createdAt}
+          </p>
+          <p>{item.instruction ?? item.body.slice(0, 200)}</p>
+          {item.path && (
+            <p>
+              {item.path}
+              {item.line !== null && `:${item.line}`}
+            </p>
+          )}
+          <a href={item.url} target="_blank" rel="noopener noreferrer">
+            查看原评论
+          </a>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 export function IssuePage() {
   const issueId = parseDetailId(useParams().id)
   const options = issueDetailOptions(issueId)
@@ -186,6 +220,7 @@ export function IssuePage() {
           ，下一轮轮询会重新入队。
         </div>
       )}
+      <FeedbackList id={issue.id} />
       <section className="stack">
         <h2>执行历史</h2>
         {runs.length ? (

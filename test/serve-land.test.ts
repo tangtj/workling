@@ -160,8 +160,11 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
       .filter(({ args }) => args[2] === 'comment')
       .map(({ args, options }) => [args[1], options?.input]),
   ).toEqual([
-    ['pr', 'workling：Checked by `@reviewer`.'],
-    ['issue', `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.`],
+    ['pr', 'workling：Checked by `@reviewer`.\n\n<!-- workling -->'],
+    [
+      'issue',
+      `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.\n\n<!-- workling -->`,
+    ],
   ])
 })
 
