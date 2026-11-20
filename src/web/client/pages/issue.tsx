@@ -114,7 +114,21 @@ function RunCard({
   )
 }
 
-function FeedbackList({ id }: { id: number }) {
+const feedbackSources: Record<string, string> = {
+  issue_comment: 'Issue 评论',
+  pr_comment: 'PR 评论',
+  review_comment: '行内评论',
+  review: 'Review',
+}
+const feedbackTrust: Record<string, string> = {
+  self: 'workling 自身',
+  bot: 'Bot',
+  allowlist: '受信账号',
+  write: '写权限',
+  untrusted: '不可信',
+}
+
+function FeedbackList({ id, now }: { id: number; now: number }) {
   const list = useQuery({
     queryKey: ['feedback', id],
     queryFn: ({ signal }) => loadFeedback(id, signal),
@@ -128,8 +142,11 @@ function FeedbackList({ id }: { id: number }) {
       {list.data?.map((item) => (
         <div className="item" key={item.id}>
           <p>
-            {item.source} · {item.authorLogin} · {item.trust} ·{' '}
-            {item.status === 'observed' ? '指令（仅观察）' : '非指令'} · {item.createdAt}
+            {feedbackSources[item.source]}
+            {item.source === 'review' && item.reviewState ? `（${item.reviewState}）` : ''} ·{' '}
+            {item.authorLogin} · {feedbackTrust[item.trust]} ·{' '}
+            {item.status === 'observed' ? '指令（仅观察）' : '非指令'} ·{' '}
+            {formatTime(new Date(item.createdAt), now)}
           </p>
           <p>{item.instruction ?? item.body.slice(0, 200)}</p>
           {item.path && (
@@ -220,7 +237,7 @@ export function IssuePage() {
           ，下一轮轮询会重新入队。
         </div>
       )}
-      <FeedbackList id={issue.id} />
+      <FeedbackList id={issue.id} now={now} />
       <section className="stack">
         <h2>执行历史</h2>
         {runs.length ? (

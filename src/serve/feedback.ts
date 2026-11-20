@@ -6,6 +6,7 @@ import { feedback, feedbackCursors, issues, repos, trustedUsers } from '../db/sc
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
+import { matchCommandPrefix } from './retry.ts'
 
 const user = Type.Object({ id: Type.Integer(), login: Type.String(), type: Type.String() })
 const common = {
@@ -45,11 +46,9 @@ export function classifyCommand(
   if (trust !== 'allowlist' && trust !== 'write') return { isCommand: false, instruction: null }
   if (reviewState === 'CHANGES_REQUESTED')
     return { isCommand: true, instruction: body.trim() || null }
-  const trimmed = body.trimStart()
-  const match = /^(\/workling|@[^\s]+)(?=\s|$)/i.exec(trimmed)
-  if (!match || !['/workling', `@${login.toLowerCase()}`].includes(match[1]!.toLowerCase()))
-    return { isCommand: false, instruction: null }
-  return { isCommand: true, instruction: trimmed.slice(match[0].length).trim() || null }
+  const rest = matchCommandPrefix(body, login)
+  if (rest === null) return { isCommand: false, instruction: null }
+  return { isCommand: true, instruction: rest || null }
 }
 
 export async function observeFeedback({

@@ -160,6 +160,10 @@ export async function serve({
       if (!signal.aborted) {
         try {
           await observeFeedback({ db, command, log, signal, state: feedbackState })
+        } catch (error) {
+          if (!signal.aborted) log(`观察反馈失败：${errorMessage(error)}`)
+        }
+        try {
           await retryOnCommand({ db, command, log, signal, state: retryState })
         } catch (error) {
           if (!signal.aborted) log(`指令重试失败：${errorMessage(error)}`)
