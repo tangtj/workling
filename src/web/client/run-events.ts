@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import {
@@ -41,7 +41,23 @@ export function createRunEvents(initiallyEnded: boolean) {
   }
 }
 
-export function processRunEvents(previous: ReturnType<typeof createRunEvents>, batch: Batch) {
+export function processRunEvents(
+  previous: ReturnType<typeof createRunEvents>,
+  batch: Batch | { logTail: string },
+) {
+  if ('logTail' in batch) {
+    const state = createTimeline()
+    batch.logTail.split(/\r?\n/).forEach((line) => applyLogLine(state, line))
+    return {
+      ...previous,
+      state,
+      fallbackText: batch.logTail,
+      generation: previous.generation + 1,
+      ended: true,
+      stop: true,
+      finishedWhileViewing: false,
+    }
+  }
   const fallbackText = batch.fallback?.lines.join('\n') ?? null
   const backToEvents = !batch.fallback && previous.fallbackText !== null
   const progressed =
@@ -133,6 +149,7 @@ export function useRunEvents({
 }) {
   const [events, setEvents] = useState(() => createRunEvents(initiallyEnded))
   const [error, setError] = useState<string | null>(null)
+  const readLogTail = useEffectEvent(() => logTail)
   useEffect(() => {
     if (!enabled) return
     const controller = new AbortController()
@@ -153,17 +170,9 @@ export function useRunEvents({
       } catch (error) {
         if (signal.aborted) return
         const message = error instanceof Error ? error.message : '加载失败'
+        const logTail = readLogTail()
         if (message === '日志已清理' && logTail) {
-          const state = createTimeline()
-          logTail.split(/\r?\n/).forEach((line) => applyLogLine(state, line))
-          setEvents({
-            ...current,
-            state,
-            fallbackText: logTail,
-            generation: current.generation + 1,
-            ended: true,
-            stop: true,
-          })
+          setEvents(processRunEvents(current, { logTail }))
         } else setError(message)
       }
     }
@@ -172,7 +181,7 @@ export function useRunEvents({
       controller.abort()
       clearTimeout(timer)
     }
-  }, [runId, initiallyEnded, enabled, logTail])
+  }, [runId, initiallyEnded, enabled])
   return { ...events, fallback: events.fallbackText !== null, error }
 }
 

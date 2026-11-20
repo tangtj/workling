@@ -1,6 +1,4 @@
 export type Active = '' | 'overview' | 'issues' | 'repos' | 'settings'
-export type LegacyContext = { navigate: (url: string) => void; refresh: () => void }
-type LegacyModule = { init: (root: HTMLElement, ctx: LegacyContext) => () => void }
 type VersionModule = { init: () => () => void }
 
 // URL imports stay external so the server and browser use one copy of each legacy script.
@@ -13,8 +11,6 @@ async function loadModule<T>(url: string): Promise<T> {
     throw error
   }
 }
-export const loadApp = () => loadModule<LegacyModule>('/app.js')
-export const loadRunLog = () => loadModule<LegacyModule>('/run-log.js')
 export const loadVersion = () => loadModule<VersionModule>('/version.js')
 
 export async function readResponse(url: string, init?: RequestInit) {

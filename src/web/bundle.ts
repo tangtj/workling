@@ -15,7 +15,7 @@ export async function buildWebBundle(): Promise<WebBundle> {
     minify: true,
     naming: '[name]-[hash].[ext]',
     splitting: false,
-    external: ['/app.js', '/run-log.js', '/version.js'],
+    external: ['/version.js'],
   })
   if (!result.success) throw new Error(`Web 打包失败：\n${result.logs.join('\n')}`)
   const files: WebBundle['files'] = new Map()

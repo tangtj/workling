@@ -5,8 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Layout } from './layout.tsx'
-import { LegacyPage, NotFound } from './legacy-page.tsx'
-import { fragmentOptions } from './legacy.ts'
+import { NotFound } from './legacy-page.tsx'
 import { issueListOptions } from './issue-list.ts'
 import { IssuesPage } from './pages/issues.tsx'
 import { overviewOptions } from './overview.ts'
@@ -14,7 +13,8 @@ import { OverviewPage } from './pages/overview.tsx'
 import { reposOptions } from './repos.ts'
 import { ReposPage } from './pages/repos.tsx'
 import { RepoPage } from './pages/repo.tsx'
-import { parseRunId, runDetailOptions } from './issue-detail.ts'
+import { issueDetailOptions, parseDetailId, runDetailOptions } from './issue-detail.ts'
+import { IssuePage } from './pages/issue.tsx'
 import { RunLogPage } from './pages/run-log.tsx'
 
 const queryClient = new QueryClient()
@@ -24,14 +24,13 @@ const router = createBrowserRouter([
     children: [
       {
         path: '/issues/:id',
-        Component: LegacyPage,
-        async loader({ request }) {
-          const url = new URL(request.url)
+        Component: IssuePage,
+        async loader({ params }) {
           // Finish loading before React Router restores scroll positions against the new content.
           try {
-            await queryClient.fetchQuery(fragmentOptions(url.pathname + url.search))
+            await queryClient.fetchQuery(issueDetailOptions(parseDetailId(params.id)))
           } catch {
-            /* LegacyPage renders the retry action. */
+            /* IssuePage renders the retry action. */
           }
           return null
         },
@@ -41,7 +40,7 @@ const router = createBrowserRouter([
         Component: RunLogPage,
         async loader({ params }) {
           try {
-            await queryClient.fetchQuery(runDetailOptions(parseRunId(params.id)))
+            await queryClient.fetchQuery(runDetailOptions(parseDetailId(params.id)))
           } catch {
             /* RunLogPage renders the retry action. */
           }

@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { createRunEvents, processRunEvents } from '../src/web/client/run-events.ts'
 import type { TimelineItem } from '../src/web/timeline.ts'
 
-type Batch = Parameters<typeof processRunEvents>[1]
+type Response = Parameters<typeof processRunEvents>[1]
+type Batch = Exclude<Response, { logTail: string }>
 const empty = { offset: 0, lines: [] }
 const stream = (offset: number, ...lines: object[]) => ({
   offset,
@@ -31,7 +32,7 @@ const cases: {
   name: string
   initiallyEnded?: boolean
   batches: {
-    response: Batch
+    response: Response
     items: Partial<TimelineItem>[]
     offsets: [number, number]
     stop?: boolean
@@ -128,6 +129,27 @@ const cases: {
       },
     ],
   },
+  {
+    name: '日志已清理时用 logTail 替换现有时间线并停止请求',
+    initiallyEnded: true,
+    batches: [
+      {
+        response: batch({ workling: stream(10, step('先前的结构化事件')) }),
+        items: [{ kind: 'step', text: '先前的结构化事件' }],
+        offsets: [10, 0],
+      },
+      {
+        response: { logTail: '[pi 12:00:00] 结论\r\n日志末尾' },
+        items: [
+          { kind: 'message', text: '结论', ts: '12:00:00' },
+          { kind: 'output', lines: ['日志末尾'] },
+        ],
+        offsets: [10, 0],
+        fallbackText: '[pi 12:00:00] 结论\r\n日志末尾',
+        stop: true,
+      },
+    ],
+  },
   ...[false, true].map((initiallyEnded) => ({
     name: initiallyEnded
       ? '进入时已结束也要再取一次，排空后无需刷新详情'
@@ -155,7 +177,7 @@ test.each(cases)('$name', ({ initiallyEnded, batches }) => {
     expect(next.state.items).toHaveLength(items.length)
     expect(next.state.items).toMatchObject(items)
     expect([next.workling, next.pi]).toEqual(offsets)
-    expect(next.ended).toBe(response.ended)
+    expect(next.ended).toBe('logTail' in response || response.ended)
     expect(next.stop).toBe(stop ?? false)
     expect(next.finishedWhileViewing).toBe(finishedWhileViewing ?? false)
     expect(next.fallbackText).toBe(fallbackText ?? null)

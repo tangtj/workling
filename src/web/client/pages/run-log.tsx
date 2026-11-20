@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { runResult } from '../../overview-view.ts'
 import { formatDuration, formatTime } from '../../views/format.ts'
-import { parseRunId, runDetailOptions } from '../issue-detail.ts'
+import { issueDetailOptions, parseDetailId, runDetailOptions } from '../issue-detail.ts'
 import { Badge } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
 import { NotFound } from '../legacy-page.tsx'
@@ -15,12 +15,13 @@ function RunDuration({ startedAt, endedAt }: { startedAt: Date; endedAt: Date | 
 }
 
 export function RunLogPage() {
-  const runId = parseRunId(useParams().id)
+  const runId = parseDetailId(useParams().id)
   const options = runDetailOptions(runId)
   const page = useQuery(options)
   const queryClient = useQueryClient()
   const { setActive } = usePageLayout()
   const data = page.data
+  const issueId = data?.issue.id
   const runIndex = data?.runs.findIndex(({ id }) => id === runId) ?? -1
   const run = data?.runs[runIndex]
 
@@ -33,8 +34,10 @@ export function RunLogPage() {
 
   const onFinished = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: runDetailOptions(runId).queryKey })
+    if (issueId !== undefined)
+      void queryClient.invalidateQueries({ queryKey: issueDetailOptions(issueId).queryKey })
     void queryClient.invalidateQueries({ queryKey: shellKey })
-  }, [queryClient, runId])
+  }, [queryClient, runId, issueId])
 
   if (!data && page.isPending) return <p className="muted">加载中…</p>
   if (!data && page.isError)

@@ -213,8 +213,90 @@ type RunTimelineProps = {
 } & ({ variant: 'full' } | { variant: 'compact'; enabled: boolean; logTail?: string | null })
 
 export function RunTimeline(props: RunTimelineProps) {
-  // The compact renderer will replace the Issue page script in 6b.
-  return props.variant === 'full' ? <FullTimeline {...props} /> : null
+  return props.variant === 'full' ? <FullTimeline {...props} /> : <CompactTimeline {...props} />
+}
+
+function TimelineEntries({
+  events,
+  ended,
+  status,
+  ticking,
+  limit,
+  filter = 'all',
+}: {
+  events: ReturnType<typeof useRunEvents>
+  ended: boolean
+  status: RunStatus
+  ticking: boolean
+  limit?: number
+  filter?: Filter
+}) {
+  const items = events.state.items
+  return (
+    <>
+      {items.map((item, index) => {
+        const hidden =
+          (limit !== undefined && index < items.length - limit) || !visible(item, filter)
+        return (
+          <Entry
+            key={`${events.generation}:${item.id}:${item.kind}`}
+            item={item}
+            hidden={hidden}
+            ended={ended}
+            ticking={ticking && !events.error}
+            failedOutput={
+              (status === 'failed' || status === 'canceled') && items[index + 1]?.kind === 'exit'
+            }
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function FallbackNotice() {
+  return <p className="muted">此次执行没有结构化事件，以下由文本日志整理</p>
+}
+
+function CompactTimeline({
+  runId,
+  ended,
+  status,
+  enabled,
+  logTail,
+  onFinished,
+}: RunTimelineProps & { variant: 'compact' }) {
+  const [initiallyEnded] = useState(ended)
+  const events = useRunEvents({ runId, initiallyEnded, enabled, logTail })
+  const finished = ended || events.ended
+  const limit = 8
+
+  useEffect(() => {
+    if (events.finishedWhileViewing && !ended) onFinished?.()
+  }, [events.finishedWhileViewing, ended, onFinished])
+
+  return (
+    <div
+      className="run-timeline compact"
+      data-run-id={runId}
+      data-ended={String(ended)}
+      data-status={status}
+      data-limit={limit}
+    >
+      {events.fallback && <FallbackNotice />}
+      <RunPhases state={events.state} ended={finished} status={status} />
+      <p className="error-box" role="alert" hidden={!events.error}>
+        {events.error}
+      </p>
+      <TimelineEntries
+        events={events}
+        ended={finished}
+        status={status}
+        ticking={enabled}
+        limit={limit}
+      />
+    </div>
+  )
 }
 
 function FullTimeline({
@@ -315,19 +397,14 @@ function FullTimeline({
           hidden={raw.visible}
           ref={timeline}
         >
-          {events.fallback && <p className="muted">此次执行没有结构化事件，以下由文本日志整理</p>}
-          {items.map((item, index) => (
-            <Entry
-              key={`${events.generation}:${item.id}:${item.kind}`}
-              item={item}
-              hidden={!visible(item, filter)}
-              ended={finished}
-              ticking={!events.error}
-              failedOutput={
-                (status === 'failed' || status === 'canceled') && items[index + 1]?.kind === 'exit'
-              }
-            />
-          ))}
+          {events.fallback && <FallbackNotice />}
+          <TimelineEntries
+            events={events}
+            ended={finished}
+            status={status}
+            ticking
+            filter={filter}
+          />
         </div>
         <pre id="run-log" hidden={!raw.visible} ref={rawLog}>
           {raw.started ? content : ''}
