@@ -20,8 +20,8 @@ const defaults: PiSettings = {
   llmBaseUrl: null,
   llmApiKey: null,
   llmApi: 'openai-responses',
-  gitName: 'workling',
-  gitEmail: 'workling@users.noreply.github.com',
+  gitName: 'Workling',
+  gitEmail: '359148021+workling-agent@users.noreply.github.com',
 }
 
 async function database() {

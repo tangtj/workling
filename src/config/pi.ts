@@ -49,8 +49,9 @@ export function parsePiSettings(input: Record<string, unknown>): PiSettings {
   const llmApi = text('llmApi', 'openai-responses')
   if (llmApi !== 'openai-responses' && llmApi !== 'openai-completions')
     throw new Error(`llmApi 的值无效：${llmApi}`)
-  const gitName = text('gitName', 'workling')!
-  const gitEmail = text('gitEmail', 'workling@users.noreply.github.com')!
+  // 默认使用 workling-agent GitHub 机器账号（ID 359148021）的 noreply 地址；旧的无 ID 地址会关联到无关的 workling 登录。
+  const gitName = text('gitName', 'Workling')!
+  const gitEmail = text('gitEmail', '359148021+workling-agent@users.noreply.github.com')!
   if (!gitEmail.includes('@')) throw new Error(`gitEmail 的值无效：${gitEmail}`)
   return {
     model,
