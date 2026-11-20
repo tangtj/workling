@@ -203,9 +203,17 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 
 > 已确认（2026-11-18）。
 
-**信任规则**（已确认）：只认**允许名单**里的 GitHub 账号。名单在设置页维护，默认只有仓库 token 所属的账号（通过 `gh api user` 取得）；仓库有多少协作者都不影响。名单对返工指令、review 和分诊统一生效。人手动打 `workling:ready` 不受名单限制，因为能不能打标签由 GitHub 的权限控制。
+**信任规则**（2026-11-20 修订）：按顺序判定作者——
 
-**反馈来源**（只认允许名单里的作者）：
+1. workling 自己发的评论（正文带 `<!-- workling -->` 标记）永远不算；token 可能就是维护者本人的账号，所以不按"作者 = token 账号"排除自己。
+2. bot 账号永远不算。
+3. 在该仓库**受信账号**（允许名单）里的可信。名单按仓库在仓库详情页维护，填用户名或主页链接，系统换成平台数字 ID 保存，按 ID 判定（用户名可改、可被他人重新注册）。
+4. 对仓库**有写权限**的成员默认可信：GitHub 为 write / maintain / admin，GitLab 为 Developer 及以上。
+5. 其余不可信。
+
+规则对返工指令、review 和分诊统一生效。人手动打 `workling:ready` 不受限制，因为能不能打标签由平台权限控制。
+
+**反馈来源**（只认可信作者）：
 
 | 来源                                                | 现阶段如何触发                                                           |
 | --------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -217,6 +225,8 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 指令前缀两种都支持：`/workling`，以及 `@<workling 所用 token 的账号>`。只认评论开头的前缀，正文中间出现的不算。
 
 普通评论默认不触发，因为讨论和指令现在分不清。以后用 LLM 识别评论意图，同样按影子 → 建议 → 自动三级放开（见 6.4）。
+
+**使用建议**：PR 已开出时，代码问题在 PR 上提——具体行用行内评论，多处问题用 Request changes，整体要求用 PR 评论；Issue 评论留给还没有 PR 或运行失败的情况。PR 打开时在 Issue 里发的指令也按 PR 返工处理，只是缺少文件与行号，回复会汇总成一条。
 
 **规则**：
 
@@ -241,7 +251,7 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 
 不管哪一级都遵守：
 
-- 只有作者在允许名单里（见 6.3）时才会被分诊。其他人的 Issue 只能由人手动打 ready。这条是安全边界，不交给 LLM。
+- 只有作者可信（见 6.3）时才会被分诊。其他人的 Issue 只能由人手动打 ready。这条是安全边界，不交给 LLM。
 - Issue 最后一次修改之后要过冷静期（默认 10 分钟）才分诊，内容哈希没变就不重复分诊。
 - 先做确定性检查（有没有 `## 目标`、`## 验收`，各指令行的格式），再做一次 LLM 结构化调用（`pi-ai`，不用 agent 循环）。输出是 `{ decision: 'accept' | 'needs_info' | 'ignore', missing: string[], note: string }`，其中 `note` 只存库，不发到 GitHub。
 - LLM 失败或输出无效时保持原状，下一轮再试，不默认放行。
@@ -264,8 +274,8 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 
 - `issues`：`status` 不新增取值，`pr_open` 用现有的 `done` 加 `prState` 表达；新增 `triage`（JSON：级别、结论、内容哈希、时间）和 `reworkRounds`。
 - `runs`：新增 `kind` 和 `contract`。
-- 新增 `feedback` 表：`issueId`、来源（PR review / PR 评论 / Issue 评论）、GitHub 上的 ID、作者、正文摘要、状态（待处理 / 已纳入运行 / 已回复）、`runId`。
-- 设置项：worker 镜像（沿用 `taskImage`）、返工轮数上限、按仓库的分诊级别、允许名单、冷静期。
+- 新增 `feedback`、`feedback_cursors`、`trusted_users` 表，字段见 [step-2.1-feedback.md](step-2.1-feedback.md)。
+- 设置项：worker 镜像（沿用 `taskImage`）、返工轮数上限、按仓库的分诊级别、冷静期（受信账号按仓库存在 `trusted_users` 表）。
 
 ## 9. 阶段
 
@@ -297,4 +307,4 @@ ready（人）──▶ queued ──▶ running(implement) ──┬─▶ fail
 
 1. **review 的触发方式**：暂不实现，只在契约里预留位置。备选方案：(a) 实现完成后自动换一个模型 review 一遍；(b) 人在 PR 上打 `workling:review` 标签触发，也适用于不是 workling 开的 PR。
 
-已确认：指令前缀 `/workling` 和 `@账号` 两种都支持（6.3）；worker 用独立的 `worker-v*` tag 发布（5.3）；信任规则用允许名单（6.3）。
+已确认：指令前缀 `/workling` 和 `@账号` 两种都支持（6.3）；worker 用独立的 `worker-v*` tag 发布（5.3）；信任规则为写权限 + 按仓库的受信账号（6.3，2026-11-20 修订）。
