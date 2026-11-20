@@ -108,10 +108,22 @@ worker/Dockerfile
   spec.json        主体写入：任务描述
   input/           主体写入：issue.md、附件、feedback.md（返工时）
   repo/            主体检出的工作副本，origin 指向本地镜像，不带凭证
-  secrets/llm.json 主体写入，权限 600：LLM 接入信息（不放进环境变量，docker inspect 能看到环境变量）
+  secrets/llm.json 主体按需写入，权限 600：LLM 接入信息
   events.jsonl     worker 追加：进度事件
   out/             worker 写入：产出
 ```
+
+`secrets/llm.json`（可选）：
+
+```ts
+type LlmSecrets = {
+  baseUrl: string // 非空
+  apiKey: string // 非空
+  api: 'openai-responses' | 'openai-completions'
+}
+```
+
+主体配置了 LLM 接入时写入此文件，`secrets/` 目录权限为 700。缺少该文件时，worker 沿用自身环境中的 codex / Pi 登录。运行结束后由主体删除整个 `secrets/` 目录。
 
 `spec.json`：
 

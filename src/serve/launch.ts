@@ -1,10 +1,11 @@
 import { type ExecutorSettings } from '../config/executor.ts'
 import { and, count, eq } from 'drizzle-orm'
 import { join } from 'node:path'
+import { removeSecrets, writeLlmSecrets } from '../contract/secrets.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../contract/spec.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs } from '../db/schema.ts'
-import { createExecutor, type Executor } from '../executor/index.ts'
+import { createExecutor, workerEnv, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
 import { docBranch, taskBranch } from '../issue/branch.ts'
 import { readIssue } from '../issue/read.ts'
@@ -124,6 +125,7 @@ export async function launchQueued({
     }
     slots--
     let record: typeof runs.$inferSelect | undefined
+    let handle: Awaited<ReturnType<Executor['start']>> | undefined
     try {
       const startedAt = now()
       const issueRef = `github:${repo.path}#${issue.number}`
@@ -134,12 +136,11 @@ export async function launchQueued({
         .values({ issueId: issue.id, worker: settings.worker, taskDir, startedAt })
         .returning()
         .get()
-      const inherited = ghEnv(repo.token, repo.host)
       const { title, body } = await readIssue({
         ref,
         dir: join(taskDir, 'input'),
         command,
-        env: inherited,
+        env: ghEnv(repo.token, repo.host),
       })
       const checkout = await prepareCheckout({
         workspace: settings.workspace,
@@ -150,7 +151,6 @@ export async function launchQueued({
         command,
         signal,
       })
-      let handle: Awaited<ReturnType<Executor['start']>> | undefined
       if ('error' in checkout) {
         await writeResult(taskDir, {
           exitCode: null,
@@ -175,28 +175,16 @@ export async function launchQueued({
           },
           git: { name: pi.gitName, email: pi.gitEmail },
         })
-        // 模型和提交身份来自契约；LLM 接入只使用当前配置。
-        for (const name of [
-          'WORKLING_MODEL',
-          'WORKLING_EFFORT',
-          'WORKLING_GIT_NAME',
-          'WORKLING_GIT_EMAIL',
-          'WORKLING_PI_MODEL',
-          'WORKLING_LLM_BASE_URL',
-          'WORKLING_LLM_API_KEY',
-          'WORKLING_LLM_API',
-        ])
-          delete inherited[name]
+        if (pi.llmBaseUrl !== null) {
+          await writeLlmSecrets(taskDir, {
+            baseUrl: pi.llmBaseUrl,
+            apiKey: pi.llmApiKey!,
+            api: pi.llmApi,
+          })
+        }
         const env = {
-          ...inherited,
+          ...workerEnv(process.env),
           WORKLING_WORKSPACE: settings.workspace,
-          ...(pi.llmBaseUrl !== null
-            ? {
-                WORKLING_LLM_BASE_URL: pi.llmBaseUrl,
-                WORKLING_LLM_API_KEY: pi.llmApiKey!,
-                WORKLING_LLM_API: pi.llmApi,
-              }
-            : {}),
         }
         signal.throwIfAborted()
         handle = await executor.start({ runId: record.id, ref: issueRef, taskDir, env })
@@ -214,6 +202,11 @@ export async function launchQueued({
           .run()
       })
     } catch (error) {
+      // 未拉起的运行不会进入对账，由启动流程清理已写入的密钥。
+      if (!handle && record?.taskDir)
+        await removeSecrets(record.taskDir).catch(() => {
+          log(`${repo.ref} #${issue.number} 删除任务密钥失败`)
+        })
       if (record)
         db.update(runs)
           .set({ endedAt: now(), error: `拉起失败：${errorMessage(error)}` })

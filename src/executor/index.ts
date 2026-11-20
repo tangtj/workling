@@ -19,6 +19,22 @@ export interface Executor {
   finish(run: RunHandle): Promise<void>
 }
 
+export function workerEnv(base: Environment): Environment {
+  const env = { ...base }
+  const allowed = new Set([
+    'WORKLING_WORKSPACE',
+    'WORKLING_CODEX_SANDBOX',
+    'WORKLING_TASK_TEE',
+    'WORKLING_GITLAB_HOST',
+  ])
+  // worker 会运行第三方代码和模型生成的命令，不应获得平台凭证或主体配置。
+  for (const name of Object.keys(env)) {
+    if (/^(GH_|GITHUB_|GITLAB_)/.test(name) || (name.startsWith('WORKLING_') && !allowed.has(name)))
+      delete env[name]
+  }
+  return env
+}
+
 export function createExecutor(
   config: ExecutorSettings,
   command: Command,

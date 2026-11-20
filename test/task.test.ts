@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseIssueRef } from '../src/issue/reference.ts'
 import { readOutResult } from '../src/contract/out.ts'
+import { writeLlmSecrets } from '../src/contract/secrets.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../src/contract/spec.ts'
 import { ROOT } from '../src/runtime/paths.ts'
 import { isAlive } from '../src/runtime/process.ts'
@@ -112,6 +113,9 @@ async function setupTask({ pi, docBranch }: { pi?: string; docBranch?: string } 
   const env: Environment = {
     ...process.env,
     GH_TOKEN: 'private-token',
+    GITHUB_TOKEN: 'private-token',
+    GH_ENTERPRISE_TOKEN: 'private-token',
+    GITHUB_ENTERPRISE_TOKEN: 'private-token',
     GH_HOST: 'wrong',
     WORKLING_MODEL: 'stale-codex',
     WORKLING_EFFORT: 'low',
@@ -123,7 +127,7 @@ async function setupTask({ pi, docBranch }: { pi?: string; docBranch?: string } 
   const calls: string[][] = []
   const command: Command = async (args, options) => {
     calls.push(args)
-    expect(options?.env).toEqual({ ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1' })
+    expect(options?.env).toEqual(env)
     expect(args[0]).toBe('git')
     expect(options?.cwd).toBe(join(dir, 'repo'))
     return preparedGit(args, options)
@@ -166,8 +170,9 @@ test('runTask 使用已准备的工作副本，假 Pi 收到两个分支和正�
   expect(captured.cwd).toBe(
     await import('node:fs/promises').then((fs) => fs.realpath(join(options.dir, 'repo'))),
   )
-  expect(captured.env.GH_TOKEN).toBe('private-token')
-  expect(captured.env.GH_PROMPT_DISABLED).toBe('1')
+  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'])
+    expect(captured.env).not.toHaveProperty(name)
+  expect(captured.env.GH_PROMPT_DISABLED).toBeUndefined()
   expect(captured.env.GH_HOST).toBe('wrong')
   expect(options.calls).toEqual([
     ['git', 'rev-parse', '--is-inside-work-tree', '--show-prefix'],
@@ -351,9 +356,11 @@ test.each([undefined, 'danger-full-access'])(
 test('runTask 自定义接口生成受限配置且密钥只经环境变量传递', async () => {
   const options = await setupTask({ pi: 'custom/pi-model' })
   const fakeKey = 'distinctive-fake-key-9f2c'
-  options.env.WORKLING_LLM_BASE_URL = 'https://llm.example/v1\\path"quoted'
-  options.env.WORKLING_LLM_API_KEY = fakeKey
-  options.env.WORKLING_LLM_API = 'openai-completions'
+  await writeLlmSecrets(options.dir, {
+    baseUrl: 'https://llm.example/v1\\path"quoted',
+    apiKey: fakeKey,
+    api: 'openai-completions',
+  })
   let launchArgs: string[] = []
   let launchEnv: Environment | undefined
   await runTask({
@@ -409,12 +416,17 @@ test('runTask 自定义接口生成受限配置且密钥只经环境变量传递
     CODEX_HOME: codexDir,
     WORKLING_LLM_API_KEY: fakeKey,
   })
+  expect(launchEnv).not.toHaveProperty('GH_TOKEN')
+  expect(options.env).not.toHaveProperty('WORKLING_LLM_API_KEY')
 })
 
 test('runTask 自定义接口的 Pi 模型回退至契约中的 codex 模型，未配置时保持原行为', async () => {
   const configured = await setupTask()
-  configured.env.WORKLING_LLM_BASE_URL = 'http://localhost:8080/v1/'
-  configured.env.WORKLING_LLM_API_KEY = 'distinctive-fake-key'
+  await writeLlmSecrets(configured.dir, {
+    baseUrl: 'http://localhost:8080/v1/',
+    apiKey: 'distinctive-fake-key',
+    api: 'openai-responses',
+  })
   let args: string[] = []
   await runTask({
     ...configured,
@@ -426,6 +438,8 @@ test('runTask 自定义接口的 Pi 模型回退至契约中的 codex 模型，�
   expect(args.slice(-4, -2)).toEqual(['--model', 'workling/spec-codex'])
 
   const normal = await setupTask()
+  normal.env.WORKLING_LLM_BASE_URL = 'https://old.example/v1'
+  normal.env.WORKLING_LLM_API_KEY = 'legacy-key'
   let normalArgs: string[] = []
   let normalEnv: Environment | undefined
   await runTask({
@@ -439,8 +453,22 @@ test('runTask 自定义接口的 Pi 模型回退至契约中的 codex 模型，�
   expect(normalArgs).not.toContain('--model')
   expect(normalEnv).not.toHaveProperty('PI_CODING_AGENT_DIR')
   expect(normalEnv).not.toHaveProperty('CODEX_HOME')
+  expect(normalEnv).not.toHaveProperty('WORKLING_LLM_API_KEY')
   expect(await Bun.file(join(normal.dir, 'pi-agent/models.json')).exists()).toBe(false)
   expect(await Bun.file(join(normal.dir, 'codex-home/config.toml')).exists()).toBe(false)
+})
+
+test('密钥文件无效时拒绝拉起 Pi，错误和日志不包含密钥', async () => {
+  const options = await setupTask()
+  const fakeKey = 'distinctive-invalid-fake-key'
+  await mkdir(join(options.dir, 'secrets'))
+  await writeFile(join(options.dir, 'secrets', 'llm.json'), `{"apiKey":"${fakeKey}",`)
+  const lines: string[] = []
+  await expect(runTask({ ...options, out: (line) => lines.push(line) })).rejects.toThrow(
+    /^secrets\/llm\.json 无效$/,
+  )
+  expect(lines.join('\n')).not.toContain(fakeKey)
+  expect(await Bun.file(options.record).exists()).toBe(false)
 })
 
 test('runTask 中止时结束假 Pi 与其子进程并返回信号', async () => {
@@ -496,12 +524,18 @@ test('Pi 工作约定对部分完成的 PR 使用 Refs，不写关闭关键字',
 
 test('runTask 保存原始事件并输出脱敏的步骤与 Pi 进度', async () => {
   const options = await setupTask()
-  const raw = `${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'private-token' }] } })}\n`
+  await writeLlmSecrets(options.dir, {
+    baseUrl: 'https://llm.example/v1',
+    apiKey: 'private-llm-key',
+    api: 'openai-responses',
+  })
+  const raw = `${JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'private-llm-key' }] } })}\n`
   options.env.WORKLING_TEST_EVENTS = raw
   const lines: string[] = []
   await runTask({ ...options, out: (line) => lines.push(line), now: () => new Date(2026, 0, 1) })
   expect(await readFile(join(options.dir, 'pi-events.jsonl'), 'utf8')).toBe(raw)
   expect(lines).toEqual([
+    '[workling 00:00:00] 生成模型配置（openai-responses，Pi 模型 workling/spec-codex）',
     '[workling 00:00:00] 拉起 Pi',
     '[pi 00:00:00] ***',
     '[workling 00:00:00] Pi 结束：退出码 0，用时 0 秒',

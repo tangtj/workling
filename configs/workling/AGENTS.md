@@ -6,7 +6,7 @@
 
 1. 读取：阅读 `<任务目录>/input/issue.md`，附件在 `<任务目录>/input/attachments/`。不再运行任何 `workling` 子命令。
 2. 分支：仓库目录已检出到用户消息给出的任务分支，不要新建、切换或重置分支。用户消息给出文档分支时，Issue 中引用的仓库内文档是任务说明的一部分，先读完再实现；不要在文档分支上提交或推送它。
-3. 依赖：codex 不联网，仓库依赖由你在调用 codex 前装好。阅读仓库 AGENTS.md / README，找出它写明的依赖安装命令（如 `bun install --frozen-lockfile --ignore-scripts`），在仓库目录加 `env -u GH_TOKEN -u GITHUB_TOKEN` 前缀运行。安装脚本会执行第三方代码，不能让它拿到平台凭证。只运行文档写明的命令；文档没写时不要自己猜，记为「仓库未说明安装命令」。记下结果（已安装 / 失败及错误摘要 / 未说明），写进下一步的约束。
+3. 依赖：codex 不联网，仓库依赖由你在调用 codex 前装好。阅读仓库 AGENTS.md / README，找出它写明的依赖安装命令（如 `bun install --frozen-lockfile --ignore-scripts`），在仓库目录加 `env -u WORKLING_LLM_API_KEY` 前缀运行。安装脚本会执行第三方代码，不能让它拿到 LLM 密钥。只运行文档写明的命令；文档没写时不要自己猜，记为「仓库未说明安装命令」。记下结果（已安装 / 失败及错误摘要 / 未说明），写进下一步的约束。
 4. 组装：写 `<任务目录>/codex-input.md`，结构如下。任务部分原样复制 Issue 正文，不改写、不补充需求：
 
    ```text
@@ -38,11 +38,11 @@
 5. 调用 codex（命令可能运行数十分钟；调用 bash 时不要传 timeout 参数，超时由 workling 整体回收）：
 
    ```text
-   env -u GH_TOKEN -u GITHUB_TOKEN codex exec -C <仓库目录> -s <codex 沙箱模式> --add-dir <任务目录> \
+   codex exec -C <仓库目录> -s <codex 沙箱模式> --add-dir <任务目录> \
      -m <模型> -c model_reasoning_effort=<强度> - < <任务目录>/codex-input.md
    ```
 
-   Issue 正文有 `模型：` / `强度：` 行时用其值，否则用默认值。必须保留 `env -u GH_TOKEN -u GITHUB_TOKEN` 前缀：codex 不需要平台凭证，去掉它们可以避免 token 被写进仓库文件后随提交泄露。
+   Issue 正文有 `模型：` / `强度：` 行时用其值，否则用默认值。
 
 6. 核对：读 `report.md`，用 `git status` 与 `git diff` 对照回报逐条核对；必要时自己重跑回报中的检查命令。安装依赖产生的锁文件变动或未被忽略的产物不属于任务改动，不要提交。
    核对后由你确定本次的**交付结果**，后续步骤都以它为准：

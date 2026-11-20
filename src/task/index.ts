@@ -2,6 +2,7 @@ import { appendFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeOutResult } from '../contract/out.ts'
+import { readLlmSecrets } from '../contract/secrets.ts'
 import { CONTRACT_VERSION, readSpec } from '../contract/spec.ts'
 import type { IssueRef } from '../issue/reference.ts'
 import { errorMessage } from '../runtime/errors.ts'
@@ -32,7 +33,8 @@ export async function runTask(options: {
   const issuePath = join(dir, 'input', 'issue.md')
   if (!(await stat(issuePath, { throwIfNoEntry: false }))?.isFile())
     throw new Error('缺少 Issue 内容文件 input/issue.md')
-  const env: Environment = { ...options.env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1' }
+  const llmSecrets = await readLlmSecrets(dir)
+  const { env } = options
   const repo = join(dir, 'repo')
   const git = (args: string[]) => command(['git', ...args], { cwd: repo, env, signal })
   if (!(await stat(repo, { throwIfNoEntry: false }))?.isDirectory())
@@ -42,9 +44,7 @@ export async function runTask(options: {
   if ((await git(['symbolic-ref', '--quiet', 'HEAD'])) !== `refs/heads/${spec.repo.branch}`)
     throw new Error(`任务工作副本未检出分支 ${spec.repo.branch}`)
   const now = options.now ?? (() => new Date())
-  const secrets = [options.env.GH_TOKEN, options.env.WORKLING_LLM_API_KEY].filter(
-    (value): value is string => Boolean(value),
-  )
+  const secrets = llmSecrets ? [llmSecrets.apiKey] : []
   const out = options.out ?? ((line: string) => process.stdout.write(`${line}\n`))
   const log = (line: string) => {
     line = redact(line, secrets)
@@ -58,12 +58,20 @@ export async function runTask(options: {
   const outDir = join(dir, 'out')
   await mkdir(outDir, { recursive: true, mode: 0o700 })
   await chmod(outDir, 0o700)
-  const llmBaseUrl = env.WORKLING_LLM_BASE_URL
   const piModel = spec.model.pi ?? spec.model.codex
-  let piEnv: Environment = { ...options.env, GH_PROMPT_DISABLED: '1' }
+  const piEnv = { ...env }
+  // 手动运行旧命令时，仍不把平台凭证或旧的 LLM Key 传给 Pi。
+  for (const name of [
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'GH_ENTERPRISE_TOKEN',
+    'GITHUB_ENTERPRISE_TOKEN',
+    'WORKLING_LLM_API_KEY',
+  ])
+    delete piEnv[name]
   let modelArgs = spec.model.pi ? ['--model', spec.model.pi] : []
-  if (llmBaseUrl) {
-    const api = env.WORKLING_LLM_API ?? 'openai-responses'
+  if (llmSecrets) {
+    const { baseUrl, apiKey, api } = llmSecrets
     log(`生成模型配置（${api}，Pi 模型 workling/${piModel}）`)
     const piAgentDir = join(dir, 'pi-agent')
     const codexHome = join(dir, 'codex-home')
@@ -74,7 +82,7 @@ export async function runTask(options: {
     const models = {
       providers: {
         workling: {
-          baseUrl: llmBaseUrl,
+          baseUrl,
           api,
           apiKey: '$WORKLING_LLM_API_KEY',
           models: [{ id: piModel, reasoning: true }],
@@ -86,14 +94,12 @@ export async function runTask(options: {
     })
     await chmod(join(piAgentDir, 'models.json'), 0o600)
     const toml = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
-    const config = `model_provider = "workling"\nmodel = "${toml(spec.model.codex)}"\n\n[model_providers.workling]\nname = "workling"\nbase_url = "${toml(llmBaseUrl)}"\nwire_api = "${api === 'openai-completions' ? 'chat' : 'responses'}"\nenv_key = "WORKLING_LLM_API_KEY"\n`
+    const config = `model_provider = "workling"\nmodel = "${toml(spec.model.codex)}"\n\n[model_providers.workling]\nname = "workling"\nbase_url = "${toml(baseUrl)}"\nwire_api = "${api === 'openai-completions' ? 'chat' : 'responses'}"\nenv_key = "WORKLING_LLM_API_KEY"\n`
     await writeFile(join(codexHome, 'config.toml'), config, { mode: 0o600 })
     await chmod(join(codexHome, 'config.toml'), 0o600)
-    piEnv = {
-      ...piEnv,
-      PI_CODING_AGENT_DIR: piAgentDir,
-      CODEX_HOME: codexHome,
-    }
+    piEnv.PI_CODING_AGENT_DIR = piAgentDir
+    piEnv.CODEX_HOME = codexHome
+    piEnv.WORKLING_LLM_API_KEY = apiKey
     modelArgs = ['--model', `workling/${piModel}`]
   }
   const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（${issueRef}）

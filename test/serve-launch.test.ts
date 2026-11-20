@@ -8,6 +8,7 @@ import type { StartSpec } from '../src/executor/index.ts'
 import { expect, test } from 'bun:test'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readLlmSecrets } from '../src/contract/secrets.ts'
 import { readSpec } from '../src/contract/spec.ts'
 import { issues, repos, runs } from '../src/db/schema.ts'
 import { parsePiSettings, readPiSettings, updatePiSettings } from '../src/config/pi.ts'
@@ -71,12 +72,9 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
           const dir = spec.taskDir
           expect(spec).toMatchObject({ runId: 1, ref: 'github:a/b#2', taskDir: dir })
           expect(JSON.stringify({ ...spec, env: undefined })).not.toContain('repo-secret')
-          expect(spec.env).toMatchObject({
-            GH_TOKEN: 'repo-secret',
-            GH_HOST: 'github.com',
-            GH_PROMPT_DISABLED: '1',
-            WORKLING_WORKSPACE: s.workspace,
-          })
+          expect(spec.env.WORKLING_WORKSPACE).toBe(s.workspace)
+          expect(spec.env).not.toHaveProperty('GH_TOKEN')
+          expect(await readLlmSecrets(dir)).toBeNull()
           expect(await readSpec(dir)).toEqual({
             contract: 1,
             kind: 'implement',
@@ -145,12 +143,24 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
   }
 })
 
-test('拉起时仅传递已配置的 LLM 接入变量，旧模型和 Git 环境变量不传入 task', async () => {
+test('拉起时配置 LLM 才写密钥文件，平台凭证与旧配置不传入 worker', async () => {
+  const removed = [
+    'GH_TOKEN',
+    'WORKLING_UPDATE_TOKEN',
+    'WORKLING_MODEL',
+    'WORKLING_EFFORT',
+    'WORKLING_GIT_NAME',
+    'WORKLING_GIT_EMAIL',
+    'WORKLING_PI_MODEL',
+    'WORKLING_LLM_BASE_URL',
+    'WORKLING_LLM_API_KEY',
+    'WORKLING_LLM_API',
+  ]
+  for (const name of removed) process.env[name] = 'stale-value'
   const configured = await scenario()
   try {
     await configured.issue(42, 'queued')
     let spec: StartSpec | undefined
-    let env: NodeJS.ProcessEnv | undefined
     await launchQueued({
       ...configured.options,
       pi: parsePiSettings({
@@ -161,46 +171,39 @@ test('拉起时仅传递已配置的 LLM 接入变量，旧模型和 Git 环境�
       executor: fakeExecutor({
         async start(value) {
           spec = value
-          env = value.env
+          expect((await stat(join(value.taskDir, 'secrets/llm.json'))).mode & 0o777).toBe(0o600)
+          expect(await readLlmSecrets(value.taskDir)).toEqual({
+            baseUrl: 'https://llm.example/v1',
+            apiKey: 'distinctive-fake-key',
+            api: 'openai-completions',
+          })
           return { pid: 700 }
         },
       }),
     })
-    expect(env).toMatchObject({
-      WORKLING_LLM_BASE_URL: 'https://llm.example/v1',
-      WORKLING_LLM_API_KEY: 'distinctive-fake-key',
-      WORKLING_LLM_API: 'openai-completions',
-    })
-    expect(JSON.stringify({ ...spec, env: undefined })).not.toContain('distinctive-fake-key')
+    expect(spec).toBeDefined()
+    for (const name of removed) expect(spec!.env).not.toHaveProperty(name)
+    expect(Object.keys(spec!.env).filter((key) => key.startsWith('WORKLING_LLM_'))).toEqual([])
+    expect(JSON.stringify(spec)).not.toContain('distinctive-fake-key')
   } finally {
     await configured.dispose()
   }
   const unset = await scenario()
   try {
-    const removed = [
-      'WORKLING_MODEL',
-      'WORKLING_EFFORT',
-      'WORKLING_GIT_NAME',
-      'WORKLING_GIT_EMAIL',
-      'WORKLING_PI_MODEL',
-      'WORKLING_LLM_BASE_URL',
-      'WORKLING_LLM_API_KEY',
-      'WORKLING_LLM_API',
-    ]
-    for (const name of removed) process.env[name] = 'stale-value'
     await unset.issue(42, 'queued')
-    let env: NodeJS.ProcessEnv | undefined
+    let spec: StartSpec | undefined
     await launchQueued({
       ...unset.options,
       executor: fakeExecutor({
-        async start(spec) {
-          env = spec.env
+        async start(value) {
+          spec = value
           return { pid: 701 }
         },
       }),
     })
-    expect(env).toBeDefined()
-    for (const name of removed) expect(env).not.toHaveProperty(name)
+    expect(spec).toBeDefined()
+    expect(await readLlmSecrets(spec!.taskDir)).toBeNull()
+    for (const name of removed) expect(spec!.env).not.toHaveProperty(name)
   } finally {
     await unset.dispose()
   }
@@ -244,8 +247,10 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
     await s.issue(42, 'queued')
     await launchQueued({
       ...s.options,
+      pi: parsePiSettings({ llmBaseUrl: 'https://llm.example', llmApiKey: 'fake-key' }),
       executor: fakeExecutor({
-        async start() {
+        async start(spec) {
+          expect(await readLlmSecrets(spec.taskDir)).not.toBeNull()
           throw new Error('spawn error')
         },
       }),
@@ -256,6 +261,8 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
       pid: null,
     })
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'queued', lastRunId: null })
+    const taskDir = s.db.select().from(runs).get()!.taskDir!
+    expect(await readdir(taskDir)).not.toContain('secrets')
     expect(s.calls.map((call) => call.args[2])).toEqual(['view'])
     await launchQueued({
       ...s.options,

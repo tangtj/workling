@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createExecutor, type RunHandle, type StartSpec } from '../src/executor/index.ts'
+import { createExecutor, workerEnv, type RunHandle, type StartSpec } from '../src/executor/index.ts'
 import * as runtime from '../src/runtime/process.ts'
 import { CLI } from '../src/runtime/paths.ts'
 import type { Command, RunOptions } from '../src/runtime/types.ts'
@@ -14,6 +14,26 @@ import { parseExecutorSettings } from '../src/config/executor.ts'
 const dirs: string[] = []
 afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true })
+})
+
+test.each([
+  ['GH_TOKEN', false],
+  ['GH_HOST', false],
+  ['GITHUB_TOKEN', false],
+  ['GITLAB_TOKEN', false],
+  ['WORKLING_UPDATE_TOKEN', false],
+  ['WORKLING_LLM_API_KEY', false],
+  ['WORKLING_PORT', false],
+  ['PATH', true],
+  ['HOME', true],
+  ['WORKLING_WORKSPACE', true],
+  ['WORKLING_CODEX_SANDBOX', true],
+  ['WORKLING_TASK_TEE', true],
+  ['WORKLING_GITLAB_HOST', true],
+] as const)('worker 环境过滤 %s（保留：%s）', (name, keep) => {
+  const base = { [name]: 'original' }
+  expect(workerEnv(base)).toEqual(keep ? base : {})
+  expect(base[name]).toBe('original')
 })
 
 async function scenario(network?: string) {
@@ -28,6 +48,8 @@ async function scenario(network?: string) {
       ...process.env,
       GH_TOKEN: 'distinctive-fake-token',
       WORKLING_LLM_API_KEY: 'distinctive-fake-key',
+      WORKLING_UPDATE_TOKEN: 'distinctive-fake-update-token',
+      WORKLING_GITLAB_HOST: network ? 'gitlab.example' : '',
       WORKLING_MODEL: 'gpt-6.1-terra',
       WORKLING_PI_MODEL: undefined,
       UNRELATED_SECRET: 'excluded',
@@ -59,9 +81,8 @@ test.each([undefined, 'workling-network'])(
       WORKLING_CODEX_SANDBOX: 'danger-full-access',
       WORKLING_TASK_TEE: '1',
     }
-    const keys = Object.keys(env).filter(
-      (key) => env[key as keyof typeof env] !== undefined && /^(GH_|WORKLING_|HOME$)/.test(key),
-    )
+    const keys = ['HOME', 'WORKLING_WORKSPACE', 'WORKLING_CODEX_SANDBOX', 'WORKLING_TASK_TEE']
+    if (network) keys.push('WORKLING_GITLAB_HOST')
     expect(calls).toEqual([
       {
         args: [
@@ -93,6 +114,7 @@ test.each([undefined, 'workling-network'])(
           ...keys.flatMap((key) => ['-e', key]),
           'workling:local',
           'bun',
+          '--no-env-file',
           'src/cli.ts',
           'task',
           spec.ref,
@@ -241,7 +263,7 @@ test('processExecutor 保持 launch 参数与日志、isTaskAlive 校验、killG
   const { spec, handle } = await scenario()
   const executor = processExecutor({
     launch(args, options) {
-      expect(args).toEqual([process.execPath, CLI, 'task', spec.ref, spec.taskDir])
+      expect(args).toEqual([process.execPath, '--no-env-file', CLI, 'task', spec.ref, spec.taskDir])
       expect(options).toEqual({ env: spec.env, log: join(spec.taskDir, 'task.log') })
       return 123
     },

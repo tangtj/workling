@@ -4,6 +4,7 @@ import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { writeLlmSecrets } from '../src/contract/secrets.ts'
 import { issues, runs } from '../src/db/schema.ts'
 import { writeResult } from '../src/task/dir.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
@@ -535,6 +536,11 @@ test.each(['done', '非零结果', 'invalid', '丢失', 'canceled'])(
         delivery: kind === 'done',
       })
       await mkdir(join(dir, 'repo'))
+      await writeLlmSecrets(dir, {
+        baseUrl: 'https://llm.example/v1',
+        apiKey: 'fake-key',
+        api: 'openai-responses',
+      })
       if (kind === 'done' || kind === '非零结果')
         await writeResult(dir, {
           exitCode: kind === 'done' ? 0 : 7,
@@ -558,6 +564,7 @@ test.each(['done', '非零结果', 'invalid', '丢失', 'canceled'])(
             }),
           )
           expect(await readdir(dir)).toContain('repo')
+          expect(await readdir(dir)).toContain('secrets')
           expect(s.calls.filter((call) => call.args[1] === 'issue')).toEqual([])
           finished++
         },
@@ -571,6 +578,7 @@ test.each(['done', '非零结果', 'invalid', '丢失', 'canceled'])(
         },
       })
       expect(finished).toBe(1)
+      expect(await readdir(dir)).not.toContain('secrets')
       expect(s.db.select().from(runs).get()).toMatchObject({
         endedAt: expect.any(Date),
         logTail: 'finish ***',
