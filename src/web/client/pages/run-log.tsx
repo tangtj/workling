@@ -2,11 +2,11 @@ import { useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { runResult } from '../../overview-view.ts'
-import { formatDuration, formatTime } from '../../views/format.ts'
+import { formatDuration, formatTime } from '../../format.ts'
 import { issueDetailOptions, parseDetailId, runDetailOptions } from '../issue-detail.ts'
 import { Badge } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
-import { NotFound } from '../legacy-page.tsx'
+import { NotFound } from '../not-found.tsx'
 import { RunTimeline, useSecondClock } from '../run-timeline.tsx'
 
 function RunDuration({ startedAt, endedAt }: { startedAt: Date; endedAt: Date | null }) {

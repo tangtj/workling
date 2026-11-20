@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { formatDuration, formatTime, prLabel, relativeTime } from '../src/web/views/format.ts'
+import { formatDuration, formatTime, prLabel, relativeTime } from '../src/web/format.ts'
 
 test('格式化本地时间、时长、相对时间和 PR 编号', () => {
   const now = new Date(2026, 10, 14, 12, 30).getTime()

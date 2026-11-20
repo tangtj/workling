@@ -1,8 +1,7 @@
 import { readExecutorSettings, updateExecutorSettings } from '../src/config/executor.ts'
 import { eq } from 'drizzle-orm'
 import { createHash } from 'node:crypto'
-import { assetUrl } from '../src/web/assets.ts'
-import { themeScript } from '../src/web/views/theme.ts'
+import { themeScript } from '../src/web/theme.ts'
 import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,7 +14,7 @@ import type { ServeStatus } from '../src/serve/index.ts'
 import { pageData } from '../src/web/data.ts'
 import * as Value from 'typebox/value'
 import { repoSchema } from '../src/web/repos.ts'
-import { failureReason } from '../src/web/views/shared.tsx'
+import { failureReason } from '../src/web/issue-view.ts'
 
 test('管理接口校验请求、掩码凭证并管理仓库', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-api-'))
@@ -169,42 +168,13 @@ test('管理页面资源受 Host 校验并设置安全响应头', async () => {
     expect(html).toContain('id="root"')
     expect(html).toMatch(/<script type="module" src="\/assets\/main-[^"/]+\.js"/)
     expect(html).toMatch(/<link rel="stylesheet" href="\/assets\/main-[^"/]+\.css"/)
-    expect(html).toContain('<meta name="color-scheme" content="light dark"/>')
+    expect(html).toContain('<meta name="color-scheme" content="light dark">')
     expect(response.headers.get('content-security-policy')).toContain(
       `'sha256-${createHash('sha256').update(themeScript).digest('base64')}'`,
     )
-    for (const name of ['style.css', 'version.js', 'login.js'] as const) {
-      const url = assetUrl(name)
-      expect(url).toMatch(/\?v=[0-9a-f]{12}$/)
-      const asset = await app.request(url, { headers })
-      const body = await asset.text()
-      expect(url).toEndWith(createHash('sha256').update(body).digest('hex').slice(0, 12))
-      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
-      expect(asset.headers.get('content-security-policy')).toBe(
-        response.headers.get('content-security-policy'),
-      )
-      expect(
-        (await app.request(`/${name}?v=wrong`, { headers })).headers.get('cache-control'),
-      ).toBe('no-cache')
-    }
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
-    for (const [path, type] of [
-      ['/version.js', 'text/javascript; charset=utf-8'],
-      ['/style.css', 'text/css; charset=utf-8'],
-      ['/login.js', 'text/javascript; charset=utf-8'],
-    ]) {
-      const asset = await app.request(path, { headers })
-      expect(asset.status).toBe(200)
-      expect(asset.headers.get('content-type')).toBe(type)
-      expect(asset.headers.get('content-security-policy')).toBe(
-        response.headers.get('content-security-policy'),
-      )
-      expect(asset.headers.get('x-content-type-options')).toBe('nosniff')
-      expect(asset.headers.get('referrer-policy')).toBe('no-referrer')
-      expect(asset.headers.get('cache-control')).toBe('no-cache')
-    }
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     expect(response.headers.get('cache-control')).toBe('no-store')
@@ -263,17 +233,16 @@ test('登录鉴权、会话过期、限流窗口和退出登录', async () => {
       expect(response.status).toBe(401)
       expect(await response.json()).toEqual({ error: '未登录' })
     }
-    for (const path of ['/health', '/login', '/style.css', '/login.js'])
-      expect((await request(path)).status).toBe(200)
+    for (const path of ['/health', '/login']) expect((await request(path)).status).toBe(200)
     const page = await request('/login')
     expect(page.headers.get('cache-control')).toBe('no-store')
     const html = await page.text()
-    expect(html).toContain('<meta name="color-scheme" content="light dark"/>')
-    expect(html).toContain(assetUrl('style.css'))
-    expect(html).toContain(assetUrl('login.js'))
-    expect((await request(assetUrl('style.css'))).status).toBe(200)
-    expect((await request(assetUrl('login.js'))).status).toBe(200)
-    expect((await request(assetUrl('version.js'))).status).toBe(302)
+    expect(html).toContain('<meta name="color-scheme" content="light dark">')
+    const script = html.match(/src="(\/assets\/login-[^"]+\.js)"/)?.[1]
+    const styles = [...html.matchAll(/href="(\/assets\/[^"]+\.css)"/g)].map((match) => match[1]!)
+    expect(script).toBeDefined()
+    expect(styles.length).toBeGreaterThan(0)
+    for (const asset of [script!, ...styles]) expect((await request(asset)).status).toBe(200)
     expect(html.match(/<script>(.*?)<\/script>/g)).toHaveLength(1)
     expect(html).not.toMatch(/\sstyle\s*=/i)
     expect(html).not.toMatch(/(?:src|href)=["']https?:/i)
@@ -858,7 +827,7 @@ test('事件接口鉴权与404、非法偏移、完整行推进、每文件1MB�
     })
     for (const asset of ['/timeline.js', '/run-log.js', '/app.js'])
       expect((await request(asset)).status).toBe(404)
-    const css = await (await request('/style.css')).text()
+    const css = await Bun.file('src/web/assets/style.css').text()
     expect(css).toMatch(/\.run-timeline\s*\{\s*padding: 0;\s*\}/)
     expect(css).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
     expect(css).toContain('border-bottom: 0.5px solid')

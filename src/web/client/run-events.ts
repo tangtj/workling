@@ -9,7 +9,7 @@ import {
   shouldReload,
   type TimelineItem,
 } from '../timeline.ts'
-import { readResponse } from './legacy.ts'
+import { readResponse } from './http.ts'
 
 const offsetSchema = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 const linesSchema = Type.Object({ lines: Type.Array(Type.String()) })

@@ -1,6 +1,6 @@
 import * as Value from 'typebox/value'
 import { reposSchema } from '../repos.ts'
-import { readResponse } from './legacy.ts'
+import { readResponse } from './http.ts'
 
 export async function repoRequest(path: string, method: string, body?: unknown) {
   const response = await readResponse(path, {

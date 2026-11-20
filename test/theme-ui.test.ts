@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { runInNewContext } from 'node:vm'
-import { themeScript } from '../src/web/views/theme.ts'
+import { themeScript } from '../src/web/theme.ts'
 
 test('首屏按有效主题偏好设置属性，缺省、非法值和读取失败时跟随系统', () => {
   for (const [stored, expected] of [

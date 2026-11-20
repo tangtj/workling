@@ -1,6 +1,6 @@
 import * as Value from 'typebox/value'
 import { overviewSchema } from '../overview.ts'
-import { readResponse } from './legacy.ts'
+import { readResponse } from './http.ts'
 
 export const overviewOptions = {
   queryKey: ['overview'],

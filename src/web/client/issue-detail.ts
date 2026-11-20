@@ -1,6 +1,6 @@
 import * as Value from 'typebox/value'
 import { issueDetailSchema } from '../issue-detail.ts'
-import { readResponse } from './legacy.ts'
+import { readResponse } from './http.ts'
 
 export function parseDetailId(value: string | undefined) {
   if (!value || !/^[1-9]\d*$/.test(value)) return undefined

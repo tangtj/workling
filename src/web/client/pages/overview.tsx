@@ -1,12 +1,13 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { formatDuration, formatTime, secondsAgo, relativeTime } from '../../views/format.ts'
+import { formatDuration, formatTime, secondsAgo, relativeTime } from '../../format.ts'
 import { failureReason } from '../../issue-view.ts'
 import { overviewModel, slotTiming, runResult, type OverviewIssue } from '../../overview-view.ts'
 import { Badge, PR } from '../issue-table.tsx'
 import { overviewOptions } from '../overview.ts'
 import { usePageLayout } from '../layout.tsx'
+import { useRefreshPaused } from '../refresh-pause.ts'
 
 const Title = ({ issue }: { issue: OverviewIssue }) => (
   <>{issue.title ?? <span className="muted">（未记录标题）</span>}</>
@@ -18,6 +19,7 @@ const IssueLink = ({ issue }: { issue: OverviewIssue }) => (
 )
 export function OverviewPage() {
   const page = useQuery(overviewOptions)
+  const paused = useRefreshPaused()
   const { setActive } = usePageLayout()
   useEffect(() => {
     document.title = '概览 · Workling'
@@ -28,12 +30,12 @@ export function OverviewPage() {
       if (
         !document.hidden &&
         !document.querySelector('dialog[open], [role="dialog"]:not([hidden])') &&
-        document.body.dataset.refreshPaused !== 'true'
+        !paused
       )
         void page.refetch()
     }, 15000)
     return () => window.clearInterval(timer)
-  }, [page.refetch])
+  }, [page.refetch, paused])
   if (!page.data && page.isPending) return <p className="muted">加载中…</p>
   if (!page.data)
     return (

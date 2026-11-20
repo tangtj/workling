@@ -103,7 +103,7 @@ test('七个页面普通请求返回同一外壳，引用带哈希的 JS 与 CSS
       const response = await f.request(path)
       expect(response.status).toBe(200)
       expect(response.headers.get('cache-control')).toBe('no-store')
-      expect(response.headers.get('vary')).toContain('X-Workling-Fragment')
+      expect(response.headers.get('vary')).toBeNull()
       expect(response.headers.get('content-security-policy')).toContain(
         "script-src 'self' 'sha256-",
       )
@@ -128,7 +128,7 @@ test('包括 Issue 详情在内的页面在普通请求与片段请求中返回�
       const response = await f.request(path, true)
       expect(response.status).toBe(200)
       expect(response.headers.has('X-Workling-Title')).toBe(false)
-      expect(response.headers.get('vary')).toContain('X-Workling-Fragment')
+      expect(response.headers.get('vary')).toBeNull()
       const shell = await response.text()
       expect(shell).toContain('id="root"')
       const ordinary = await f.request(path)
@@ -208,14 +208,14 @@ test('侧栏数据通过严格形状校验，统计活动任务并排除凭证�
   }
 })
 
-test('未登录页面跳转登录，片段与侧栏返回 401，公共资源仍受 Host 校验', async () => {
+test('未登录页面跳转登录，侧栏返回 401，公共资源仍受 Host 校验', async () => {
   const f = await fixture()
   try {
     for (const path of f.paths) {
       const response = await f.request(path, false, false)
       expect(response.status).toBe(302)
       expect(response.headers.get('location')).toBe('/login')
-      expect((await f.request(path, true, false)).status).toBe(401)
+      expect((await f.request(path, true, false)).status).toBe(302)
     }
     expect((await f.request('/api/shell', false, false)).status).toBe(401)
     const unknownAsset = await f.request('/assets/nested/unknown.js', false, false)

@@ -1,7 +1,7 @@
 import { type PiSettings } from '../config/pi.ts'
 import { createHash } from 'node:crypto'
 import { maskToken } from './data.ts'
-import { themeScript } from './views/theme.ts'
+import { themeScript } from './theme.ts'
 export function responsePi(pi: PiSettings) {
   return { ...pi, llmApiKey: pi.llmApiKey === null ? null : maskToken(pi.llmApiKey) }
 }
