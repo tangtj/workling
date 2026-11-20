@@ -1,4 +1,4 @@
-import { formatDuration } from './views/format.ts'
+import { formatDuration } from './format.ts'
 export type IssueRow = {
   id: number
   repoId: number

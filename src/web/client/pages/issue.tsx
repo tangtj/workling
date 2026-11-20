@@ -3,11 +3,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { runResult } from '../../overview-view.ts'
 import { platformName } from '../../platform.ts'
-import { formatDuration, formatTime } from '../../views/format.ts'
+import { formatDuration, formatTime } from '../../format.ts'
 import { issueDetailOptions, parseDetailId } from '../issue-detail.ts'
 import { Badge, PlatformIcon, PR } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
-import { NotFound } from '../legacy-page.tsx'
+import { NotFound } from '../not-found.tsx'
 import { RunTimeline } from '../run-timeline.tsx'
 
 type Detail = NonNullable<Awaited<ReturnType<ReturnType<typeof issueDetailOptions>['queryFn']>>>

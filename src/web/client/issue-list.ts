@@ -1,6 +1,6 @@
 import * as Value from 'typebox/value'
 import { issueListSchema } from '../issue-list.ts'
-import { readResponse } from './legacy.ts'
+import { readResponse } from './http.ts'
 
 export const issueListOptions = {
   queryKey: ['issue-list'],

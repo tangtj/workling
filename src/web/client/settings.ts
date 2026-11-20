@@ -1,6 +1,6 @@
 import * as Value from 'typebox/value'
 import { settingsSchema, type SettingsData } from '../settings.ts'
-import { readResponse } from './legacy.ts'
+import { readResponse } from './http.ts'
 
 export const settingsOptions = {
   queryKey: ['settings'],

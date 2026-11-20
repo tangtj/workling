@@ -6,7 +6,7 @@ import { platformName } from '../../platform.ts'
 import { issueListOptions } from '../issue-list.ts'
 import { IssueTable, PlatformIcon, StatusChips } from '../issue-table.tsx'
 import { usePageLayout } from '../layout.tsx'
-import { NotFound } from '../legacy-page.tsx'
+import { NotFound } from '../not-found.tsx'
 
 export function RepoPage() {
   const page = useQuery(issueListOptions)

@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router'
 import { labels, statuses, stageText, type IssueRow } from '../issue-view.ts'
 import { PLATFORM_ICON_PATHS, platformName } from '../platform.ts'
-import { formatTime, prLabel } from '../views/format.ts'
+import { formatTime, prLabel } from '../format.ts'
 import type { IssueList } from './issue-list.ts'
 
 type Issue = IssueList['issues'][number]

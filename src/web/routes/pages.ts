@@ -1,19 +1,18 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { Shell } from '../views/shell.tsx'
+import { shellHtml } from '../shell-html.ts'
 import { getWebBundle } from '../bundle.ts'
 import { readVersion } from '../../runtime/version.ts'
 import * as Value from 'typebox/value'
 import { shellSchema, type ShellData } from '../shell.ts'
 import { overviewSchema, type OverviewData } from '../overview.ts'
-import { LoginPage } from '../views/login.tsx'
 
 import { pageData, maskToken } from '../data.ts'
 import { issueListSchema, type IssueListData } from '../issue-list.ts'
 import { issueDetailSchema, type IssueDetailData } from '../issue-detail.ts'
 import type { Issue } from '../data.ts'
 import type { AppDeps } from '../app.ts'
-import { repoId, html, headers } from '../response.ts'
+import { repoId, headers } from '../response.ts'
 
 export function pagesRoutes(deps: AppDeps): Hono {
   const { db, options } = deps
@@ -183,10 +182,10 @@ export function pagesRoutes(deps: AppDeps): Hono {
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
   const shell = async (c: Context, status: 200 | 404) =>
-    c.body(html(Shell(await getWebBundle())), status, { ...headers, Vary: 'X-Workling-Fragment' })
+    c.body(shellHtml(await getWebBundle()), status, headers)
   app.get('/', (c) => shell(c, 200))
   app.get('/issues', (c) => shell(c, 200))
-  app.get('/login', (c) => c.body(html(LoginPage()), 200, headers))
+  app.get('/login', async (c) => c.body(shellHtml(await getWebBundle(), true), 200, headers))
   app.get('/settings', (c) => shell(c, 200))
   app.get('/repos', (c) => shell(c, 200))
   app.get('/repos/:id', (c) => {

@@ -3,7 +3,6 @@ import { Hono } from 'hono'
 import type { AppDeps } from '../app.ts'
 import { getWebBundle } from '../bundle.ts'
 import { webHeaders } from '../response.ts'
-import { assetContents, assetHashes, type AssetName } from '../assets.ts'
 
 export function assetsRoutes(deps: AppDeps): Hono {
   const { options } = deps
@@ -17,20 +16,6 @@ export function assetsRoutes(deps: AppDeps): Hono {
       'Cache-Control': 'public, max-age=31536000, immutable',
     })
   })
-  for (const name of Object.keys(assetContents) as AssetName[]) {
-    app.get(`/${name}`, (c) =>
-      c.body(assetContents[name], 200, {
-        ...webHeaders,
-        'Content-Type': name.endsWith('.css')
-          ? 'text/css; charset=utf-8'
-          : 'text/javascript; charset=utf-8',
-        'Cache-Control':
-          c.req.query('v') === assetHashes[name]
-            ? 'public, max-age=31536000, immutable'
-            : 'no-cache',
-      }),
-    )
-  }
   app.get('/health', (c) => c.json({ ok: true }))
   app.get('/api/status', (c) => {
     const status = options.status?.()
