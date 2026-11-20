@@ -54,7 +54,11 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
         '--add-label',
         'workling:done',
       ],
+      ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
+    expect(s.calls.at(-1)?.options?.input).toBe(
+      'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）',
+    )
   } finally {
     await s.dispose()
   }
@@ -73,6 +77,88 @@ test('对账退出码 0 但旧运行缺少分支记录时判失败', async () =>
       exitCode: 0,
     })
     expect(s.calls.some(({ args }) => args[1] === 'pr')).toBe(false)
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([
+  ['全部成功', ['结果评论', '读取', '待办评论', '重读', '编辑']],
+  ['结果评论', ['结果评论', '读取', '待办评论', '重读', '编辑']],
+  ['读取', ['结果评论', '读取']],
+  ['待办评论', ['结果评论', '读取', '待办评论']],
+  ['重读', ['结果评论', '读取', '待办评论', '重读']],
+  ['编辑', ['结果评论', '读取', '待办评论', '重读', '编辑']],
+  ['无变更', ['结果评论', '读取']],
+] as const)('落地后的 Issue 同步：%s，保持 done 且下轮不重发', async (failure, expected) => {
+  const s = await scenario()
+  try {
+    const { dir } = await s.running({ delivery: true })
+    await writeFile(join(dir, 'out', 'issue-comment.md'), '检查通过 @someone')
+    await writeFile(
+      join(dir, 'out', 'checklist.json'),
+      JSON.stringify([
+        { line: '- [ ] Run tests', checked: true, evidence: 'bun run check @reviewer' },
+        { line: '* [x] Old', checked: false, evidence: '命令退出 1' },
+        { line: '- [ ] Missing', checked: true, evidence: 'checked' },
+        { line: '- [ ] Duplicate', checked: true, evidence: 'checked' },
+      ]),
+    )
+    await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
+    const steps: string[] = []
+    const messages: string[] = []
+    let edited: string | undefined
+    const options = {
+      ...s.options,
+      command: (async (args, options) => {
+        if (
+          args[0] !== 'gh' ||
+          args[1] !== 'issue' ||
+          (!args.includes('--body-file') && args[2] !== 'view')
+        )
+          return s.command(args, options)
+        const step =
+          args[2] === 'view'
+            ? steps.includes('读取')
+              ? '重读'
+              : '读取'
+            : args[2] === 'edit'
+              ? '编辑'
+              : steps.length
+                ? '待办评论'
+                : '结果评论'
+        steps.push(step)
+        if (step === failure) throw new Error('API failed')
+        if (step === '读取')
+          return JSON.stringify({
+            body:
+              failure === '无变更'
+                ? '- [x] Run tests'
+                : '- [ ] Run tests \r\n* [x] Old\r\n- [ ] Duplicate\r\n- [ ] Duplicate',
+          })
+        if (step === '重读')
+          return JSON.stringify({ body: '新标题\r\n- [ ] Run tests \r\n* [x] Renamed\r\n' })
+        if (step === '编辑') edited = options?.input
+        else messages.push(options?.input ?? '')
+        return ''
+      }) satisfies typeof s.command,
+    }
+    await reconcile(options)
+    await reconcile(options)
+    expect(s.db.select().from(issues).get()?.status).toBe('done')
+    expect(steps).toEqual([...expected])
+    if (failure === '全部成功') {
+      expect(messages).toHaveLength(2)
+      expect(messages[0]).toBe(
+        'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）\n\n检查通过 `@someone`',
+      )
+      expect(messages[1]).toContain('勾选：- [ ] Run tests')
+      expect(messages[1]).toContain('取消勾选：* [x] Old')
+      expect(messages[1]).toContain('依据：bun run check `@reviewer`')
+      expect(messages[1]).toContain('- [ ] Missing（找不到原文行）')
+      expect(messages[1]).toContain('- [ ] Duplicate（匹配多行）')
+      expect(edited).toBe('新标题\r\n- [x] Run tests \r\n* [x] Renamed\r\n')
+    }
   } finally {
     await s.dispose()
   }
@@ -287,17 +373,21 @@ test.each(['无 run', 'run 不存在', '无目录'])('缺少任务目录优先�
   }
 })
 
-test.each(['有报告', '无报告'])(
+test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
   '终态先事务落库再同步标签与兜底评论，%s 正文符合模板且 GitHub 失败不回滚',
   async (kind) => {
     const s = await scenario()
     try {
       const { dir } = await s.running()
-      if (kind === '有报告')
+      if (kind !== '无报告')
         await writeFile(
           join(dir, 'report.md'),
           Array.from({ length: 22 }, (_, i) => `line ${i + 1}`).join('\n'),
         )
+      if (kind === '有报告和 Pi 说明') {
+        await mkdir(join(dir, 'out'))
+        await writeFile(join(dir, 'out', 'issue-comment.md'), '@someone 检查未通过')
+      }
       await reconcile({
         ...s.options,
         executor: fakeExecutor(),
@@ -333,11 +423,14 @@ test.each(['有报告', '无报告'])(
           GH_PROMPT_DISABLED: '1',
         })
       const report =
-        kind === '有报告'
+        kind !== '无报告'
           ? Array.from({ length: 20 }, (_, i) => `> line ${i + 1}`).join('\n') + '\n\n'
           : ''
       expect(s.calls[1]!.options!.input).toBe(
-        `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。`,
+        `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。` +
+          (kind === '有报告和 Pi 说明'
+            ? '\n\n### Pi 的说明\n\n<code>&#64;someone</code> 检查未通过'
+            : ''),
       )
       expect(s.logs.filter((line) => line.includes('更新 GitHub 失败'))).toHaveLength(2)
       expect(s.db.select().from(issues).get()?.status).toBe('failed')
