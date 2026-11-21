@@ -15,7 +15,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import { loadSteps, runUpgradeSteps, type UpgradeStep } from '../upgrade/index.ts'
 import { pollOnce } from './poll.ts'
 import { launchQueued } from './launch.ts'
-import { reconcile } from './reconcile.ts'
+import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
@@ -88,6 +88,7 @@ export async function serve({
         `\n========================================\n首次启动，已生成管理密码（只显示这一次）：\n${password}\n忘记密码可运行 bun src/cli.ts reset-password\n========================================\n`,
       )
     try {
+      recoverOrphanFeedback(db)
       await reconcile({
         db,
         command,

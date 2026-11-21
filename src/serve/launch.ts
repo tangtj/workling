@@ -19,6 +19,7 @@ import type { Settings } from '../config/env.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import { writeRunContext } from './context.ts'
 import { syncMirror } from './mirror.ts'
+import { selectBatch } from './rework.ts'
 type Log = (message: string) => void
 
 async function prepareCheckout({
@@ -156,6 +157,8 @@ export async function launchQueued({
     slots--
     let record: typeof runs.$inferSelect | undefined
     let handle: Awaited<ReturnType<Executor['start']>> | undefined
+    let kind: Spec['kind'] = 'implement'
+    let originalStatuses: Array<{ id: number; status: typeof feedback.$inferSelect.status }> = []
     try {
       const startedAt = now()
       const issueRef = `github:${repo.path}#${issue.number}`
@@ -167,22 +170,50 @@ export async function launchQueued({
         .returning()
         .get()
       const included = db.transaction((tx) => {
-        tx.update(feedback)
-          .set({ status: 'included', runId: record!.id })
-          .where(and(eq(feedback.issueId, issue.id), eq(feedback.status, 'pending')))
-          .run()
-        const selected = tx.select().from(feedback).where(eq(feedback.runId, record!.id)).all()
-        const reviewIds = selected
+        const previousRun = issue.lastRunId
+          ? tx.select().from(runs).where(eq(runs.id, issue.lastRunId)).get()
+          : undefined
+        const rows = tx.select().from(feedback).where(eq(feedback.issueId, issue.id)).all()
+        const observed = previousRun ? selectBatch({ issue, run: previousRun }, rows) : []
+        const claim = rows.filter((row) => row.status === 'pending' || observed.includes(row))
+        const reviewIds = claim
           .filter((row) => row.source === 'review')
           .map((row) => row.externalId)
-        if (reviewIds.length)
+        originalStatuses = rows
+          .filter(
+            (row) =>
+              claim.includes(row) ||
+              (row.source === 'review_comment' &&
+                row.reviewId !== null &&
+                reviewIds.includes(row.reviewId) &&
+                (row.status === 'ignored' || row.status === 'observed')),
+          )
+          .map((row) => ({
+            id: row.id,
+            status: row.status === 'observed' && claim.includes(row) ? 'pending' : row.status,
+          }))
+        if (claim.length)
+          tx.update(feedback)
+            .set({ status: 'included', runId: record!.id })
+            .where(
+              inArray(
+                feedback.id,
+                claim.map((row) => row.id),
+              ),
+            )
+            .run()
+        const selected = tx.select().from(feedback).where(eq(feedback.runId, record!.id)).all()
+        const selectedReviewIds = selected
+          .filter((row) => row.source === 'review')
+          .map((row) => row.externalId)
+        if (selectedReviewIds.length)
           tx.update(feedback)
             .set({ status: 'included', runId: record!.id })
             .where(
               and(
                 eq(feedback.issueId, issue.id),
                 eq(feedback.source, 'review_comment'),
-                inArray(feedback.reviewId, reviewIds),
+                inArray(feedback.reviewId, selectedReviewIds),
                 inArray(feedback.status, ['ignored', 'observed']),
               ),
             )
@@ -194,7 +225,7 @@ export async function launchQueued({
           .orderBy(feedback.createdAt, feedback.id)
           .all()
       })
-      const kind = included.length && issue.prState === 'open' ? 'rework' : 'implement'
+      kind = included.length && issue.prState === 'open' ? 'rework' : 'implement'
       db.update(runs).set({ kind }).where(eq(runs.id, record.id)).run()
       const previous = db
         .select({ branch: runs.branch })
@@ -293,10 +324,13 @@ export async function launchQueued({
           log(`${repo.ref} #${issue.number} 删除任务密钥失败`)
         })
       if (record)
-        db.update(feedback)
-          .set({ status: 'pending', runId: null })
-          .where(eq(feedback.runId, record.id))
-          .run()
+        db.transaction((tx) => {
+          for (const row of originalStatuses)
+            tx.update(feedback)
+              .set({ status: row.status, runId: null })
+              .where(and(eq(feedback.id, row.id), eq(feedback.runId, record!.id)))
+              .run()
+        })
       if (record)
         db.update(runs)
           .set({ endedAt: now(), error: `拉起失败：${errorMessage(error)}` })
@@ -342,9 +376,7 @@ export async function launchQueued({
         .map((row) => `- ${names[row.source]} · @${row.authorLogin} · ${row.url}`)
       if (included.length > 10) lines.push(`等 ${included.length} 条`)
       const first =
-        record!.kind === 'rework' || (included.length > 0 && issue.prState === 'open')
-          ? 'workling：收到 PR 反馈，开始返工。'
-          : 'workling：已领取，开始执行。'
+        kind === 'rework' ? 'workling：收到 PR 反馈，开始返工。' : 'workling：已领取，开始执行。'
       const body = `${first}\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}${lines.length ? `\n\n触发反馈：\n${lines.join('\n')}` : ''}`
       await command(
         ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],

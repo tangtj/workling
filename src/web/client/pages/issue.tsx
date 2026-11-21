@@ -151,6 +151,8 @@ function FeedbackList({ id, now }: { id: number; now: number }) {
               '已入队'
             ) : item.status === 'included' && item.runId ? (
               <a href={`/runs/${item.runId}/log`}>已处理</a>
+            ) : item.status === 'replied' ? (
+              '已回复'
             ) : (
               '不算指令'
             )}{' '}
