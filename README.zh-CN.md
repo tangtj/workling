@@ -54,7 +54,7 @@ bun run start          # 或 workling serve
 2. 在「设置」里填好 LLM 接入地址与 Key。
 3. 在「仓库」里添加仓库（如 `github:owner/repo`）和 token。token 需要能读写该仓库的 Issue、代码与 PR。添加后 workling 会在仓库里创建 `workling:*` 标签。
 4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值；设计文档较多时放在文档分支上，正文加 `分支：<名称>` 行，任务分支会从该分支切出。
-5. 在管理页查看进度与日志。结果以标签呈现：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`；失败后重新打上 `workling:ready` 即可重试。
+5. 在管理页查看进度与日志。结果以标签呈现：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`；失败后重新打上 `workling:ready` 即可重试。失败、部分完成或 PR 仍开着时，可评论 `/workling <补充说明>` 或提及机器账号（由 Pi 设置的 `gitEmail` 推导，默认 `@workling-agent`），在同一分支上继续。
 
 ## 在其他项目接入
 

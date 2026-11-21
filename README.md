@@ -54,7 +54,7 @@ bun run start          # or: workling serve
 2. Under **Settings**, fill in the LLM base URL and key.
 3. Under **Repos**, add a repository (e.g. `github:owner/repo`) with a token that can read and write its Issues, code and pull requests. workling creates the `workling:*` labels in that repository.
 4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort. For larger designs, keep the documents on a branch and add a `分支：<name>` line; the task branch is created from it.
-5. Follow progress and logs in the admin UI. Results show up as labels: `workling:queued` → `workling:running` → `workling:done` / `workling:failed`. To retry a failed Issue, add `workling:ready` again.
+5. Follow progress and logs in the admin UI. Results show up as labels: `workling:queued` → `workling:running` → `workling:done` / `workling:failed`. To retry a failed Issue, add `workling:ready` again. When a task fails, is partially completed, or its PR remains open, comment `/workling <additional instructions>` or mention the machine account (derived from Pi’s `gitEmail` setting, `@workling-agent` by default) to continue on the same branch.
 
 ## Adopting in other projects
 

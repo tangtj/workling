@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { classifyCommand } from '../src/serve/feedback.ts'
+import { machineLogin, parsePiSettings } from '../src/config/pi.ts'
+import { classifyCommand, parseCommand } from '../src/serve/feedback.ts'
 import { observeFeedback } from '../src/serve/feedback.ts'
 import { openDatabase } from '../src/db/index.ts'
 import { feedback, feedbackCursors, issues, repos, runs, trustedUsers } from '../src/db/schema.ts'
@@ -32,6 +33,81 @@ test('只把可信作者开头的前缀或请求修改 review 视为指令', () 
     isCommand: true,
     instruction: 'fix',
   })
+})
+
+test('从 GitHub noreply 地址推导机器账号', () => {
+  expect(machineLogin(parsePiSettings({}).gitEmail)).toBe('workling-agent')
+  expect(machineLogin('123+Workling-Agent@Users.NoReply.GitHub.Com')).toBe('Workling-Agent')
+  for (const email of [
+    'a@example.com',
+    'workling-agent@users.noreply.github.com',
+    '123+workling-agent@example.com',
+  ])
+    expect(machineLogin(email)).toBeNull()
+})
+
+test('机器账号提及遵守位置、边界和 Markdown 排除规则', () => {
+  const parse = (body: string) => parseCommand(body, 'worker', 'workling-agent')
+  expect(parse('@workling-agent 修一下')).toBe('修一下')
+  expect(parse('@Workling-Agent fix')).toBe('fix')
+  expect(parse('请 @workling-agent 看看')).toBe('请 @workling-agent 看看')
+  expect(parse('看看 @workling-agent。')).toBe('看看 @workling-agent。')
+  expect(parse('@workling-agent, fix')).toBe('@workling-agent, fix')
+  expect(parse('/workling 修一下 @workling-agent')).toBe('修一下 @workling-agent')
+  for (const body of [
+    '@workling-agent-bot fix',
+    '@workling-agent_x',
+    'me@workling-agent',
+    'path/@workling-agent',
+    '```\n@workling-agent\n```',
+    '~~~\n@workling-agent\n~~~',
+    '```\n@workling-agent',
+    '`@workling-agent`',
+    '   > @workling-agent',
+    '<!-- @workling-agent -->',
+  ])
+    expect(parse(body)).toBeUndefined()
+  expect(parse('```\n@workling-agent\n```\n请 @workling-agent 看看')).toBe(
+    '```\n@workling-agent\n```\n请 @workling-agent 看看',
+  )
+  expect(parseCommand('@workling-agent fix', 'worker', null)).toBeUndefined()
+  expect(parseCommand('/workling fix', 'worker', null)).toBe('fix')
+  expect(parseCommand('@worker fix', 'worker', null)).toBe('fix')
+  expect(
+    classifyCommand('@workling-agent fix', 'untrusted', 'worker', null, 'workling-agent').isCommand,
+  ).toBe(false)
+})
+
+test('跨行代码片段仅由相同长度的反引号闭合', () => {
+  const parse = (body: string) => parseCommand(body, 'worker', 'workling-agent')
+  expect(parse('`说明\n@workling-agent\n结束`')).toBeUndefined()
+  expect(parse('``说明 `\n@workling-agent\n中间 ``` 结束``')).toBeUndefined()
+  expect(parse('`说明 ``\n@workling-agent\n结束`')).toBeUndefined()
+  expect(parse('`未闭合\n@workling-agent')).toBe('`未闭合\n@workling-agent')
+  expect(parse('`说明\n@workling-agent\n结束`\n请 @workling-agent 处理')).toBe(
+    '`说明\n@workling-agent\n结束`\n请 @workling-agent 处理',
+  )
+  expect(parse('@worker `说明\n@workling-agent\n结束`')).toBe('`说明\n@workling-agent\n结束`')
+  expect(parse('@worker-more fix')).toBeUndefined()
+})
+
+test('代码片段、围栏和注释中的标记不会改变其他区域', () => {
+  const parse = (body: string) => parseCommand(body, 'worker', 'workling-agent')
+  for (const body of [
+    '`<!--` 请 @workling-agent 看看',
+    '`片段\n~~~\n片段` 请 @workling-agent 看看',
+    '<!-- ` --> 请 @workling-agent 看看 `未闭合',
+    '```\n<!-- `\n```\n请 @workling-agent 看看',
+    '<!--\n```\n`\n-->\n请 @workling-agent 看看',
+  ])
+    expect(parse(body)).toBe(body)
+  for (const body of [
+    '`<!-- @workling-agent -->`',
+    '`片段\n~~~\n@workling-agent\n片段`',
+    '<!-- ` --> `@workling-agent`',
+    '```\n`\n```\n`@workling-agent`',
+  ])
+    expect(parse(body)).toBeUndefined()
 })
 
 test('首次建立游标，之后去重、重新判定编辑并缓存写权限', async () => {
@@ -213,6 +289,7 @@ test('观察到的写权限指令入队，而未受信、机器人和自身评�
       { id: 2, login: 'reader', type: 'User' },
       { id: 3, login: 'robot', type: 'Bot' },
       { id: 4, login: 'worker', type: 'User' },
+      { id: 5, login: 'Workling-Agent', type: 'User' },
     ]
     f.setRespond((endpoint) => {
       if (endpoint === 'user') return 'worker'
@@ -223,7 +300,8 @@ test('观察到的写权限指令入队，而未受信、机器人和自身评�
           users.map((user) =>
             comment(user.id, {
               user,
-              body: user.login === 'worker' ? '<!-- workling --> /workling fix' : '/workling fix',
+              body:
+                user.login === 'worker' ? '<!-- workling --> /workling fix' : '@workling-agent fix',
               issue_url: 'https://api.github.com/repos/a/b/issues/1',
             }),
           ),
@@ -231,6 +309,19 @@ test('观察到的写权限指令入队，而未受信、机器人和自身评�
       return '[[]]'
     })
     await observeFeedback(f.options)
+    expect(
+      f.db
+        .select()
+        .from(feedback)
+        .all()
+        .map((row) => [row.trust, row.status, row.instruction]),
+    ).toEqual([
+      ['write', 'observed', 'fix'],
+      ['untrusted', 'ignored', null],
+      ['bot', 'ignored', null],
+      ['self', 'ignored', null],
+      ['self', 'ignored', null],
+    ])
     await queueRework(f.options)
     expect(f.db.select().from(issues).get()?.status).toBe('queued')
     expect(
@@ -243,6 +334,7 @@ test('观察到的写权限指令入队，而未受信、机器人和自身评�
       ['write', 'pending'],
       ['untrusted', 'ignored'],
       ['bot', 'ignored'],
+      ['self', 'ignored'],
       ['self', 'ignored'],
     ])
   } finally {

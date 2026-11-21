@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
+import { machineLogin, readPiSettings } from '../config/pi.ts'
 import type { WorklingDatabase } from '../db/index.ts'
 import { feedback, feedbackCursors, issues, repos, trustedUsers } from '../db/schema.ts'
 import { ghEnv } from '../platform/github.ts'
@@ -12,6 +13,98 @@ export function matchCommandPrefix(body: string, login: string): string | null {
   if (!match || !['/workling', `@${login.toLowerCase()}`].includes(match[1]!.toLowerCase()))
     return null
   return trimmed.slice(match[0].length).trim()
+}
+
+// Mask excluded Markdown regions while preserving offsets and line boundaries.
+function visibleText(body: string): string {
+  let fence: { char: string; length: number } | null = null
+  let comment = false
+  let result = ''
+  const blank = (text: string) => text.replace(/[^\n]/g, ' ')
+  for (let i = 0; i < body.length;) {
+    if (i === 0 || body[i - 1] === '\n') {
+      const end = body.indexOf('\n', i)
+      const lineEnd = end < 0 ? body.length : end + 1
+      const line = body.slice(i, lineEnd)
+      if (fence) {
+        const close = /^ {0,3}(`+|~+)\s*$/.exec(line.trimEnd())
+        if (close && close[1]![0] === fence.char && close[1]!.length >= fence.length) fence = null
+        result += blank(line)
+        i = lineEnd
+        continue
+      }
+      if (!comment) {
+        const open = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+        if (open) {
+          fence = { char: open[1]![0]!, length: open[1]!.length }
+          result += blank(line)
+          i = lineEnd
+          continue
+        }
+        if (/^ {0,3}>/.test(line)) {
+          result += blank(line)
+          i = lineEnd
+          continue
+        }
+      }
+    }
+    if (comment) {
+      if (body.startsWith('-->', i)) {
+        result += '   '
+        i += 3
+        comment = false
+      } else {
+        result += blank(body[i]!)
+        i++
+      }
+    } else if (body.startsWith('<!--', i)) {
+      comment = true
+    } else if (body[i] === '`') {
+      const open = /^`+/.exec(body.slice(i))![0]
+      const runs = /`+/g
+      runs.lastIndex = i + open.length
+      let close: RegExpExecArray | null
+      while ((close = runs.exec(body)) && close[0].length !== open.length) {}
+      if (close) {
+        const end = close.index + close[0].length
+        result += blank(body.slice(i, end))
+        i = end
+      } else {
+        result += open
+        i += open.length
+      }
+    } else {
+      result += body[i]!
+      i++
+    }
+  }
+  return result
+}
+
+export function parseCommand(
+  body: string,
+  token: string,
+  machine: string | null,
+): string | null | undefined {
+  const prefix = matchCommandPrefix(body, token)
+  if (prefix !== null) return prefix || null
+  if (!machine) return undefined
+  const visible = visibleText(body)
+  const lower = visible.toLowerCase()
+  const mention = `@${machine.toLowerCase()}`
+  let from = 0
+  while (true) {
+    const index = lower.indexOf(mention, from)
+    if (index < 0) return undefined
+    const before = visible[index - 1] ?? ''
+    const after = visible[index + mention.length] ?? ''
+    if (!/[a-z\d_./@-]/i.test(before) && !/[a-z\d_-]/i.test(after)) {
+      if (!body.slice(0, index).trim() && (!after || /\s/.test(after)))
+        return body.slice(index + mention.length).trim() || null
+      return body.trim() || null
+    }
+    from = index + mention.length
+  }
 }
 
 const user = Type.Object({ id: Type.Integer(), login: Type.String(), type: Type.String() })
@@ -53,6 +146,7 @@ export async function judgeTrust({
   env,
   signal,
   permissions,
+  machine = null,
 }: {
   db: WorklingDatabase
   repo: typeof repos.$inferSelect
@@ -62,8 +156,10 @@ export async function judgeTrust({
   env: ReturnType<typeof ghEnv>
   signal: AbortSignal
   permissions: FeedbackState['permissions']
+  machine?: string | null
 }): Promise<Trust> {
   if (body.includes('<!-- workling -->')) return 'self'
+  if (machine && user.login.toLowerCase() === machine.toLowerCase()) return 'self'
   if (user.type === 'Bot') return 'bot'
   if (
     db
@@ -105,12 +201,13 @@ export function classifyCommand(
   trust: Trust,
   login: string,
   reviewState: string | null,
+  machine: string | null = null,
 ) {
   if (trust !== 'allowlist' && trust !== 'write') return { isCommand: false, instruction: null }
   if (reviewState === 'CHANGES_REQUESTED')
     return { isCommand: true, instruction: body.trim() || null }
-  const rest = matchCommandPrefix(body, login)
-  if (rest === null) return { isCommand: false, instruction: null }
+  const rest = parseCommand(body, login, machine)
+  if (rest === undefined) return { isCommand: false, instruction: null }
   return { isCommand: true, instruction: rest || null }
 }
 
@@ -127,6 +224,7 @@ export async function observeFeedback({
   signal: AbortSignal
   state: FeedbackState
 }) {
+  const machine = machineLogin(readPiSettings(db).gitEmail)
   const repositories = db
     .select()
     .from(repos)
@@ -202,7 +300,9 @@ export async function observeFeedback({
           return
         const body = (item.body ?? '').slice(0, 65536)
         const trust =
-          old?.trust ??
+          (machine && item.user.login.toLowerCase() === machine.toLowerCase()
+            ? 'self'
+            : old?.trust) ??
           (await judgeTrust({
             db,
             repo,
@@ -212,12 +312,14 @@ export async function observeFeedback({
             env,
             signal,
             permissions: state.permissions,
+            machine,
           }))
         const result = classifyCommand(
           body,
           trust,
           trust === 'allowlist' || trust === 'write' ? await getLogin() : '',
           reviewState,
+          machine,
         )
         const values = {
           body,

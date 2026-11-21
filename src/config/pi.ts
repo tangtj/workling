@@ -14,6 +14,14 @@ export type PiSettings = {
   gitEmail: string
 }
 
+export function machineLogin(gitEmail: string): string | null {
+  return (
+    /^(?:\d+)\+([A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?)@users\.noreply\.github\.com$/i.exec(
+      gitEmail,
+    )?.[1] ?? null
+  )
+}
+
 export function parsePiSettings(input: Record<string, unknown>): PiSettings {
   const text = (field: string, fallback: string | null): string | null => {
     const value = input[field] === undefined ? fallback : input[field]
