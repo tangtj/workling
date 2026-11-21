@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, ne } from 'drizzle-orm'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import { complete } from '@earendil-works/pi-ai/compat'
@@ -12,6 +12,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { judgeTrust, type FeedbackState } from './feedback.ts'
 import { redactSecrets } from './secret-scan.ts'
+import { suggestComment } from './triage-comment.ts'
 import { TRIAGE_PROMPT } from './triage-prompt.ts'
 
 // LLM 调用串行执行，每仓库每轮最坏耗时 5 × 60 秒，会推迟主循环的其他步骤。
@@ -62,6 +63,7 @@ const issueSchema = Type.Array(
     body: Type.Union([Type.String(), Type.Null()]),
     user: Type.Object({ id: Type.Integer(), login: Type.String(), type: Type.String() }),
     updated_at: Type.String(),
+    labels: Type.Array(Type.Object({ name: Type.String() })),
     pull_request: Type.Optional(Type.Unknown()),
   }),
 )
@@ -152,7 +154,7 @@ export type TriageState = {
   permissions: FeedbackState['permissions']
   missingConfigLogged?: boolean
 }
-export async function triageShadow({
+export async function triageIssues({
   db,
   command,
   log,
@@ -172,9 +174,7 @@ export async function triageShadow({
   const repositories = db
     .select()
     .from(repos)
-    .where(
-      and(eq(repos.enabled, true), eq(repos.platform, 'github'), eq(repos.triageLevel, 'shadow')),
-    )
+    .where(and(eq(repos.enabled, true), eq(repos.platform, 'github'), ne(repos.triageLevel, 'off')))
     .all()
   if (!repositories.length) return
   const pi = readPiSettings(db)
@@ -205,10 +205,11 @@ export async function triageShadow({
       )
         throw new Error('Issue 格式无效')
       let calls = 0
+      let comments = 0
       for (const item of data) {
-        if (signal.aborted || calls >= 5) break
+        if (signal.aborted) break
         const updated = new Date(item.updated_at)
-        if ('pull_request' in item || now.getTime() - updated.getTime() < 600000) continue
+        if ('pull_request' in item) continue
         const body = item.body ?? ''
         const hash = createHash('sha256').update(`${item.title}\n${body}`).digest('hex')
         const old = db
@@ -222,73 +223,200 @@ export async function triageShadow({
             ),
           )
           .get()
-        if (old && (old.decision || now.getTime() - old.triagedAt.getTime() < 3600000)) continue
-        const trust = await judgeTrust({
-          db,
-          repo,
-          user: item.user,
-          body,
-          command,
-          env,
-          signal,
-          permissions: state.permissions,
-        })
-        if (trust !== 'allowlist' && trust !== 'write') continue
-        const checks = checkIssue(body)
-        const missing = [
-          ...checks.missingSections.map((s) => `缺少「${s}」`),
-          ...checks.invalidDirectives,
-        ]
-        let decision: 'accept' | 'needs_info' | 'ignore' | null = null,
-          llmDecision: 'accept' | 'needs_info' | 'ignore' | null = null,
-          note: string | null = null,
-          error: string | null = null
-        calls++
-        try {
-          const result = parseTriageResult(
-            await classify({ title: item.title, body: body.slice(0, 20000), checks, pi, signal }),
-          )
-          llmDecision = result.decision
-          decision = result.decision === 'accept' && missing.length ? 'needs_info' : result.decision
-          missing.push(...result.missing)
-          note = result.note
-        } catch (e) {
-          error = redactSecrets(errorMessage(e), [pi.llmApiKey, repo.token])
-        }
-        if (signal.aborted) break
-        const values = {
-          repoId: repo.id,
-          number: item.number,
-          title: item.title,
-          authorId: String(item.user.id),
-          authorLogin: item.user.login,
-          trust,
-          contentHash: hash,
-          issueUpdatedAt: old?.issueUpdatedAt ?? updated,
-          checks: JSON.stringify(checks),
-          decision,
-          llmDecision,
-          missing: JSON.stringify([...new Set(missing)]),
-          note,
-          model: pi.piModel ?? pi.model,
-          error,
-          alreadyReady:
-            (decision ? undefined : old?.alreadyReady) ??
-            !!db
-              .select()
-              .from(issues)
-              .where(and(eq(issues.repoId, repo.id), eq(issues.number, item.number)))
-              .get(),
-          attempts: (old?.attempts ?? 0) + 1,
-          triagedAt: now,
-        }
-        db.insert(triageRecords)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [triageRecords.repoId, triageRecords.number, triageRecords.contentHash],
-            set: values,
+        if (
+          calls < 5 &&
+          now.getTime() - updated.getTime() >= 600000 &&
+          !(old && (old.decision || now.getTime() - old.triagedAt.getTime() < 3600000))
+        ) {
+          const trust = await judgeTrust({
+            db,
+            repo,
+            user: item.user,
+            body,
+            command,
+            env,
+            signal,
+            permissions: state.permissions,
           })
-          .run()
+          if (trust === 'allowlist' || trust === 'write') {
+            const checks = checkIssue(body)
+            const missing = [
+              ...checks.missingSections.map((s) => `缺少「${s}」`),
+              ...checks.invalidDirectives,
+            ]
+            let decision: 'accept' | 'needs_info' | 'ignore' | null = null,
+              llmDecision: 'accept' | 'needs_info' | 'ignore' | null = null,
+              note: string | null = null,
+              error: string | null = null
+            calls++
+            try {
+              const result = parseTriageResult(
+                await classify({
+                  title: item.title,
+                  body: body.slice(0, 20000),
+                  checks,
+                  pi,
+                  signal,
+                }),
+              )
+              llmDecision = result.decision
+              decision =
+                result.decision === 'accept' && missing.length ? 'needs_info' : result.decision
+              missing.push(...result.missing)
+              note = result.note
+            } catch (e) {
+              error = redactSecrets(errorMessage(e), [pi.llmApiKey, repo.token])
+            }
+            if (signal.aborted) break
+            const values = {
+              repoId: repo.id,
+              number: item.number,
+              title: item.title,
+              authorId: String(item.user.id),
+              authorLogin: item.user.login,
+              trust,
+              contentHash: hash,
+              issueUpdatedAt: old?.issueUpdatedAt ?? updated,
+              checks: JSON.stringify(checks),
+              decision,
+              llmDecision,
+              missing: JSON.stringify([...new Set(missing)]),
+              note,
+              model: pi.piModel ?? pi.model,
+              error,
+              alreadyReady:
+                (decision ? undefined : old?.alreadyReady) ??
+                !!db
+                  .select()
+                  .from(issues)
+                  .where(and(eq(issues.repoId, repo.id), eq(issues.number, item.number)))
+                  .get(),
+              attempts: (old?.attempts ?? 0) + 1,
+              triagedAt: now,
+            }
+            db.insert(triageRecords)
+              .values(values)
+              .onConflictDoUpdate({
+                target: [triageRecords.repoId, triageRecords.number, triageRecords.contentHash],
+                set: values,
+              })
+              .run()
+          }
+        }
+        if (repo.triageLevel !== 'suggest') continue
+        const records = db
+          .select()
+          .from(triageRecords)
+          .where(
+            and(
+              eq(triageRecords.repoId, repo.id),
+              eq(triageRecords.number, item.number),
+              isNotNull(triageRecords.decision),
+            ),
+          )
+          .orderBy(desc(triageRecords.triagedAt), desc(triageRecords.id))
+          .all()
+        const latest = records[0]
+        if (!latest) continue
+        const labels = new Set(item.labels.map((label) => label.name))
+        const inFlow =
+          ['ready', 'queued', 'running', 'done', 'failed'].some((label) =>
+            labels.has(`workling:${label}`),
+          ) ||
+          !!db
+            .select()
+            .from(issues)
+            .where(and(eq(issues.repoId, repo.id), eq(issues.number, item.number)))
+            .get()
+        if (inFlow || latest.decision !== 'needs_info') {
+          if (labels.has('workling:needs-info')) {
+            try {
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'edit',
+                  String(item.number),
+                  '-R',
+                  repo.path,
+                  '--remove-label',
+                  'workling:needs-info',
+                ],
+                { env, signal },
+              )
+              db.update(triageRecords)
+                .set({ labelRemovedAt: now })
+                .where(eq(triageRecords.id, latest.id))
+                .run()
+            } catch (error) {
+              log(
+                `${repo.ref} #${item.number} 摘标签失败：${redactSecrets(errorMessage(error), [repo.token, pi.llmApiKey])}`,
+              )
+            }
+          }
+          continue
+        }
+        if (latest.suggestedAt || !repo.triageSince || latest.triagedAt < repo.triageSince) continue
+        const previous = records.find((record) => record.id !== latest.id && record.suggestedAt)
+        const same =
+          previous &&
+          JSON.stringify([...new Set(JSON.parse(previous.missing) as string[])].sort()) ===
+            JSON.stringify([...new Set(JSON.parse(latest.missing) as string[])].sort())
+        if (!same && comments >= 5) continue
+        try {
+          if (!labels.has('workling:needs-info'))
+            await command(
+              [
+                'gh',
+                'issue',
+                'edit',
+                String(item.number),
+                '-R',
+                repo.path,
+                '--add-label',
+                'workling:needs-info',
+              ],
+              { env, signal },
+            )
+          let url = previous?.suggestCommentUrl ?? null
+          if (!same) {
+            comments++
+            url = (
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'comment',
+                  String(item.number),
+                  '-R',
+                  repo.path,
+                  '--body-file',
+                  '-',
+                ],
+                {
+                  env,
+                  signal,
+                  input: suggestComment(JSON.parse(latest.missing) as string[], [
+                    repo.token,
+                    pi.llmApiKey,
+                  ]),
+                },
+              )
+            ).trim()
+            if (!url) throw new Error('评论未返回链接')
+          }
+          db.update(triageRecords)
+            .set({ suggestedAt: now, suggestCommentUrl: url, suggestError: null })
+            .where(eq(triageRecords.id, latest.id))
+            .run()
+        } catch (error) {
+          const message = redactSecrets(errorMessage(error), [repo.token, pi.llmApiKey])
+          db.update(triageRecords)
+            .set({ suggestError: message })
+            .where(eq(triageRecords.id, latest.id))
+            .run()
+          log(`${repo.ref} #${item.number} 建议失败：${message}`)
+        }
       }
     } catch (error) {
       if (!signal.aborted)

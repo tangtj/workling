@@ -128,11 +128,12 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
       .run()
     first.db.run(sql`DROP TABLE triage_records`)
     first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_level`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
     first.db.run(sql`DROP TABLE feedback`)
     first.db.run(sql`DROP TABLE feedback_cursors`)
     first.db.run(sql`DROP TABLE trusted_users`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 3)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -144,6 +145,56 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
         ),
       ).toHaveLength(1)
     }
+    upgraded.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('建议级迁移保留仓库数据并为新旧库创建可空列', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-suggest-'))
+  try {
+    const first = await openDatabase(dir)
+    const repoColumns = first.db.all<{ name: string }>(sql`PRAGMA table_info(repos)`)
+    expect(repoColumns.some((c) => c.name === 'triage_since')).toBe(true)
+    const columns = ['suggested_at', 'suggest_comment_url', 'suggest_error', 'label_removed_at']
+    for (const name of columns)
+      expect(
+        first.db
+          .all<{ name: string; notnull: number }>(sql`PRAGMA table_info(triage_records)`)
+          .find((c) => c.name === name),
+      ).toMatchObject({ notnull: 0 })
+    const now = new Date()
+    first.db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'secret',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    for (const name of columns)
+      first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
+    first.db.run(
+      sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+    )
+    first.close()
+    const upgraded = await openDatabase(dir)
+    expect(upgraded.db.select().from(repos).get()).toMatchObject({
+      token: 'secret',
+      triageSince: null,
+    })
+    for (const name of columns)
+      expect(
+        upgraded.db
+          .all<{ name: string }>(sql`PRAGMA table_info(triage_records)`)
+          .some((c) => c.name === name),
+      ).toBe(true)
     upgraded.close()
   } finally {
     await rm(dir, { recursive: true, force: true })

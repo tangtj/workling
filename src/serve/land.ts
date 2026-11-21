@@ -1,4 +1,4 @@
-import { markComment } from './comment.ts'
+import { markComment, neutralizeMentions } from './comment.ts'
 import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
@@ -39,14 +39,6 @@ type LandResult = Landed | { status: 'answered' } | { status: 'failed'; error: s
 
 function failed(error: string): LandResult {
   return { status: 'failed', error }
-}
-
-export function neutralizeMentions(text: string): string {
-  // 现有反引号可能和新插入的反引号配对，使提及落到代码之外。
-  const useHtml = text.includes('`') || /\\@|@[A-Za-z0-9_/-]*@/.test(text)
-  return text.replace(/\\?@([A-Za-z0-9-]+(?:\/[A-Za-z0-9_-]+)?)/g, (_, name: string) =>
-    useHtml ? `<code>&#64;${name}</code>` : `\`@${name}\``,
-  )
 }
 
 async function readMarkdown(dir: string, name: string): Promise<string> {

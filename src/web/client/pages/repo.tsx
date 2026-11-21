@@ -108,9 +108,10 @@ function Triage({
   const data = query.data
   return (
     <section className="card">
-      <h2>分诊（影子模式）</h2>
+      <h2>分诊</h2>
       <p>
-        只记录结论，不打标签、不评论；只分诊受信作者的 Issue；需要<Link to="/settings">设置页</Link>
+        影子级只记录结论，建议级会打标签并评论；只分诊受信作者的 Issue；需要
+        <Link to="/settings">设置页</Link>
         的 LLM 配置。
       </p>
       {settings.data && (!settings.data.pi.llmBaseUrl || !settings.data.pi.llmApiKey) && (
@@ -123,10 +124,17 @@ function Triage({
         <select
           disabled={!github || !data || mutation.isPending}
           value={data?.level ?? 'off'}
-          onChange={(event) => mutation.mutate(event.target.value)}
+          onChange={(event) => {
+            if (
+              event.target.value !== 'suggest' ||
+              window.confirm('建议级会对受信作者信息不全的 Issue 打标签并评论。确认开启？')
+            )
+              mutation.mutate(event.target.value)
+          }}
         >
           <option value="off">关闭</option>
           <option value="shadow">影子</option>
+          <option value="suggest">建议</option>
         </select>
       </label>
       {(query.error || mutation.error) && (
@@ -140,6 +148,14 @@ function Triage({
             一致率：
             {data.summary.total
               ? `${Math.round(((data.summary.acceptReady + data.summary.otherNotReady) * 100) / data.summary.total)}%`
+              : '—'}
+          </p>
+          <p>
+            建议：{data.summary.suggestions.total} · 已补充：{data.summary.suggestions.edited} ·
+            未修改直接打 ready：{data.summary.suggestions.readyWithoutEdit} · 待跟进：
+            {data.summary.suggestions.pending} · 建议被跳过的比例：
+            {data.summary.suggestions.total
+              ? `${Math.round((data.summary.suggestions.readyWithoutEdit * 100) / data.summary.suggestions.total)}%`
               : '—'}
           </p>
           {data.records.length === 0 && <p>暂无分诊记录</p>}
@@ -162,11 +178,29 @@ function Triage({
                     : '未 ready'}{' '}
                   · 分诊：{row.triagedAt}
                 </p>
-                {(row.note || row.error) && (
+                {row.suggestedAt && (
+                  <p>
+                    已提示{' '}
+                    {row.suggestCommentUrl && (
+                      <a href={row.suggestCommentUrl} target="_blank" rel="noopener noreferrer">
+                        评论链接
+                      </a>
+                    )}{' '}
+                    ·{' '}
+                    {row.followUp === 'edited'
+                      ? '已补充'
+                      : row.followUp === 'readyWithoutEdit'
+                        ? '未修改直接打 ready'
+                        : '待跟进'}
+                  </p>
+                )}
+                {row.labelRemovedAt && <p>已摘标签</p>}
+                {(row.note || row.error || row.suggestError) && (
                   <details>
                     <summary>说明</summary>
                     <p>{row.note}</p>
                     <p>{row.error}</p>
+                    <p>{row.suggestError}</p>
                   </details>
                 )}
               </div>

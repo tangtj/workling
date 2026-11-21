@@ -328,7 +328,7 @@ test('标签创建缓存、同步失败重试且不阻塞后续 Issue', async ()
     calls.length = 0
     await poll()
     await poll()
-    expect(calls.filter((call) => call.args[1] === 'label')).toHaveLength(10)
+    expect(calls.filter((call) => call.args[1] === 'label')).toHaveLength(12)
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })

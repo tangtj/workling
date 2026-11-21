@@ -8,9 +8,18 @@ const decision = Type.Union([
 const nullableString = Type.Union([Type.String(), Type.Null()])
 export const triageSchema = Type.Object(
   {
-    level: Type.Union([Type.Literal('off'), Type.Literal('shadow')]),
+    level: Type.Union([Type.Literal('off'), Type.Literal('shadow'), Type.Literal('suggest')]),
     summary: Type.Object(
       {
+        suggestions: Type.Object(
+          {
+            total: Type.Integer(),
+            edited: Type.Integer(),
+            readyWithoutEdit: Type.Integer(),
+            pending: Type.Integer(),
+          },
+          { additionalProperties: false },
+        ),
         total: Type.Integer(),
         acceptReady: Type.Integer(),
         acceptNotReady: Type.Integer(),
@@ -47,6 +56,16 @@ export const triageSchema = Type.Object(
           alreadyReady: Type.Boolean(),
           attempts: Type.Integer(),
           triagedAt: Type.String(),
+          suggestedAt: nullableString,
+          suggestCommentUrl: nullableString,
+          suggestError: nullableString,
+          labelRemovedAt: nullableString,
+          followUp: Type.Union([
+            Type.Literal('edited'),
+            Type.Literal('readyWithoutEdit'),
+            Type.Literal('pending'),
+            Type.Null(),
+          ]),
           readyAt: nullableString,
           readyAfterMinutes: Type.Union([Type.Integer(), Type.Null()]),
         },

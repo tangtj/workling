@@ -14,9 +14,10 @@ export const repos = sqliteTable('repos', {
   path: text('path').notNull(),
   token: text('token').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  triageLevel: text('triage_level', { enum: ['off', 'shadow'] })
+  triageLevel: text('triage_level', { enum: ['off', 'shadow', 'suggest'] })
     .notNull()
     .default('off'),
+  triageSince: integer('triage_since', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 })
@@ -191,6 +192,10 @@ export const triageRecords = sqliteTable(
     alreadyReady: integer('already_ready', { mode: 'boolean' }).notNull(),
     attempts: integer('attempts').notNull(),
     triagedAt: integer('triaged_at', { mode: 'timestamp' }).notNull(),
+    suggestedAt: integer('suggested_at', { mode: 'timestamp' }),
+    suggestCommentUrl: text('suggest_comment_url'),
+    suggestError: text('suggest_error'),
+    labelRemovedAt: integer('label_removed_at', { mode: 'timestamp' }),
   },
   (table) => [
     uniqueIndex('triage_repo_number_hash_unique').on(table.repoId, table.number, table.contentHash),
