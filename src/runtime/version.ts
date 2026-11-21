@@ -14,8 +14,14 @@ export function readVersion(root = ROOT): string {
 export const TAG_PATTERN = '^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?$'
 export const validTag = (tag: string): boolean => new RegExp(TAG_PATTERN).test(tag)
 
+export const EDGE_PATTERN = '^edge-[0-9a-f]{12}$'
+export const VERSION_PATTERN = `(?:${TAG_PATTERN})|(?:${EDGE_PATTERN})`
+export const isEdge = (version: string): boolean => new RegExp(EDGE_PATTERN).test(version)
+export const validVersion = (version: string): boolean => validTag(version) || isEdge(version)
+
 export const isPrerelease = (tag: string): boolean => tag.split('+')[0]!.includes('-')
 
+// Only compare tags and dev; edge ordering requires GitHub compare.
 export function compareVersions(a: string, b: string): number {
   if (a === 'dev' || b === 'dev') return a === b ? 0 : a === 'dev' ? -1 : 1
   const parts = (version: string) => {

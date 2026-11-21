@@ -22,15 +22,16 @@ try {
 const fs = require("node:fs");
 const path = require("node:path");
 const { APP_HOME, IMAGE_ROOT, STATE, WORKLING_DATA, ACTION } = process.env;
-const { compareVersions, TAG_PATTERN } = require(path.join(IMAGE_ROOT, "src/runtime/version.ts"));
-const validVersion = v => typeof v === "string" && (v === "dev" || new RegExp(TAG_PATTERN).test(v));
+const { compareVersions, VERSION_PATTERN, isEdge } = require(path.join(IMAGE_ROOT, "src/runtime/version.ts"));
+const validVersion = v => typeof v === "string" && (v === "dev" || new RegExp(VERSION_PATTERN).test(v));
 const readState = () => {
   if (!fs.existsSync(STATE)) return null;
   const s = JSON.parse(fs.readFileSync(STATE, "utf8"));
   if (!s || ![s.current, s.previous].every(v => v === null || validVersion(v)) ||
       typeof s.previousIsImage !== "boolean" || !(s.backup === null || typeof s.backup === "string") ||
       typeof s.pending !== "boolean" || !Number.isSafeInteger(s.attempts) || s.attempts < 0 || typeof s.updatedAt !== "string" ||
-      Object.keys(s).some(k => !["current", "previous", "previousIsImage", "backup", "pending", "attempts", "updatedAt", "lastError", "lastSuccess"].includes(k)) ||
+      Object.keys(s).some(k => !["current", "previous", "previousIsImage", "backup", "pending", "attempts", "updatedAt", "lastError", "lastSuccess", "image"].includes(k)) ||
+      s.image !== undefined && !validVersion(s.image) ||
       s.lastError !== undefined && typeof s.lastError !== "string" ||
       s.lastSuccess !== undefined && (!s.lastSuccess || !validVersion(s.lastSuccess.tag) || typeof s.lastSuccess.at !== "string" ||
         Object.keys(s.lastSuccess).some(k => !["tag", "at"].includes(k))))
@@ -60,7 +61,7 @@ const select = () => {
   const current = path.join(APP_HOME, "current");
   const image = version(IMAGE_ROOT);
   if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink() &&
-      fs.existsSync(path.join(current, "src/cli.ts")) && fs.existsSync(path.join(current, "VERSION")) && newer(version(current), image)) return current;
+      fs.existsSync(path.join(current, "src/cli.ts")) && fs.existsSync(path.join(current, "VERSION")) && (isEdge(version(current)) ? readState()?.image === image : newer(version(current), image))) return current;
   // 管理员拉了更新的镜像后，以镜像为准，清除旧在线版本的选择。
   if (fs.lstatSync(current, { throwIfNoEntry: false })) {
     fs.unlinkSync(current);

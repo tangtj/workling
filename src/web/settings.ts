@@ -26,8 +26,13 @@ export const executorSettingsSchema = Type.Object(
   },
   { additionalProperties: false },
 )
+export const updateSettingsSchema = Type.Object(
+  { channel: Type.Union([Type.Literal('stable'), Type.Literal('edge')]) },
+  { additionalProperties: false },
+)
 export const settingsSchema = Type.Object(
   {
+    update: updateSettingsSchema,
     pi: piSettingsSchema,
     executor: executorSettingsSchema,
     startup: Type.Union([

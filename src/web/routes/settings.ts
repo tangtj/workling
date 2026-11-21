@@ -1,4 +1,6 @@
 import * as Type from 'typebox'
+import { readUpdateChannel, updateUpdateChannel } from '../../config/update.ts'
+import { updateSettingsSchema } from '../settings.ts'
 import { readExecutorSettings, updateExecutorSettings } from '../../config/executor.ts'
 import { Hono } from 'hono'
 import * as Value from 'typebox/value'
@@ -40,6 +42,7 @@ export function settingsRoutes(deps: AppDeps): Hono {
   const app = new Hono()
   app.get('/api/settings', (c) => {
     const body = {
+      update: { channel: readUpdateChannel(db) },
       pi: responsePi(readPiSettings(db)),
       executor: readExecutorSettings(db),
       startup: deps.options.startup ?? null,
@@ -47,6 +50,16 @@ export function settingsRoutes(deps: AppDeps): Hono {
     }
     if (!Value.Check(settingsSchema, body)) throw new Error('设置数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
+  })
+  app.patch('/api/settings/update', async (c) => {
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'JSON 格式无效' }, 400)
+    }
+    if (!Value.Check(updateSettingsSchema, body)) return c.json({ error: '参数无效' }, 400)
+    return c.json(updateUpdateChannel(db, body.channel))
   })
   app.get('/api/settings/pi', (c) => c.json(responsePi(readPiSettings(db))))
   app.patch('/api/settings/pi', async (c) => {

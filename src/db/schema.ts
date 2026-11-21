@@ -208,3 +208,9 @@ export const triageRecords = sqliteTable(
     uniqueIndex('triage_repo_number_hash_unique').on(table.repoId, table.number, table.contentHash),
   ],
 )
+
+export const updateSettings = sqliteTable('update_settings', {
+  id: integer('id').primaryKey(),
+  channel: text('channel', { enum: ['stable', 'edge'] }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+})

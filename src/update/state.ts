@@ -2,12 +2,13 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
-import { TAG_PATTERN } from '../runtime/version.ts'
+import { VERSION_PATTERN } from '../runtime/version.ts'
 
-const version = Type.String({ pattern: `(?:${TAG_PATTERN})|^dev$` })
+const version = Type.String({ pattern: `(?:${VERSION_PATTERN})|^dev$` })
 const nullableVersion = Type.Union([version, Type.Null()])
 export const stateSchema = Type.Object(
   {
+    image: Type.Optional(version),
     current: nullableVersion,
     previous: nullableVersion,
     previousIsImage: Type.Boolean(),

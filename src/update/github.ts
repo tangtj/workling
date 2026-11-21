@@ -88,24 +88,88 @@ export async function listReleases({
   return releases
 }
 
+type RefOptions = {
+  repo: string
+  token?: string
+  proxy?: string
+  fetch?: UpdateFetch
+  force?: boolean
+  now?: () => number
+}
+const refCaches = new WeakMap<UpdateFetch, Map<string, { at: number; value: unknown }>>()
+async function getRef<T>(options: RefOptions, endpoint: string, schema: Type.TSchema): Promise<T> {
+  const {
+    repo,
+    token = '',
+    proxy = process.env.WORKLING_UPDATE_PROXY,
+    fetch: request = globalThis.fetch,
+    force = false,
+    now = Date.now,
+  } = options
+  let cache = refCaches.get(request)
+  if (!cache) {
+    cache = new Map()
+    refCaches.set(request, cache)
+  }
+  const key = JSON.stringify([repo, token, proxy, endpoint])
+  const hit = cache.get(key)
+  if (!force && hit && now() - hit.at < 20 * 60_000) return hit.value as T
+  let response: Response
+  try {
+    response = await request(`https://api.github.com/repos/${repoPath(repo)}/${endpoint}`, {
+      headers: headers(token),
+      proxy,
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch {
+    throw new Error('GitHub 请求失败')
+  }
+  if (!response.ok) throw new Error(`GitHub 请求失败（HTTP ${response.status}）`)
+  const value: unknown = await response.json()
+  if (!Value.Check(schema, value)) throw new Error('GitHub 响应格式无效')
+  cache.set(key, { at: now(), value })
+  return value as T
+}
+export function getBranchHead(options: RefOptions & { branch: 'main' }): Promise<{ sha: string }> {
+  return getRef(
+    options,
+    `commits/${encodeURIComponent(options.branch)}`,
+    Type.Object({ sha: Type.String({ pattern: '^[0-9a-f]{40}$' }) }),
+  )
+}
+export function compareRefs(
+  options: RefOptions & { base: string; head: string },
+): Promise<{ status: 'ahead' | 'behind' | 'identical' | 'diverged' }> {
+  const valid = (ref: string) => validTag(ref) || /^[0-9a-f]{7,40}$/.test(ref)
+  if (!valid(options.base) || !valid(options.head)) throw new Error('非法版本')
+  return getRef(
+    options,
+    `compare/${encodeURIComponent(options.base)}...${encodeURIComponent(options.head)}`,
+    Type.Object({
+      status: Type.Union(['ahead', 'behind', 'identical', 'diverged'].map((v) => Type.Literal(v))),
+    }),
+  )
+}
+
 export async function downloadTarball({
   repo,
-  tag,
+  ref,
   token = '',
   dest,
   proxy = process.env.WORKLING_UPDATE_PROXY,
   fetch: request = globalThis.fetch,
 }: {
   repo: string
-  tag: string
+  ref: string
   token?: string
   dest: string
   proxy?: string
   fetch?: UpdateFetch
 }): Promise<void> {
-  if (!validTag(tag)) throw new Error('非法 tag')
+  if (!validTag(ref) && !/^[0-9a-f]{40}$/.test(ref)) throw new Error('非法版本')
   let url = new URL(
-    `https://api.github.com/repos/${repoPath(repo)}/tarball/${encodeURIComponent(tag)}`,
+    `https://api.github.com/repos/${repoPath(repo)}/tarball/${encodeURIComponent(ref)}`,
   )
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 120_000)
