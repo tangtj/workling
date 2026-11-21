@@ -702,6 +702,10 @@ label.checkbox {
   --accent-soft: #e9eefc;
   --queued: #5b6b82;
   --queued-soft: #eef1f5;
+  --review: #0d6e67;
+  --review-soft: #e3f3f1;
+  --rework: #6844c0;
+  --rework-soft: #efeafb;
   --running: #1d6fd6;
   --running-soft: #e7f0fc;
   --done: #1f8a4c;
@@ -731,6 +735,10 @@ label.checkbox {
     --accent-soft: #1e2645;
     --queued: #94a3b8;
     --queued-soft: #1f242c;
+    --review: #55cbc4;
+    --review-soft: #10292a;
+    --rework: #bba2ff;
+    --rework-soft: #251d3d;
     --running: #5aa2ff;
     --running-soft: #15263d;
     --done: #4cc47e;
@@ -759,6 +767,10 @@ label.checkbox {
   --accent-soft: #1e2645;
   --queued: #94a3b8;
   --queued-soft: #1f242c;
+  --review: #55cbc4;
+  --review-soft: #10292a;
+  --rework: #bba2ff;
+  --rework-soft: #251d3d;
   --running: #5aa2ff;
   --running-soft: #15263d;
   --done: #4cc47e;
@@ -2381,4 +2393,21 @@ legend {
   display: inline-block;
   vertical-align: -0.125em;
   flex-shrink: 0;
+}
+
+.badge--review {
+  color: var(--review);
+  background: var(--review-soft);
+}
+.badge--rework,
+.badge--capped {
+  color: var(--rework);
+  background: var(--rework-soft);
+}
+.dot--review {
+  background: var(--review);
+}
+.dot--rework,
+.dot--capped {
+  background: var(--rework);
 }

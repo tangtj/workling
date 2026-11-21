@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { selectedStatus, statusCounts, queuePositions, sortIssues } from '../../issue-view.ts'
+import {
+  stageFromParams,
+  stageCounts,
+  queuePositions,
+  sortIssues,
+  matchesStage,
+} from '../../issue-view.ts'
 import { platformName } from '../../platform.ts'
 import { issueListOptions } from '../issue-list.ts'
 import { IssueTable, PlatformIcon, StatusChips } from '../issue-table.tsx'
@@ -240,7 +246,7 @@ export function RepoPage() {
   if (!repo) return <NotFound />
   const data = page.data
   const items = data.issues.filter((i) => i.repoId === repo.id)
-  const selected = selectedStatus(params.get('status') ?? 'all')
+  const selected = stageFromParams(params)
   return (
     <>
       <nav className="breadcrumbs">
@@ -266,10 +272,10 @@ export function RepoPage() {
       <TrustedUsers id={repo.id} github={repo.platform === 'github'} />
       <section className="card">
         <div className="toolbar">
-          <StatusChips selected={selected} counts={statusCounts(items)} />
+          <StatusChips selected={selected} counts={stageCounts(items)} />
         </div>
         <IssueTable
-          items={sortIssues(items.filter((i) => selected === 'all' || i.status === selected))}
+          items={sortIssues(items.filter((i) => matchesStage(i.stage, selected)))}
           repos={data.repos}
           now={data.now}
           queuePosition={queuePositions(data.issues)}

@@ -1,3 +1,4 @@
+import { attentionStages } from '../stage.ts'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { shellHtml } from '../shell-html.ts'
@@ -32,6 +33,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
           (issue) => issue.repoId === id && ['queued', 'running', 'failed'].includes(issue.status),
         ).length,
       })),
+      attention: sidebar.issues.filter((issue) => attentionStages.includes(issue.stage)).length,
       failed: sidebar.issues.filter((issue) => issue.status === 'failed').length,
       running: sidebar.issues.filter((issue) => issue.status === 'running').length,
       concurrency: sidebar.concurrency,
@@ -63,17 +65,33 @@ export function pagesRoutes(deps: AppDeps): Hono {
         tokenMask: maskToken(token),
       })),
       issues: page.issues.map(
-        ({ id, repoId, number, title, status, prUrl, prState, updatedAt, runs, lastRun }) => ({
+        ({
           id,
           repoId,
           number,
           title,
           status,
+          stage,
+          prUrl,
+          prState,
+          updatedAt,
+          runs,
+          lastRun,
+        }) => ({
+          id,
+          repoId,
+          number,
+          title,
+          status,
+          stage,
+          branch: lastRun?.branch ?? null,
+          rounds: runs.length,
           prUrl,
           prState,
           updatedAt: updatedAt.toISOString(),
           runCount: runs.length,
           lastRun: lastRun && {
+            kind: lastRun.kind,
             startedAt: lastRun.startedAt.toISOString(),
             endedAt: lastRun.endedAt?.toISOString() ?? null,
             exitCode: lastRun.exitCode,

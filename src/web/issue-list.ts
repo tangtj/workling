@@ -30,6 +30,14 @@ export const issueListSchema = obj({
       number: Type.Integer(),
       title: nullableString,
       status,
+      stage: Type.Union([
+        status,
+        Type.Literal('rework'),
+        Type.Literal('review'),
+        Type.Literal('capped'),
+      ]),
+      branch: nullableString,
+      rounds: Type.Integer({ minimum: 0 }),
       prUrl: nullableString,
       prState: Type.Union([
         Type.Literal('open'),
@@ -42,6 +50,7 @@ export const issueListSchema = obj({
       lastRun: Type.Union([
         Type.Null(),
         obj({
+          kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
           startedAt: Type.String(),
           endedAt: nullableString,
           exitCode: Type.Union([Type.Integer(), Type.Null()]),

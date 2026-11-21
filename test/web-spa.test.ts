@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as Value from 'typebox/value'
 import { openDatabase } from '../src/db/index.ts'
-import { issues, repos, runs, sessions } from '../src/db/schema.ts'
+import { feedback, issues, repos, runs, sessions } from '../src/db/schema.ts'
 import { createApp } from '../src/web/app.ts'
 import { hashToken } from '../src/web/auth.ts'
 import { buildWebBundle, getWebBundle } from '../src/web/bundle.ts'
@@ -174,6 +174,7 @@ test('侧栏数据通过严格形状校验，统计活动任务并排除凭证�
       repos: [{ id: f.repo.id, ref: 'github:owner/repo', enabled: true, open: 3 }],
       running: 1,
       failed: 1,
+      attention: 1,
       watch: {
         worker: 'spa-worker',
         interval: 60,
@@ -315,6 +316,73 @@ test('概览接口仅包含活动任务、近期运行与最后运行，隐藏�
     ).toEqual([latest.id, within.id].sort())
     expect(body.issues.find((i) => i.id === included.id)?.runCount).toBe(3)
     expect((await f.request('/api/overview', false, false)).status).toBe(401)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('列表和侧栏根据最新运行与上限反馈计算阶段和待处理数', async () => {
+  const f = await fixture()
+  try {
+    const issue = f.db
+      .select()
+      .from(issues)
+      .all()
+      .find((i) => i.status === 'done')!
+    const endedAt = new Date(f.now.getTime() - 20000)
+    const run = f.db
+      .insert(runs)
+      .values({
+        issueId: issue.id,
+        worker: 'worker',
+        kind: 'rework',
+        branch: 'work/branch',
+        startedAt: new Date(f.now.getTime() - 30000),
+        endedAt,
+      })
+      .returning()
+      .get()
+    f.db
+      .update(issues)
+      .set({ prState: 'open', lastRunId: run.id })
+      .where(eq(issues.id, issue.id))
+      .run()
+    f.db
+      .insert(feedback)
+      .values({
+        repoId: f.repo.id,
+        issueId: issue.id,
+        source: 'review',
+        externalId: '1',
+        authorId: '1',
+        authorLogin: 'reviewer',
+        trust: 'write',
+        isCommand: false,
+        body: 'changes',
+        url: 'https://example.com',
+        status: 'capped',
+        createdAt: f.now,
+        updatedAt: f.now,
+        seenAt: f.now,
+      })
+      .run()
+    const list = await f.request('/api/issue-list')
+    expect(list.status).toBe(200)
+    const body: unknown = await list.json()
+    expect(Value.Check(issueListSchema, body)).toBe(true)
+    if (!Value.Check(issueListSchema, body)) throw new Error('invalid issue list')
+    expect(body.issues.find((i) => i.id === issue.id)).toMatchObject({
+      stage: 'capped',
+      branch: 'work/branch',
+      rounds: 1,
+      runCount: 1,
+      lastRun: { kind: 'rework' },
+    })
+    const shell = await f.request('/api/shell')
+    expect(shell.status).toBe(200)
+    const sidebar: unknown = await shell.json()
+    expect(Value.Check(shellSchema, sidebar)).toBe(true)
+    expect(sidebar).toMatchObject({ failed: 1, attention: 2 })
   } finally {
     await f.cleanup()
   }
