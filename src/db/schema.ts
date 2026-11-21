@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const upgradeSteps = sqliteTable('upgrade_steps', {
   id: text('id').primaryKey(),
@@ -94,3 +94,72 @@ export const executorSettings = sqliteTable('executor_settings', {
   concurrency: integer('concurrency').notNull().default(3),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 })
+
+export const feedback = sqliteTable(
+  'feedback',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    issueId: integer('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    prNumber: integer('pr_number'),
+    source: text('source', {
+      enum: ['issue_comment', 'pr_comment', 'review_comment', 'review'],
+    }).notNull(),
+    externalId: text('external_id').notNull(),
+    authorId: text('author_id').notNull(),
+    authorLogin: text('author_login').notNull(),
+    trust: text('trust', { enum: ['self', 'bot', 'allowlist', 'write', 'untrusted'] }).notNull(),
+    isCommand: integer('is_command', { mode: 'boolean' }).notNull(),
+    instruction: text('instruction'),
+    body: text('body').notNull(),
+    path: text('path'),
+    line: integer('line'),
+    reviewState: text('review_state'),
+    url: text('url').notNull(),
+    status: text('status', {
+      enum: ['ignored', 'observed', 'pending', 'included', 'replied'],
+    }).notNull(),
+    runId: integer('run_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    seenAt: integer('seen_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('feedback_repo_source_external_unique').on(
+      table.repoId,
+      table.source,
+      table.externalId,
+    ),
+  ],
+)
+
+export const feedbackCursors = sqliteTable(
+  'feedback_cursors',
+  {
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['issue_comments', 'review_comments'] }).notNull(),
+    cursor: integer('cursor', { mode: 'timestamp' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.repoId, table.kind] })],
+)
+
+export const trustedUsers = sqliteTable(
+  'trusted_users',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    login: text('login').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [uniqueIndex('trusted_users_repo_user_unique').on(table.repoId, table.userId)],
+)

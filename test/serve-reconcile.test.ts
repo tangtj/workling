@@ -58,7 +58,7 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
-      'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）',
+      'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）\n\n<!-- workling -->',
     )
   } finally {
     await s.dispose()
@@ -151,7 +151,7 @@ test.each([
     if (failure === '全部成功') {
       expect(messages).toHaveLength(2)
       expect(messages[0]).toBe(
-        'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）\n\n检查通过 `@someone`',
+        'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）\n\n检查通过 `@someone`\n\n<!-- workling -->',
       )
       expect(messages[1]).toContain('勾选：- [ ] Run tests')
       expect(messages[1]).toContain('取消勾选：* [x] Old')
@@ -431,7 +431,8 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
         `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。` +
           (kind === '有报告和 Pi 说明'
             ? '\n\n### Pi 的说明\n\n<code>&#64;someone</code> 检查未通过'
-            : ''),
+            : '') +
+          '\n\n<!-- workling -->',
       )
       expect(s.logs.filter((line) => line.includes('更新 GitHub 失败'))).toHaveLength(2)
       expect(s.db.select().from(issues).get()?.status).toBe('failed')

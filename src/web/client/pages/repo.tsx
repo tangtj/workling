@@ -1,12 +1,80 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { selectedStatus, statusCounts, queuePositions, sortIssues } from '../../issue-view.ts'
 import { platformName } from '../../platform.ts'
 import { issueListOptions } from '../issue-list.ts'
 import { IssueTable, PlatformIcon, StatusChips } from '../issue-table.tsx'
 import { usePageLayout } from '../layout.tsx'
+import { loadTrustedUsers } from '../feedback.ts'
+import { repoRequest } from '../repos.ts'
 import { NotFound } from '../not-found.tsx'
+
+function TrustedUsers({ id, github }: { id: number; github: boolean }) {
+  const [user, setUser] = useState('')
+  const client = useQueryClient()
+  const key = ['trusted-users', id]
+  const list = useQuery({ queryKey: key, queryFn: ({ signal }) => loadTrustedUsers(id, signal) })
+  const mutation = useMutation({
+    mutationFn: ({ value, remove }: { value: string; remove?: boolean }) =>
+      repoRequest(
+        `/api/repos/${id}/trusted-users${remove ? `/${encodeURIComponent(value)}` : ''}`,
+        remove ? 'DELETE' : 'POST',
+        remove ? undefined : { user: value },
+      ),
+    onSuccess: () => {
+      setUser('')
+      void client.invalidateQueries({ queryKey: key })
+    },
+  })
+  return (
+    <section className="card">
+      <h2>受信账号</h2>
+      <p>
+        对仓库有写权限的成员默认可信，这里额外放行没有写权限的账号；bot 与 workling
+        自身评论永远不算指令。
+      </p>
+      {!github && <p>暂只支持 GitHub</p>}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          mutation.mutate({ value: user })
+        }}
+      >
+        <input
+          aria-label="用户名或主页链接"
+          value={user}
+          onChange={(event) => setUser(event.target.value)}
+          disabled={!github || mutation.isPending}
+          placeholder="用户名或主页链接"
+        />{' '}
+        <button className="button" disabled={!github || !user.trim() || mutation.isPending}>
+          添加
+        </button>
+      </form>
+      {mutation.error && (
+        <p className="error-box" role="alert">
+          {mutation.error.message}
+        </p>
+      )}
+      {list.isError && <p className="error-box">加载受信账号失败</p>}
+      {list.data?.map((entry) => (
+        <div className="row" key={entry.id}>
+          <span>
+            {entry.login} · ID {entry.userId}
+          </span>
+          <button
+            className="button"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate({ value: entry.userId, remove: true })}
+          >
+            移除
+          </button>
+        </div>
+      ))}
+    </section>
+  )
+}
 
 export function RepoPage() {
   const page = useQuery(issueListOptions)
@@ -55,6 +123,7 @@ export function RepoPage() {
           </p>
         </div>
       </header>
+      <TrustedUsers id={repo.id} github={repo.platform === 'github'} />
       <section className="card">
         <div className="toolbar">
           <StatusChips selected={selected} counts={statusCounts(items)} />

@@ -1,6 +1,8 @@
+import * as Value from 'typebox/value'
+import { feedbackSchema } from '../feedback.ts'
 import { Hono } from 'hono'
 import { desc, eq } from 'drizzle-orm'
-import { repos, issues, runs } from '../../db/schema.ts'
+import { repos, issues, runs, feedback } from '../../db/schema.ts'
 import type { AppDeps } from '../app.ts'
 import { repoId } from '../response.ts'
 
@@ -45,6 +47,25 @@ export function issuesRoutes(deps: AppDeps): Hono {
         updatedAt: issue.updatedAt.toISOString(),
       })),
     )
+  })
+  app.get('/api/issues/:id/feedback', (c) => {
+    const id = repoId(c.req.param('id'))
+    if (!id || !db.select().from(issues).where(eq(issues.id, id)).get())
+      return c.json({ error: 'Issue 不存在' }, 404)
+    const rows = db
+      .select()
+      .from(feedback)
+      .where(eq(feedback.issueId, id))
+      .orderBy(feedback.createdAt, feedback.id)
+      .all()
+      .map((row) => ({
+        ...row,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        seenAt: row.seenAt.toISOString(),
+      }))
+    if (!Value.Check(feedbackSchema, rows)) throw new Error('反馈数据无效')
+    return c.json(rows)
   })
   app.get('/api/issues/:id/runs', (c) => {
     const id = repoId(c.req.param('id'))

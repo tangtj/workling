@@ -25,6 +25,15 @@ export type RetryState = {
   triggers: Map<number, string>
 }
 
+/** 正文 trimStart 后以 /workling 或 @<login> 开头（不区分大小写，其后为空白或结尾）时返回前缀之后 trim 的文字，否则返回 null。 */
+export function matchCommandPrefix(body: string, login: string): string | null {
+  const trimmed = body.trimStart()
+  const match = /^(\/workling|@[^\s]+)(?=\s|$)/i.exec(trimmed)
+  if (!match || !['/workling', `@${login.toLowerCase()}`].includes(match[1]!.toLowerCase()))
+    return null
+  return trimmed.slice(match[0].length).trim()
+}
+
 export async function retryOnCommand({
   db,
   command,
@@ -85,14 +94,7 @@ export async function retryOnCommand({
         const entry = failed.find(({ issue }) => issue.number === Number(number))
         if (!entry || !(Date.parse(comment.created_at) > entry.run.startedAt.getTime())) continue
         if (comment.user.login.toLowerCase() !== account.login.toLowerCase()) continue
-        const body = comment.body.trimStart()
-        const prefix = body.match(/^(\/workling|@[^\s]+)(?=\s|$)/i)?.[1]
-        if (
-          !prefix ||
-          (prefix.toLowerCase() !== '/workling' &&
-            prefix.toLowerCase() !== `@${account.login.toLowerCase()}`)
-        )
-          continue
+        if (matchCommandPrefix(comment.body, account.login) === null) continue
         matches.set(entry.issue.id, comment.html_url)
       }
       for (const { issue } of failed) {
