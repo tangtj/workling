@@ -87,7 +87,8 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
     await reconcile({
       ...s.options,
       command: (args, options) => {
-        if (!args[2]?.endsWith('/parent')) commands.push(args)
+        if (!args[2]?.endsWith('/parent') && !(args[2] === 'view' && args.at(-1) === 'labels'))
+          commands.push(args)
         return s.command(args, options)
       },
     })
@@ -168,6 +169,7 @@ test.each([
     const options = {
       ...s.options,
       command: (async (args, options) => {
+        if (args[2] === 'view' && args.at(-1) === 'labels') return s.command(args, options)
         if (
           args[0] !== 'gh' ||
           args[1] !== 'issue' ||
@@ -455,6 +457,8 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
             error: '进程丢失',
           })
           if (args[2]?.endsWith('/parent')) throw new Error('HTTP 404')
+          if (args[2] === 'view' && args.at(-1) === 'labels')
+            return JSON.stringify({ labels: [{ name: 'workling:running' }] })
           s.calls.push({ args, options })
           throw new Error('API failed')
         },
@@ -736,6 +740,39 @@ test('保留次数配置为 2 时清理较旧的已结束任务目录', async ()
     expect(remaining).not.toContain(names[0]!)
     expect(remaining).not.toContain(names[1]!)
     expect(remaining).toHaveLength(2)
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each(['done', 'failed'] as const)('执行结束为 %s 时移除其他已有状态标签', async (status) => {
+  const s = await scenario()
+  try {
+    const { dir } = await s.running({ delivery: status === 'done' })
+    await writeResult(dir, {
+      exitCode: status === 'done' ? 0 : 1,
+      signal: null,
+      finishedAt: clock.toISOString(),
+    })
+    const edits: string[][] = []
+    await reconcile({
+      ...s.options,
+      command: async (args, options) => {
+        if (args[2] === 'view' && args.at(-1) === 'labels')
+          return JSON.stringify({
+            labels: ['queued', 'running', status === 'done' ? 'failed' : 'done'].map((name) => ({
+              name: `workling:${name}`,
+            })),
+          })
+        if (args[2] === 'edit' && args.includes('--add-label')) edits.push(args)
+        return s.command(args, options)
+      },
+    })
+    expect(edits).toHaveLength(1)
+    expect(edits[0]).toContain(`workling:${status}`)
+    expect(edits[0]).toContain('workling:queued')
+    expect(edits[0]).toContain('workling:running')
+    expect(edits[0]).toContain(`workling:${status === 'done' ? 'failed' : 'done'}`)
   } finally {
     await s.dispose()
   }

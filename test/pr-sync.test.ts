@@ -43,6 +43,7 @@ test('同步优先打开的 PR，同优先级选最新，保留执行中和未�
       signal,
       log: s.log,
       command: async (args, options) => {
+        if (args[1] === 'issue') return '[]'
         expect(args).toEqual([
           'gh',
           'pr',
@@ -119,13 +120,17 @@ test.each(['命令失败', 'JSON 无效', '形状无效'])('仓库%s时继续同
           if (failure === '命令失败') throw new Error('failed')
           return failure === 'JSON 无效' ? '{' : '[{"number": 1}]'
         }
+        if (args[1] === 'issue')
+          return args[2] === 'view'
+            ? JSON.stringify({ labels: [{ name: 'workling:failed' }] })
+            : '[]'
         return JSON.stringify([pr(2, 'MERGED', recent)])
       },
     })
-    expect(s.logs).toHaveLength(1)
+    expect(s.logs.filter((line) => line.includes('PR 同步失败'))).toHaveLength(1)
     expect(s.db.select().from(issues).where(eq(issues.number, 2)).get()).toMatchObject({
       prState: 'merged',
-      status: 'failed',
+      status: 'done',
     })
   } finally {
     await s.dispose()
@@ -164,6 +169,7 @@ test.each(['成功', '冲突', '远端已更新', '运行中'])('上游合并后
       calls.push({ args, input: options?.input })
       if (args[0] === 'gh' && args[1] === 'pr' && args[2] === 'list')
         return JSON.stringify([pr(1, 'MERGED', recent), pr(2, 'OPEN', recent)])
+      if (args[0] === 'gh' && args[1] === 'issue' && args[2] === 'list') return '[]'
       if (args[0] === 'gh' && args[1] === 'api') return 'main'
       if (args.includes('rev-parse'))
         return args.at(-1)?.includes('origin/main') ? 'b'.repeat(40) : 'c'.repeat(40)
@@ -180,6 +186,7 @@ test.each(['成功', '冲突', '远端已更新', '运行中'])('上游合并后
     await sync()
     expect(calls.slice(afterFirst).map((call) => call.args.slice(0, 3))).toEqual([
       ['gh', 'pr', 'list'],
+      ['gh', 'issue', 'list'],
     ])
     const push = calls.find((call) => call.args.includes('push'))
     const edit = calls.find((call) => call.args[1] === 'pr' && call.args[2] === 'edit')
@@ -199,6 +206,89 @@ test.each(['成功', '冲突', '远端已更新', '运行中'])('上游合并后
       expect(calls.some((call) => call.input?.includes('conflict.txt'))).toBe(true)
     }
     if (mode === '运行中') expect(calls.some((call) => call.input?.includes('手动'))).toBe(true)
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('已合并 PR 修正失败和取消状态，关闭的失败 Issue 根据当前 PR 状态取消', async () => {
+  const s = await scenario()
+  try {
+    for (const [number, status, prState] of [
+      [1, 'failed', 'merged'],
+      [2, 'canceled', null],
+      [3, 'failed', 'closed'],
+      [4, 'failed', null],
+      [5, 'failed', 'open'],
+      [6, 'running', null],
+      [7, 'queued', null],
+      [8, 'done', null],
+    ] as const) {
+      await s.issue(number, status)
+      s.db.update(issues).set({ prState }).where(eq(issues.number, number)).run()
+    }
+    const edits: string[][] = []
+    await syncPullRequests({
+      db: s.db,
+      signal: s.signal,
+      log: s.log,
+      command: async (args) => {
+        if (args[1] === 'pr')
+          return JSON.stringify([
+            pr(1, 'MERGED', recent),
+            pr(2, 'MERGED', recent),
+            pr(3, 'CLOSED', recent),
+            pr(5, 'OPEN', recent),
+            pr(6, 'MERGED', recent),
+            pr(7, 'MERGED', recent),
+            pr(8, 'MERGED', recent),
+          ])
+        if (args[2] === 'list')
+          return JSON.stringify([3, 4, 5].map((number) => ({ number, stateReason: 'COMPLETED' })))
+        if (args[2] === 'view') return JSON.stringify({ labels: [{ name: 'workling:failed' }] })
+        edits.push(args)
+        return ''
+      },
+    })
+    const rows = s.db.select().from(issues).orderBy(issues.number).all()
+    expect(rows.map((row) => row.status)).toEqual([
+      'done',
+      'done',
+      'canceled',
+      'canceled',
+      'failed',
+      'running',
+      'queued',
+      'done',
+    ])
+    expect(edits.map((args) => args[3])).toEqual(['1', '2', '3', '4'])
+    expect(edits[0]).toContain('workling:done')
+    expect(edits[0]).toContain('workling:failed')
+    expect(edits[2]).not.toContain('--add-label')
+    expect(rows[0]!.updatedAt.getTime()).toBeGreaterThan(clock.getTime())
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('标签更新失败保留合并状态，关闭 Issue 列表无效不影响 PR 同步', async () => {
+  const s = await scenario()
+  try {
+    await s.issue(1, 'failed')
+    await syncPullRequests({
+      db: s.db,
+      signal: s.signal,
+      log: s.log,
+      command: async (args) => {
+        if (args[1] === 'pr') return JSON.stringify([pr(1, 'MERGED', recent)])
+        if (args[2] === 'list') return '[{"number":"bad"}]'
+        if (args[2] === 'view') return JSON.stringify({ labels: [{ name: 'workling:failed' }] })
+        throw new Error('edit failed')
+      },
+    })
+    expect(s.db.select().from(issues).get()).toMatchObject({ status: 'done', prState: 'merged' })
+    expect(s.logs.some((line) => line.includes('更新标签失败'))).toBe(true)
+    expect(s.logs.some((line) => line.includes('已关闭 Issue 列表格式无效'))).toBe(true)
   } finally {
     await s.dispose()
   }

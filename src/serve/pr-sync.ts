@@ -10,6 +10,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { markComment, neutralizeMentions } from './comment.ts'
 import { mirrorPath } from './mirror.ts'
+import { setStatusLabel } from './status-label.ts'
 
 async function rebaseDownstream({
   db,
@@ -140,6 +141,10 @@ const schema = Type.Array(
   }),
 )
 
+const closedSchema = Type.Array(
+  Type.Object({ number: Type.Integer(), stateReason: Type.Union([Type.String(), Type.Null()]) }),
+)
+
 export async function syncPullRequests({
   db,
   command,
@@ -200,8 +205,26 @@ export async function syncPullRequests({
         const pr = best.get(issue.number)
         if (!pr) continue
         const prState = pr.state.toLowerCase() as NonNullable<typeof issue.prState>
-        if (issue.prUrl !== pr.url || issue.prState !== prState)
-          db.update(issues).set({ prUrl: pr.url, prState }).where(eq(issues.id, issue.id)).run()
+        const complete =
+          prState === 'merged' && (issue.status === 'failed' || issue.status === 'canceled')
+        if (issue.prUrl !== pr.url || issue.prState !== prState || complete)
+          db.update(issues)
+            .set({
+              prUrl: pr.url,
+              prState,
+              ...(complete ? { status: 'done' as const, updatedAt: new Date() } : {}),
+            })
+            .where(eq(issues.id, issue.id))
+            .run()
+        if (complete) {
+          log(`${repo.ref} #${issue.number} PR 已合并，状态由 ${issue.status} 改为 done`)
+          try {
+            await setStatusLabel({ repo, number: issue.number, target: 'done', command, signal })
+          } catch (error) {
+            if (signal.aborted) return
+            log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
+          }
+        }
         if (issue.prState === 'open' && prState === 'merged') {
           const upstreamRun = db
             .select()
@@ -232,6 +255,54 @@ export async function syncPullRequests({
             })
           }
         }
+      }
+      try {
+        const output = await command(
+          [
+            'gh',
+            'issue',
+            'list',
+            '-R',
+            repo.path,
+            '--state',
+            'closed',
+            '--label',
+            'workling:failed',
+            '--json',
+            'number,stateReason',
+            '--limit',
+            '100',
+          ],
+          { env: ghEnv(repo.token, repo.host), signal },
+        )
+        const parsed: unknown = JSON.parse(output)
+        if (!Value.Check(closedSchema, parsed)) throw new Error('已关闭 Issue 列表格式无效')
+        const closed = new Set(parsed.map((issue) => issue.number))
+        for (const issue of rows) {
+          if (signal.aborted) return
+          if (issue.status !== 'failed' || !closed.has(issue.number)) continue
+          const current = db.select().from(issues).where(eq(issues.id, issue.id)).get()
+          if (
+            !current ||
+            current.status !== 'failed' ||
+            (current.prState !== null && current.prState !== 'closed')
+          )
+            continue
+          db.update(issues)
+            .set({ status: 'canceled', updatedAt: new Date() })
+            .where(eq(issues.id, issue.id))
+            .run()
+          log(`${repo.ref} #${issue.number} Issue 已关闭，状态由 failed 改为 canceled`)
+          try {
+            await setStatusLabel({ repo, number: issue.number, target: null, command, signal })
+          } catch (error) {
+            if (signal.aborted) return
+            log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
+          }
+        }
+      } catch (error) {
+        if (signal.aborted) return
+        log(`${repo.ref} 已关闭 Issue 同步失败：${errorMessage(error)}`)
       }
     } catch (error) {
       if (signal.aborted) return

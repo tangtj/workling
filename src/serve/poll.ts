@@ -6,6 +6,7 @@ import { issues as issueStates, repos } from '../db/schema.ts'
 import { readSubIssues } from '../issue/chain.ts'
 import { ghEnv } from '../platform/github.ts'
 import type { Command } from '../runtime/types.ts'
+import { setStatusLabel } from './status-label.ts'
 const issuesSchema = Type.Array(
   Type.Object({ number: Type.Integer(), title: Type.String(), url: Type.String() }),
 )
@@ -197,24 +198,14 @@ export async function pollOnce({
           log(`${row.ref} #${issue.number} 执行中但仍带 workling:ready，已忽略`)
         } else if (labelsReady) {
           try {
-            await command(
-              [
-                'gh',
-                'issue',
-                'edit',
-                String(issue.number),
-                '-R',
-                row.path,
-                '--remove-label',
-                'workling:ready',
-                '--add-label',
-                'workling:queued',
-              ],
-              {
-                env: ghEnv(row.token, row.host),
-                signal,
-              },
-            )
+            await setStatusLabel({
+              repo: row,
+              number: issue.number,
+              target: 'queued',
+              command,
+              signal,
+              removeReady: true,
+            })
             log(`${row.ref} #${issue.number} 已标记 workling:queued`)
           } catch (error) {
             if (signal.aborted) break
