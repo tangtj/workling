@@ -64,3 +64,12 @@ test.each([
 ] as const)('镜像不兼容时给出原因 %#', async (output, message) => {
   expect(await checkWorkerImage(inspect(output).command, 'w:1')).toContain(message)
 })
+
+test.each(['worker/Dockerfile', 'deploy/docker/Dockerfile'])(
+  '%s 的构建上下文排除依赖、运行数据、Git 与环境文件',
+  async (file) => {
+    const ignore = (await readFile(join(ROOT, `${file}.dockerignore`), 'utf8')).split('\n')
+    for (const entry of ['node_modules', '.runtime', '.git', '.env*'])
+      expect(ignore).toContain(entry)
+  },
+)
