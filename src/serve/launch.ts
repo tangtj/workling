@@ -102,6 +102,7 @@ async function prepareCheckout({
   kind,
   pi,
   command,
+  log,
   signal,
 }: {
   workspace: string
@@ -114,6 +115,7 @@ async function prepareCheckout({
   kind: Spec['kind']
   pi: PiSettings
   command: Command
+  log: Log
   signal: AbortSignal
 }): Promise<(Spec['repo'] & { start: string }) | { error: string }> {
   const mirror = await syncMirror({ workspace, repo, command, signal })
@@ -142,14 +144,45 @@ async function prepareCheckout({
     (!stackOn.branch.startsWith('workling/') || !(await hasRef(branchRef(stackOn.branch))))
   )
     return { error: `上一个子任务的分支「${stackOn.branch}」不存在` }
-  const start =
-    stackOn?.branch ??
-    doc?.name ??
-    (await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
+  const defaultBranch = async () => {
+    const name = await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
       env: ghEnv(repo.token, repo.host),
       signal,
-    }))
-  if (!doc && !stackOn) await command(['git', 'check-ref-format', branchRef(start)], mirrorOptions)
+    })
+    await command(['git', 'check-ref-format', branchRef(name)], mirrorOptions)
+    return name
+  }
+  let start = stackOn?.branch ?? doc?.name
+  if (!start) start = await defaultBranch()
+  else if (doc && !stackOn && !continuedBranch) {
+    const base = await defaultBranch()
+    const paths = await command(
+      ['git', 'diff', '--name-only', '-z', `${branchRef(base)}...${branchRef(doc.name)}`],
+      mirrorOptions,
+    )
+    const changes = paths
+      ? await command(
+          [
+            'git',
+            'diff',
+            '--name-only',
+            '-z',
+            branchRef(base),
+            branchRef(doc.name),
+            '--',
+            ...paths
+              .split('\0')
+              .filter(Boolean)
+              .map((path) => `:(literal)${path}`),
+          ],
+          mirrorOptions,
+        )
+      : ''
+    if (!changes) {
+      start = base
+      log(`#${issue.number} 文档分支「${doc.name}」的改动已在 ${base} 中，改从 ${base} 切出`)
+    }
+  }
   let ref: string
   let branch: string
   if (continuedBranch) {
@@ -341,6 +374,7 @@ export async function launchQueued({
                 kind,
                 pi,
                 command,
+                log,
                 signal,
               })
       if ('error' in checkout) {
