@@ -166,7 +166,7 @@ export async function serve({
         log(`对账失败：${errorMessage(error)}`)
       }
       try {
-        await syncPullRequests({ db, command, log, signal })
+        await syncPullRequests({ db, command, log, signal, workspace: settings.workspace })
       } catch (error) {
         if (!signal.aborted) log(`PR 同步失败：${errorMessage(error)}`)
       }
