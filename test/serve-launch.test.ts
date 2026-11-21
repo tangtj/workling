@@ -500,7 +500,15 @@ test.each([
         },
       }),
     })
-    expect(baseRequests).toEqual([['gh', 'api', 'repos/a/b', '--jq', '.default_branch']])
+    expect(baseRequests).toEqual(
+      Array.from({ length: docBranch ? 2 : 1 }, () => [
+        'gh',
+        'api',
+        'repos/a/b',
+        '--jq',
+        '.default_branch',
+      ]),
+    )
     expect(s.db.select().from(runs).get()).toMatchObject({
       pid: 123,
       branch: 'workling/42-issue',
@@ -554,6 +562,43 @@ test.each([
     const cwd = join(run.taskDir!, 'repo')
     expect(await remote.git(['git', 'branch', '--show-current'], { cwd })).toBe(expected.branch)
     expect(await remote.git(['git', 'rev-parse', 'HEAD'], { cwd })).toBe(expected.baseRef)
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([
+  ['相同', 'design', true],
+  ['不同', 'changed design', false],
+] as const)('真实 Git：默认分支上的文档内容%s时选择正确起点', async (_label, mainDoc, merged) => {
+  const s = await scenario({ body: '分支：docs/design' })
+  try {
+    const remote = await localRemote(s.workspace)
+    const initial = await remote.commit('refs/heads/main', 'initial')
+    const design = await remote.commit('refs/heads/docs/design', 'design', initial)
+    const docBlob = await remote.write(['hash-object', '-w', '--stdin'], mainDoc)
+    const codeBlob = await remote.write(['hash-object', '-w', '--stdin'], 'code X')
+    const docTree = await remote.write(['mktree'], `100644 blob ${docBlob}\tcontent.txt\n`)
+    const squash = await remote.write(['commit-tree', docTree, '-p', initial, '-m', 'squash'])
+    const tree = await remote.write(
+      ['mktree'],
+      `100644 blob ${docBlob}\tcontent.txt\n100644 blob ${codeBlob}\tcode.txt\n`,
+    )
+    const main = await remote.write(['commit-tree', tree, '-p', squash, '-m', 'code X'])
+    await remote.write(['update-ref', 'refs/heads/main', main])
+    await s.issue(42, 'queued')
+    const logs: string[] = []
+    await launchQueued({
+      ...s.options,
+      log: (message) => logs.push(message),
+      command: (args, options) =>
+        args[0] === 'git' ? remote.git(args, options) : s.command(args, options),
+      executor: fakeExecutor(),
+    })
+    const run = s.db.select().from(runs).get()!
+    expect(run.baseRef).toBe(merged ? main : design)
+    expect((await readSpec(run.taskDir!)).repo.docBranch).toBe('docs/design')
+    expect(logs.some((line) => line.includes('改从 main 切出'))).toBe(merged)
   } finally {
     await s.dispose()
   }
