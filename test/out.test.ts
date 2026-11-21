@@ -9,7 +9,7 @@ test('out/result.json 原子写入，并分别报告缺文件、无效 JSON、�
   try {
     await expect(readOutResult(dir)).rejects.toThrow('缺少 out/result.json')
     const result: OutResult = {
-      contract: 1,
+      contract: 2,
       outcome: 'completed',
       branch: 'workling/42-task',
       head: null,
@@ -21,7 +21,7 @@ test('out/result.json 原子写入，并分别报告缺文件、无效 JSON、�
     for (const [data, error] of [
       ['{', '不是有效的 JSON'],
       [JSON.stringify({ ...result, commits: -1 }), '结构无效'],
-      [JSON.stringify({ ...result, contract: 2 }), '契约版本不受支持'],
+      [JSON.stringify({ ...result, contract: 3 }), '契约版本不受支持'],
     ] as const) {
       await writeFile(join(dir, 'result.json'), data)
       await expect(readOutResult(dir)).rejects.toThrow(error)

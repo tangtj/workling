@@ -75,7 +75,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
     const out = join(dir, 'out')
     await rm(join(out, 'commits.bundle'))
     await writeOutResult(out, {
-      contract: 1,
+      contract: 2,
       outcome: 'answered',
       branch: run.branch!,
       head: null,

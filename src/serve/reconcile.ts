@@ -1,12 +1,12 @@
 import { markComment, neutralizeMentions } from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { truncateComment } from '../contract/out.ts'
 import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
-import { issues as issueStates, repos, runs } from '../db/schema.ts'
+import { feedback, issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
 import { assertTaskDir, readResult } from '../task/dir.ts'
@@ -20,6 +20,28 @@ import { landRun, publishIssueResult, readRunIssueComment } from './land.ts'
 import { mirrorPath } from './mirror.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
+
+export function recoverOrphanFeedback(db: WorklingDatabase): void {
+  const orphanIds = db
+    .select({ id: runs.id })
+    .from(runs)
+    .innerJoin(issueStates, eq(runs.issueId, issueStates.id))
+    .where(
+      and(
+        eq(issueStates.status, 'queued'),
+        isNull(runs.endedAt),
+        isNull(runs.pid),
+        isNull(runs.container),
+      ),
+    )
+    .all()
+    .map((row) => row.id)
+  if (orphanIds.length)
+    db.update(feedback)
+      .set({ status: 'pending', runId: null })
+      .where(and(eq(feedback.status, 'included'), inArray(feedback.runId, orphanIds)))
+      .run()
+}
 
 async function cleanTaskDirs(
   db: WorklingDatabase,

@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test'
 import { classifyCommand } from '../src/serve/feedback.ts'
 import { observeFeedback } from '../src/serve/feedback.ts'
 import { openDatabase } from '../src/db/index.ts'
-import { feedback, feedbackCursors, issues, repos, trustedUsers } from '../src/db/schema.ts'
+import { feedback, feedbackCursors, issues, repos, runs, trustedUsers } from '../src/db/schema.ts'
+import { queueRework } from '../src/serve/rework.ts'
+import { eq } from 'drizzle-orm'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -196,6 +198,57 @@ function comment(id: number, extra: Record<string, unknown> = {}) {
     ...extra,
   }
 }
+
+test('观察到的写权限指令入队，而未受信、机器人和自身评论不入队', async () => {
+  const f = await fixture()
+  try {
+    const prior = f.db
+      .insert(runs)
+      .values({ issueId: f.issue.id, worker: 'old', startedAt: new Date('2025-01-01T00:00:00Z') })
+      .returning()
+      .get()
+    f.db.update(issues).set({ lastRunId: prior.id }).where(eq(issues.id, f.issue.id)).run()
+    const users = [
+      { id: 1, login: 'writer', type: 'User' },
+      { id: 2, login: 'reader', type: 'User' },
+      { id: 3, login: 'robot', type: 'Bot' },
+      { id: 4, login: 'worker', type: 'User' },
+    ]
+    f.setRespond((endpoint) => {
+      if (endpoint === 'user') return 'worker'
+      if (endpoint.includes('/permission'))
+        return endpoint.includes('/writer/') ? '{"permission":"write"}' : '{"permission":"read"}'
+      if (endpoint.includes('issues/comments'))
+        return JSON.stringify([
+          users.map((user) =>
+            comment(user.id, {
+              user,
+              body: user.login === 'worker' ? '<!-- workling --> /workling fix' : '/workling fix',
+              issue_url: 'https://api.github.com/repos/a/b/issues/1',
+            }),
+          ),
+        ])
+      return '[[]]'
+    })
+    await observeFeedback(f.options)
+    await queueRework(f.options)
+    expect(f.db.select().from(issues).get()?.status).toBe('queued')
+    expect(
+      f.db
+        .select()
+        .from(feedback)
+        .all()
+        .map((row) => [row.trust, row.status]),
+    ).toEqual([
+      ['write', 'pending'],
+      ['untrusted', 'ignored'],
+      ['bot', 'ignored'],
+      ['self', 'ignored'],
+    ])
+  } finally {
+    await f.cleanup()
+  }
+})
 
 test('按编号区分 Issue 评论和 PR 对话区评论并丢弃未知编号', async () => {
   const f = await fixture()

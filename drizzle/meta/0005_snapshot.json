@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "db65696c-0e5e-43d9-85e9-7ffeef570127",
+  "id": "b9356f4a-0121-4e38-800f-82701ee4f0c2",
   "prevId": "87a417e9-10ff-40bd-8019-060fec7e0fd4",
   "tables": {
     "admin": {
@@ -257,6 +257,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
@@ -607,13 +614,6 @@
           "autoincrement": false,
           "default": "'off'"
         },
-        "triage_since": {
-          "name": "triage_since",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -750,6 +750,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'implement'"
         }
       },
       "indexes": {},
@@ -937,34 +945,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "suggested_at": {
-          "name": "suggested_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "suggest_comment_url": {
-          "name": "suggest_comment_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "suggest_error": {
-          "name": "suggest_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "label_removed_at": {
-          "name": "label_removed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },

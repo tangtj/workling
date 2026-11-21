@@ -59,6 +59,9 @@ export const runs = sqliteTable('runs', {
   issueId: integer('issue_id')
     .notNull()
     .references(() => issues.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: ['implement', 'rework'] })
+    .notNull()
+    .default('implement'),
   worker: text('worker').notNull(),
   taskDir: text('task_dir'),
   pid: integer('pid'),
@@ -123,6 +126,7 @@ export const feedback = sqliteTable(
     path: text('path'),
     line: integer('line'),
     reviewState: text('review_state'),
+    reviewId: text('review_id'),
     url: text('url').notNull(),
     status: text('status', {
       enum: ['ignored', 'observed', 'pending', 'included', 'replied'],

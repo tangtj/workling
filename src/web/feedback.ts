@@ -31,6 +31,7 @@ export const feedbackSchema = Type.Array(
       path: nullableString,
       line: nullableNumber,
       reviewState: nullableString,
+      reviewId: nullableString,
       url: Type.String(),
       status: Type.String(),
       runId: nullableNumber,

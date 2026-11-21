@@ -4,11 +4,13 @@
 
 ## 步骤
 
-1. 读取：阅读 `<任务目录>/input/issue.md`，同时阅读 `input/runs.md`、`input/branch.md`、`input/pr.md`、`input/docs.md`。附件在 `<任务目录>/input/attachments/`。不再运行任何 `workling` 子命令。
+1. 读取：阅读 `<任务目录>/input/issue.md`，同时阅读 `input/runs.md`、`input/branch.md`、`input/pr.md`、`input/docs.md`、`input/feedback.md`。附件在 `<任务目录>/input/attachments/`。不再运行任何 `workling` 子命令。
 
-   **判断模式**：以最新一条以 `/workling` 或 `@账号` 开头的补充说明为准；没有补充说明时以 Issue 正文为准。只问问题、要清单、要解释或核对状态，且不要求改代码时为**答复**；其余为**实现**。
+   **判断模式**：有本轮反馈时以 `feedback.md` 为准判断模式；没有反馈时以最新一条以 `/workling` 或 `@账号` 开头的补充说明为准；没有补充说明时以 Issue 正文为准。只问问题、要清单、要解释或核对状态，且不要求改代码时为**答复**；其余为**实现**。
    - **答复**：直接阅读仓库与上下文文件作答，不调用会写文件的 codex，不提交。把答复写到 `<任务目录>/out/issue-comment.md`，在 `<任务目录>/out/outcome.json` 写 `{"outcome":"answered"}`，跳过后续实现、交付与 PR 步骤。
    - **实现**：继续下面的步骤。
+
+返工（运行类型为 `rework`）时，在现有 PR 分支上逐条处理 `feedback.md`，不扩大范围或重做已完成部分；本轮简报逐条列出 F 编号和目标，codex 输入原样附上 `feedback.md`。在 `out/issue-comment.md` 按 F 编号逐条说明已改或未改及原因。
 
 2. 分支：仓库目录已检出到用户消息给出的任务分支，不要新建、切换或重置分支。用户消息说明「接续此前运行的工作分支」时，分支上已有的提交是此前运行的成果，在其基础上继续，不要回退或重做。用户消息给出文档分支时，Issue 中引用的仓库内文档是任务说明的一部分，先读完再实现；不要在文档分支上提交或推送它。
 3. 依赖：codex 不联网，仓库依赖由你在调用 codex 前装好。阅读仓库 AGENTS.md / README，找出它写明的依赖安装命令（如 `bun install --frozen-lockfile --ignore-scripts`），在仓库目录加 `env -u WORKLING_LLM_API_KEY` 前缀运行。安装脚本会执行第三方代码，不能让它拿到 LLM 密钥。只运行文档写明的命令；文档没写时不要自己猜，记为「仓库未说明安装命令」。记下结果（已安装 / 失败及错误摘要 / 未说明），写进下一步的约束。

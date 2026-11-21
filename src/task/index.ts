@@ -108,9 +108,10 @@ export async function runTask(options: {
   const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（${issueRef}）
 仓库目录：${repo}
 任务分支：${spec.repo.branch}（已检出，${branchStatus}）${spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''}
+运行类型：${spec.kind}
 任务目录：${dir}
 Issue 内容：${issuePath}
-上下文：${join(dir, 'input', 'runs.md')}、branch.md、pr.md、docs.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）
+上下文：${join(dir, 'input', 'runs.md')}、branch.md、pr.md、docs.md、feedback.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）
 默认 codex 模型：${spec.model.codex}
 默认 codex 推理强度：${spec.model.effort}
 codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}

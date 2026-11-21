@@ -71,7 +71,7 @@ export async function syncPullRequests({
       }
       for (const issue of rows) {
         if (signal.aborted) return
-        if (issue.status === 'queued' || issue.status === 'running') continue
+        if (issue.status === 'running' || issue.status === 'queued') continue
         const pr = best.get(issue.number)
         if (!pr) continue
         const prState = pr.state.toLowerCase() as NonNullable<typeof issue.prState>

@@ -164,7 +164,7 @@ test('runTask 使用已准备的工作副本，假 Pi 收到两个分支和正�
     '--model',
     'test-provider/model',
     '--',
-    `Issue：https://github.com/a/b/issues/12（github:a/b#12）\n仓库目录：${options.dir}/repo\n任务分支：${spec.repo.branch}（已检出，基于 ${spec.repo.baseRef}）\n文档分支：docs/design\n任务目录：${options.dir}\nIssue 内容：${options.dir}/input/issue.md\n上下文：${options.dir}/input/runs.md、branch.md、pr.md、docs.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）\n默认 codex 模型：spec-codex\n默认 codex 推理强度：high\ncodex 沙箱模式：workspace-write\n按系统提示中的 workling 工作约定完成这个 Issue。`,
+    `Issue：https://github.com/a/b/issues/12（github:a/b#12）\n仓库目录：${options.dir}/repo\n任务分支：${spec.repo.branch}（已检出，基于 ${spec.repo.baseRef}）\n文档分支：docs/design\n运行类型：implement\n任务目录：${options.dir}\nIssue 内容：${options.dir}/input/issue.md\n上下文：${options.dir}/input/runs.md、branch.md、pr.md、docs.md、feedback.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）\n默认 codex 模型：spec-codex\n默认 codex 推理强度：high\ncodex 沙箱模式：workspace-write\n按系统提示中的 workling 工作约定完成这个 Issue。`,
   ])
   expect(JSON.stringify(captured.args)).not.toContain('private-token')
   expect(captured.cwd).toBe(
@@ -209,7 +209,7 @@ test('Pi 退出后 worker 打包两个本地提交，保留退出码和部分完
   const head = await git('rev-parse', 'HEAD')
   expect(status).toEqual({ code: 7, signal: null })
   expect(await readOutResult(out)).toEqual({
-    contract: 1,
+    contract: 2,
     outcome: 'partial',
     branch,
     head,
@@ -232,7 +232,7 @@ test.each([
   await runTask({ ...options, wait: async () => ({ code: 0, signal: null }) })
   const out = join(options.dir, 'out')
   expect(await readOutResult(out)).toEqual({
-    contract: 1,
+    contract: 2,
     outcome,
     branch: spec.repo.branch,
     head: null,

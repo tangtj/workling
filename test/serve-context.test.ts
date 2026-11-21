@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { runs } from '../src/db/schema.ts'
+import { feedback, runs } from '../src/db/schema.ts'
 import { writeRunContext } from '../src/serve/context.ts'
 import { baseRef, clock, scenario } from './helpers/serve.ts'
 
@@ -27,6 +27,47 @@ async function fixture() {
   }
   return { ...s, context, read: (name: string) => readFile(join(taskDir, 'input', name), 'utf8') }
 }
+
+test('feedback.md 显示本批编号、位置、指令和截断并脱敏；空批次有提示', async () => {
+  const s = await fixture()
+  try {
+    await writeRunContext(s.context)
+    expect(await s.read('feedback.md')).toContain('无本轮反馈。')
+    const row = s.db
+      .insert(feedback)
+      .values({
+        repoId: s.repo.id,
+        issueId: s.context.issue.id,
+        runId: s.context.runId,
+        source: 'review_comment',
+        externalId: '1',
+        authorId: '1',
+        authorLogin: 'alice',
+        trust: 'write',
+        isCommand: false,
+        body: `repo-secret ${'长'.repeat(8001)}`,
+        path: 'src/a.ts',
+        line: 12,
+        url: 'https://example.com/1',
+        status: 'included',
+        createdAt: clock,
+        updatedAt: clock,
+        seenAt: clock,
+      })
+      .returning()
+      .get()
+    await writeRunContext({ ...s.context, kind: 'rework' })
+    const content = await s.read('feedback.md')
+    expect(content).toContain(`F${row.id} · 行内评论 · @alice`)
+    expect(content).toContain('类型：rework')
+    expect(content).toContain('位置：src/a.ts:12')
+    expect(content).toContain('链接：https://example.com/1')
+    expect(content).toContain('（已截断）')
+    expect(content).not.toContain('repo-secret')
+  } finally {
+    await s.dispose()
+  }
+})
 
 test('runs.md 只列此前最近五次运行，包含脱敏并截断的回报与 Pi 说明', async () => {
   const s = await fixture()

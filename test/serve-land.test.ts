@@ -98,7 +98,7 @@ async function scenario(taskBranch = branch, draft?: boolean) {
       prerequisite ? `${prerequisite}..${ref}` : ref,
       ...(extraRef ? [extraRef] : []),
     )
-    await writeOutResult(out, { contract: 1, outcome, branch: taskBranch, head: tip, commits })
+    await writeOutResult(out, { contract: 2, outcome, branch: taskBranch, head: tip, commits })
     await writeFile(join(out, 'pr-body.md'), 'Thanks @someone and @org/team.')
     await writeFile(join(out, 'pr-comment.md'), 'Checked by @reviewer.')
     return tip
@@ -285,7 +285,7 @@ test.each([
   })
   if (kind === 'incomplete 且没有提交')
     await writeOutResult(s.out, {
-      contract: 1,
+      contract: 2,
       outcome: 'incomplete',
       branch,
       head: null,

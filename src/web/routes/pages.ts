@@ -106,6 +106,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
     runs: issue.runs.map((run) => ({
       id: run.id,
       worker: run.worker,
+      kind: run.kind,
       startedAt: run.startedAt.toISOString(),
       endedAt: run.endedAt?.toISOString() ?? null,
       exitCode: run.exitCode,
