@@ -24,6 +24,18 @@ export const issueDetailSchema = obj({
       Type.Literal('failed'),
       Type.Literal('canceled'),
     ]),
+    stage: Type.Union([
+      Type.Literal('queued'),
+      Type.Literal('running'),
+      Type.Literal('rework'),
+      Type.Literal('review'),
+      Type.Literal('capped'),
+      Type.Literal('failed'),
+      Type.Literal('done'),
+      Type.Literal('canceled'),
+    ]),
+    branch: nullableString,
+    baseRef: nullableString,
     prUrl: nullableString,
     prState: Type.Union([
       Type.Literal('open'),
@@ -34,10 +46,37 @@ export const issueDetailSchema = obj({
     createdAt: Type.String(),
     updatedAt: Type.String(),
   }),
+  triage: Type.Array(
+    obj({
+      id: Type.Integer(),
+      decision: Type.Union([
+        Type.Literal('accept'),
+        Type.Literal('needs_info'),
+        Type.Literal('ignore'),
+        Type.Null(),
+      ]),
+      llmDecision: Type.Union([
+        Type.Literal('accept'),
+        Type.Literal('needs_info'),
+        Type.Literal('ignore'),
+        Type.Null(),
+      ]),
+      missing: Type.Array(Type.String()),
+      triagedAt: Type.String(),
+      suggestedAt: nullableString,
+      suggestCommentUrl: nullableString,
+      autoQueuedAt: nullableString,
+    }),
+  ),
+  rework: obj({
+    rounds: Type.Integer({ minimum: 0 }),
+    limit: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  }),
   runs: Type.Array(
     obj({
       id: Type.Integer(),
       worker: Type.String(),
+      branch: nullableString,
       kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
       startedAt: Type.String(),
       endedAt: nullableString,

@@ -33,6 +33,8 @@ function detailOptions(key: string, resource: 'issues' | 'runs', id: number | un
           createdAt: new Date(body.issue.createdAt),
           updatedAt: new Date(body.issue.updatedAt),
         },
+        triage: body.triage,
+        rework: body.rework,
         runs: body.runs.map((run) => ({
           ...run,
           startedAt: new Date(run.startedAt),
