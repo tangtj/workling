@@ -1,9 +1,9 @@
 import { maskToken } from '../data.ts'
 import * as Type from 'typebox'
 import { Hono } from 'hono'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import * as Value from 'typebox/value'
-import { repos, trustedUsers } from '../../db/schema.ts'
+import { issues, repos, triageRecords, trustedUsers } from '../../db/schema.ts'
 import { formatRepoRef, parseRepoRef } from '../../issue/reference.ts'
 import type { AppDeps } from '../app.ts'
 import { repoId } from '../response.ts'
@@ -12,6 +12,7 @@ import { ghEnv } from '../../platform/github.ts'
 import { errorMessage } from '../../runtime/errors.ts'
 import { trustedUserSchema, trustedUsersSchema } from '../feedback.ts'
 import { reposSchema } from '../repos.ts'
+import { triageSchema } from '../triage.ts'
 
 const createSchema = Type.Object(
   { ref: Type.String(), token: Type.String(), enabled: Type.Optional(Type.Boolean()) },
@@ -72,6 +73,73 @@ export function reposRoutes(deps: AppDeps): Hono {
       .returning()
       .get()
     return c.json(responseRepo(row), 201)
+  })
+  app.get('/api/repos/:id/triage', (c) => {
+    const id = repoId(c.req.param('id'))
+    const repo = id ? db.select().from(repos).where(eq(repos.id, id)).get() : undefined
+    if (!repo) return c.json({ error: '仓库不存在' }, 404)
+    const seen = new Set<number>()
+    const records = db
+      .select()
+      .from(triageRecords)
+      .where(eq(triageRecords.repoId, repo.id))
+      .orderBy(desc(triageRecords.triagedAt), desc(triageRecords.id))
+      .all()
+      .filter((row) => {
+        if (seen.has(row.number)) return false
+        seen.add(row.number)
+        return true
+      })
+      .slice(0, 100)
+      .map((row) => {
+        const issue = db
+          .select()
+          .from(issues)
+          .where(and(eq(issues.repoId, repo.id), eq(issues.number, row.number)))
+          .get()
+        return {
+          ...row,
+          checks: JSON.parse(row.checks) as unknown,
+          missing: JSON.parse(row.missing) as unknown,
+          issueUpdatedAt: row.issueUpdatedAt.toISOString(),
+          triagedAt: row.triagedAt.toISOString(),
+          readyAt: issue?.createdAt.toISOString() ?? null,
+          readyAfterMinutes:
+            issue && !row.alreadyReady
+              ? Math.floor((issue.createdAt.getTime() - row.issueUpdatedAt.getTime()) / 60000)
+              : null,
+        }
+      })
+    const summary = { total: 0, acceptReady: 0, acceptNotReady: 0, otherReady: 0, otherNotReady: 0 }
+    for (const row of records) {
+      if (!row.decision || row.alreadyReady) continue
+      summary.total++
+      if (row.decision === 'accept') {
+        if (row.readyAt) summary.acceptReady++
+        else summary.acceptNotReady++
+      } else if (row.readyAt) summary.otherReady++
+      else summary.otherNotReady++
+    }
+    const response = { level: repo.triageLevel, summary, records }
+    if (!Value.Check(triageSchema, response)) throw new Error('分诊数据无效')
+    return c.json(response)
+  })
+  app.put('/api/repos/:id/triage-level', async (c) => {
+    const id = repoId(c.req.param('id'))
+    const repo = id ? db.select().from(repos).where(eq(repos.id, id)).get() : undefined
+    if (!repo) return c.json({ error: '仓库不存在' }, 404)
+    if (repo.platform !== 'github') return c.json({ error: '暂只支持 GitHub' }, 400)
+    const body: unknown = await c.req.json().catch(() => null)
+    const schema = Type.Object(
+      { level: Type.Union([Type.Literal('off'), Type.Literal('shadow')]) },
+      { additionalProperties: false },
+    )
+    if (!Value.Check(schema, body)) return c.json({ error: '分诊级别无效' }, 400)
+    db.update(repos)
+      .set({ triageLevel: body.level, updatedAt: new Date() })
+      .where(eq(repos.id, repo.id))
+      .run()
+    return c.json(body)
   })
   app.get('/api/repos/:id/trusted-users', (c) => {
     const id = repoId(c.req.param('id'))

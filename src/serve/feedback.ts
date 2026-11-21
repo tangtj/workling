@@ -37,6 +37,62 @@ export type FeedbackState = {
   permissions: Map<string, { value: boolean; expires: number }>
 }
 
+export async function judgeTrust({
+  db,
+  repo,
+  user,
+  body,
+  command,
+  env,
+  signal,
+  permissions,
+}: {
+  db: WorklingDatabase
+  repo: typeof repos.$inferSelect
+  user: { id: number; login: string; type: string }
+  body: string
+  command: Command
+  env: ReturnType<typeof ghEnv>
+  signal: AbortSignal
+  permissions: FeedbackState['permissions']
+}): Promise<Trust> {
+  if (body.includes('<!-- workling -->')) return 'self'
+  if (user.type === 'Bot') return 'bot'
+  if (
+    db
+      .select()
+      .from(trustedUsers)
+      .where(and(eq(trustedUsers.repoId, repo.id), eq(trustedUsers.userId, String(user.id))))
+      .get()
+  )
+    return 'allowlist'
+  const key = `${repo.id}:${user.id}`
+  let cached = permissions.get(key)
+  if (!cached || cached.expires <= Date.now()) {
+    let allowed = false
+    try {
+      const response: unknown = JSON.parse(
+        await command(
+          [
+            'gh',
+            'api',
+            `repos/${repo.path}/collaborators/${encodeURIComponent(user.login)}/permission`,
+            '--include',
+          ],
+          { env, signal },
+        ).then((output) => output.replace(/^HTTP\/[^\n]*\n(?:[^\n]*\n)*?\r?\n/, '')),
+      )
+      if (!Value.Check(permission, response)) throw new Error('权限格式无效')
+      allowed = ['admin', 'maintain', 'write'].includes(response.permission)
+    } catch (error) {
+      if (!/\b404\b/.test(errorMessage(error))) throw error
+    }
+    cached = { value: allowed, expires: Date.now() + 600_000 }
+    permissions.set(key, cached)
+  }
+  return cached.value ? 'write' : 'untrusted'
+}
+
 export function classifyCommand(
   body: string,
   trust: Trust,
@@ -137,51 +193,18 @@ export async function observeFeedback({
         if (old && (!['ignored', 'observed'].includes(old.status) || old.updatedAt >= updated))
           return
         const body = (item.body ?? '').slice(0, 65536)
-        let trust: Trust = old?.trust ?? 'untrusted'
-        if (!old) {
-          if ((item.body ?? '').includes('<!-- workling -->')) trust = 'self'
-          else if (item.user.type === 'Bot') trust = 'bot'
-          else if (
-            db
-              .select()
-              .from(trustedUsers)
-              .where(
-                and(
-                  eq(trustedUsers.repoId, repo.id),
-                  eq(trustedUsers.userId, String(item.user.id)),
-                ),
-              )
-              .get()
-          )
-            trust = 'allowlist'
-          else {
-            const key = `${repo.id}:${item.user.id}`
-            let cached = state.permissions.get(key)
-            if (!cached || cached.expires <= Date.now()) {
-              let allowed = false
-              try {
-                const response: unknown = JSON.parse(
-                  await command(
-                    [
-                      'gh',
-                      'api',
-                      `repos/${repo.path}/collaborators/${encodeURIComponent(item.user.login)}/permission`,
-                      '--include',
-                    ],
-                    { env, signal },
-                  ).then((output) => output.replace(/^HTTP\/[^\n]*\n(?:[^\n]*\n)*?\r?\n/, '')),
-                )
-                if (!Value.Check(permission, response)) throw new Error('权限格式无效')
-                allowed = ['admin', 'maintain', 'write'].includes(response.permission)
-              } catch (error) {
-                if (!/\b404\b/.test(errorMessage(error))) throw error
-              }
-              cached = { value: allowed, expires: Date.now() + 600_000 }
-              state.permissions.set(key, cached)
-            }
-            if (cached.value) trust = 'write'
-          }
-        }
+        const trust =
+          old?.trust ??
+          (await judgeTrust({
+            db,
+            repo,
+            user: item.user,
+            body: item.body ?? '',
+            command,
+            env,
+            signal,
+            permissions: state.permissions,
+          }))
         const result = classifyCommand(
           body,
           trust,
