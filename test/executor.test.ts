@@ -451,9 +451,10 @@ test.each([
       error: 'Docker 不支持内存、CPU 配额限制（rootless 需要为用户委派 cgroup 控制器）',
     },
   ],
+  [dockerInfo({ CgroupVersion: '1' }), { rootless: false, error: null }],
   [
-    dockerInfo({ CgroupVersion: '1' }),
-    { rootless: false, error: 'Docker 使用 cgroup v1，worker 需要 cgroup v2' },
+    dockerInfo({ CgroupVersion: '1', SecurityOptions: ['name=rootless'] }),
+    { rootless: true, error: 'Docker 使用 cgroup v1，rootless 下 worker 需要 cgroup v2' },
   ],
   ['oops', { rootless: false, error: '无法解析 docker info 的输出' }],
 ] as const)('parseDockerInfo %#', (raw, expected) => {
