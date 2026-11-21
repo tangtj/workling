@@ -55,7 +55,7 @@ export function createApp(db: WorklingDatabase, options: AppOptions) {
       return c.json({ error: '禁止访问' }, 403)
     // 要求 JSON 使浏览器跨站表单不能直接提交修改请求。
     if (
-      (c.req.method === 'POST' || c.req.method === 'PATCH') &&
+      (c.req.method === 'POST' || c.req.method === 'PATCH' || c.req.method === 'PUT') &&
       !/^application\/json\s*(?:;|$)/i.test(c.req.header('content-type') ?? '')
     )
       return c.json({ error: '请求类型必须为 application/json' }, 415)

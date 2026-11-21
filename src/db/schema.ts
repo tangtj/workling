@@ -14,6 +14,9 @@ export const repos = sqliteTable('repos', {
   path: text('path').notNull(),
   token: text('token').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  triageLevel: text('triage_level', { enum: ['off', 'shadow'] })
+    .notNull()
+    .default('off'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 })
@@ -162,4 +165,34 @@ export const trustedUsers = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
   (table) => [uniqueIndex('trusted_users_repo_user_unique').on(table.repoId, table.userId)],
+)
+
+export const triageRecords = sqliteTable(
+  'triage_records',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    title: text('title').notNull(),
+    authorId: text('author_id').notNull(),
+    authorLogin: text('author_login').notNull(),
+    trust: text('trust', { enum: ['allowlist', 'write'] }).notNull(),
+    contentHash: text('content_hash').notNull(),
+    issueUpdatedAt: integer('issue_updated_at', { mode: 'timestamp' }).notNull(),
+    checks: text('checks').notNull(),
+    decision: text('decision', { enum: ['accept', 'needs_info', 'ignore'] }),
+    llmDecision: text('llm_decision', { enum: ['accept', 'needs_info', 'ignore'] }),
+    missing: text('missing').notNull(),
+    note: text('note'),
+    model: text('model'),
+    error: text('error'),
+    alreadyReady: integer('already_ready', { mode: 'boolean' }).notNull(),
+    attempts: integer('attempts').notNull(),
+    triagedAt: integer('triaged_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [
+    uniqueIndex('triage_repo_number_hash_unique').on(table.repoId, table.number, table.contentHash),
+  ],
 )
