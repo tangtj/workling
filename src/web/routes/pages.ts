@@ -1,3 +1,4 @@
+import { triageOverview } from '../triage.ts'
 import { attentionStages } from '../stage.ts'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -33,6 +34,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
           (issue) => issue.repoId === id && ['queued', 'running', 'failed'].includes(issue.status),
         ).length,
       })),
+      triagePending: triageOverview(db).pendingSuggestions,
       attention: sidebar.issues.filter((issue) => attentionStages.includes(issue.stage)).length,
       failed: sidebar.issues.filter((issue) => issue.status === 'failed').length,
       running: sidebar.issues.filter((issue) => issue.status === 'running').length,
@@ -205,6 +207,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
   const shell = async (c: Context, status: 200 | 404) =>
     c.body(shellHtml(await getWebBundle()), status, headers)
   app.get('/', (c) => shell(c, 200))
+  app.get('/triage', (c) => shell(c, 200))
   app.get('/issues', (c) => shell(c, 200))
   app.get('/login', async (c) => c.body(shellHtml(await getWebBundle(), true), 200, headers))
   app.get('/settings', (c) => shell(c, 200))

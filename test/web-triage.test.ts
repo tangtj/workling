@@ -210,3 +210,68 @@ test('级别切换写入时间下限并统计各类建议跟进', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('跨仓库分诊汇总相加，记录按时间倒序并统计待补充', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'triage-overview-'))
+  const conn = await openDatabase(dir)
+  try {
+    const now = new Date('2026-01-01T12:00:00Z')
+    for (const [index, name] of ['a', 'b'].entries()) {
+      const repo = conn.db
+        .insert(repos)
+        .values({
+          ref: `github:${name}/repo`,
+          platform: 'github',
+          host: 'github.com',
+          path: `${name}/repo`,
+          token: 'x',
+          enabled: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning()
+        .get()
+      conn.db
+        .insert(triageRecords)
+        .values({
+          repoId: repo.id,
+          number: 1,
+          title: 'task',
+          authorId: '1',
+          authorLogin: 'user',
+          trust: 'write',
+          contentHash: 'a',
+          issueUpdatedAt: now,
+          checks: JSON.stringify({ missingSections: [], invalidDirectives: [] }),
+          missing: '[]',
+          decision: index ? 'needs_info' : 'accept',
+          llmDecision: index ? 'needs_info' : 'accept',
+          alreadyReady: false,
+          attempts: 1,
+          triagedAt: new Date(now.getTime() + index * 60000),
+          suggestedAt: index ? now : null,
+        })
+        .run()
+    }
+    const app = reposRoutes({ db: conn.db, options: { workspace: dir } })
+    const response = await app.request('/api/triage')
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data.summary).toEqual({
+      total: 2,
+      acceptReady: 0,
+      acceptNotReady: 1,
+      otherReady: 0,
+      otherNotReady: 1,
+      suggestions: { total: 1, edited: 0, readyWithoutEdit: 0, pending: 1 },
+    })
+    expect(data.records.map((row: { repoRef: string }) => row.repoRef)).toEqual([
+      'github:b/repo',
+      'github:a/repo',
+    ])
+    expect(data.pendingSuggestions).toBe(1)
+  } finally {
+    conn.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

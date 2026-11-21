@@ -1,4 +1,4 @@
-export type Active = '' | 'overview' | 'issues' | 'repos' | 'settings'
+export type Active = '' | 'overview' | 'issues' | 'triage' | 'repos' | 'settings'
 
 export async function readResponse(url: string, init?: RequestInit) {
   const response = await fetch(url, init)

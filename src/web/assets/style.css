@@ -2411,3 +2411,43 @@ legend {
 .dot--capped {
   background: var(--rework);
 }
+
+.triage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.triage-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.triage-table table {
+  width: 100%;
+}
+.triage-agree {
+  background: var(--done-soft);
+}
+.triage-disagree {
+  background: var(--failed-soft);
+}
+.triage-warn {
+  color: var(--warn);
+}
+.level-group {
+  display: inline-flex;
+  white-space: nowrap;
+}
+.level-group .selected,
+.toolbar .selected {
+  color: var(--accent);
+  font-weight: bold;
+}
+@media (max-width: 700px) {
+  .triage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .triage-grid > *,
+  .main {
+    min-width: 0;
+  }
+}
