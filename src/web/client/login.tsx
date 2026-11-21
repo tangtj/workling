@@ -1,11 +1,22 @@
 import '../assets/style.css'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 
 function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showReset, setShowReset] = useState(false)
+  // 点浮层以外的地方即关闭，不必再点一次链接
+  useEffect(() => {
+    if (!showReset) return
+    const close = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.forgot'))
+        setShowReset(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [showReset])
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const value = password
@@ -30,20 +41,15 @@ function Login() {
     <div className="login-inner">
       <div className="brand">
         <span className="brand-mark">W</span>
-        <span>
-          Workling<small>本机管理</small>
-        </span>
+        <span>Workling</span>
       </div>
       <form id="login-form" className="card stack" onSubmit={submit}>
-        <div>
-          <h1>登录</h1>
-          <p className="muted">首次启动 watch 时，控制台会打印管理密码。</p>
-        </div>
+        <h1>登录</h1>
         <div id="login-error" className="error-box" role="alert" hidden={!error}>
           {error}
         </div>
         <label>
-          密码
+          管理密码
           <input
             id="password"
             name="password"
@@ -54,17 +60,29 @@ function Login() {
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
+        <div className="forgot" onMouseLeave={() => setShowReset(false)}>
+          <button
+            type="button"
+            className="link-button"
+            aria-expanded={showReset}
+            aria-controls="forgot-tip"
+            onClick={() => setShowReset((open) => !open)}
+            onKeyDown={(event) => event.key === 'Escape' && setShowReset(false)}
+          >
+            忘记密码？
+          </button>
+          {showReset && (
+            <div id="forgot-tip" className="forgot-tip" role="status">
+              运行 <code>workling reset-password</code> 重置
+              <br />
+              已登录的会话会失效
+            </div>
+          )}
+        </div>
         <button className="button button--primary" type="submit" disabled={submitting}>
           登录
         </button>
       </form>
-      <p className="muted">
-        忘记密码？在终端运行
-        <br />
-        <code>bun src/cli.ts reset-password</code>
-        <br />
-        生成新密码，已登录的会话会失效。
-      </p>
     </div>
   )
 }
