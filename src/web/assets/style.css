@@ -2503,3 +2503,129 @@ legend {
     justify-content: flex-end;
   }
 }
+
+.issue-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.issue-timeline {
+  flex: 999 1 520px;
+  min-width: 0;
+}
+.issue-sidebar {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.issue-header-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.issue-header .row {
+  flex-wrap: wrap;
+}
+.timeline-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.timeline-filters [aria-pressed='true'] {
+  color: var(--rework);
+  border-color: var(--rework);
+}
+.timeline-events {
+  margin-top: 16px;
+}
+.timeline-event {
+  position: relative;
+  padding: 0 0 24px 32px;
+  overflow-wrap: anywhere;
+}
+.timeline-event:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: 0;
+  border-left: 1px solid var(--border);
+}
+.timeline-dot {
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+}
+.timeline-dot--warn {
+  border-color: var(--warn);
+}
+.timeline-dot--rework {
+  border-color: var(--rework);
+}
+.timeline-dot--run {
+  left: 0;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 12px;
+}
+.timeline-dot--done {
+  border-color: var(--done);
+  color: var(--done);
+}
+.timeline-dot--failed {
+  border-color: var(--failed);
+  color: var(--failed);
+}
+.timeline-dot--running {
+  border-color: var(--running);
+  color: var(--running);
+}
+.timeline-event--muted {
+  opacity: 0.6;
+}
+.timeline-event blockquote {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  white-space: pre-wrap;
+}
+.issue-sidebar pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rework-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rework-boxes span {
+  width: 22px;
+  height: 8px;
+  border: 1px solid var(--rework);
+  border-radius: 3px;
+}
+.rework-boxes .filled {
+  background: var(--rework);
+}
+@media (max-width: 1100px) {
+  .issue-timeline,
+  .issue-sidebar {
+    flex-basis: 100%;
+  }
+}
+.issue-timeline pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.issue-timeline .run-details {
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+}

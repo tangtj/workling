@@ -1,5 +1,6 @@
 import { repoTriage, triageOverview } from '../triage.ts'
-import { feedback } from '../../db/schema.ts'
+import { feedback, triageRecords } from '../../db/schema.ts'
+import { and, eq, asc } from 'drizzle-orm'
 import { countAutoRounds, prNumberOf } from '../../serve/rework.ts'
 import { failureReason } from '../issue-view.ts'
 import { attentionStages } from '../stage.ts'
@@ -108,7 +109,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
     if (!Value.Check(issueListSchema, body)) throw new Error('任务列表数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
-  const detail = (issue: Issue, time: number): IssueDetailData => ({
+  const detail = (issue: Issue, time: number, limit: number | null): IssueDetailData => ({
     now: new Date(time).toISOString(),
     issue: {
       id: issue.id,
@@ -122,14 +123,44 @@ export function pagesRoutes(deps: AppDeps): Hono {
       number: issue.number,
       title: issue.title,
       status: issue.status,
+      stage: issue.stage,
+      branch: issue.runs[0]?.branch ?? null,
+      baseRef: issue.runs[0]?.baseRef ?? null,
       prUrl: issue.prUrl,
       prState: issue.prState,
       createdAt: issue.createdAt.toISOString(),
       updatedAt: issue.updatedAt.toISOString(),
     },
+    triage: db
+      .select()
+      .from(triageRecords)
+      .where(and(eq(triageRecords.repoId, issue.repoId), eq(triageRecords.number, issue.number)))
+      .orderBy(asc(triageRecords.triagedAt), asc(triageRecords.id))
+      .all()
+      .map((row) => ({
+        id: row.id,
+        decision: row.decision,
+        llmDecision: row.llmDecision,
+        missing: JSON.parse(row.missing) as string[],
+        triagedAt: row.triagedAt.toISOString(),
+        suggestedAt: row.suggestedAt?.toISOString() ?? null,
+        suggestCommentUrl: row.suggestCommentUrl,
+        autoQueuedAt: row.autoQueuedAt?.toISOString() ?? null,
+      })),
+    rework: {
+      rounds: issue.prUrl
+        ? countAutoRounds(
+            prNumberOf(issue.prUrl),
+            db.select().from(feedback).where(eq(feedback.issueId, issue.id)).all(),
+            new Set(issue.runs.filter((run) => run.kind === 'rework').map((run) => run.id)),
+          )
+        : 0,
+      limit,
+    },
     runs: issue.runs.map((run) => ({
       id: run.id,
       worker: run.worker,
+      branch: run.branch,
       kind: run.kind,
       startedAt: run.startedAt.toISOString(),
       endedAt: run.endedAt?.toISOString() ?? null,
@@ -148,7 +179,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
     const id = repoId(c.req.param('id'))
     const issue = page.issues.find((item) => item.id === id)
     if (!issue) return c.json({ error: 'Issue 不存在' }, 404)
-    const body = detail(issue, page.now)
+    const body = detail(issue, page.now, page.status?.reworkLimit ?? null)
     if (!Value.Check(issueDetailSchema, body)) throw new Error('Issue 详情数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
@@ -157,7 +188,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
     const id = repoId(c.req.param('id'))
     const issue = page.issues.find((item) => item.runs.some((run) => run.id === id))
     if (!issue) return c.json({ error: '执行记录不存在' }, 404)
-    const body = detail(issue, page.now)
+    const body = detail(issue, page.now, page.status?.reworkLimit ?? null)
     if (!Value.Check(issueDetailSchema, body)) throw new Error('Issue 详情数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
