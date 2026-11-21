@@ -79,12 +79,13 @@ export function reposRoutes(deps: AppDeps): Hono {
     const repo = id ? db.select().from(repos).where(eq(repos.id, id)).get() : undefined
     if (!repo) return c.json({ error: '仓库不存在' }, 404)
     const seen = new Set<number>()
-    const records = db
+    const rows = db
       .select()
       .from(triageRecords)
       .where(eq(triageRecords.repoId, repo.id))
       .orderBy(desc(triageRecords.triagedAt), desc(triageRecords.id))
       .all()
+    const records = rows
       .filter((row) => {
         if (seen.has(row.number)) return false
         seen.add(row.number)
@@ -111,13 +112,15 @@ export function reposRoutes(deps: AppDeps): Hono {
         }
       })
     const summary = { total: 0, acceptReady: 0, acceptNotReady: 0, otherReady: 0, otherNotReady: 0 }
-    for (const row of records) {
-      if (!row.decision || row.alreadyReady) continue
+    // 列表展示最新尝试；最新尝试失败时，汇总沿用该 Issue 最近一次有结论的记录。
+    for (const latest of records) {
+      const row = rows.find((item) => item.number === latest.number && item.decision)
+      if (!row || row.alreadyReady) continue
       summary.total++
       if (row.decision === 'accept') {
-        if (row.readyAt) summary.acceptReady++
+        if (latest.readyAt) summary.acceptReady++
         else summary.acceptNotReady++
-      } else if (row.readyAt) summary.otherReady++
+      } else if (latest.readyAt) summary.otherReady++
       else summary.otherNotReady++
     }
     const response = { level: repo.triageLevel, summary, records }

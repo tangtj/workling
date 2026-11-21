@@ -113,7 +113,7 @@ function Triage({
         只记录结论，不打标签、不评论；只分诊受信作者的 Issue；需要<Link to="/settings">设置页</Link>
         的 LLM 配置。
       </p>
-      {settings.data && !settings.data.pi.llmBaseUrl && (
+      {settings.data && (!settings.data.pi.llmBaseUrl || !settings.data.pi.llmApiKey) && (
         <p>
           LLM 未配置，请前往<Link to="/settings">设置页</Link>配置接入地址与 Key。
         </p>

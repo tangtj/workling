@@ -14,6 +14,8 @@ import { judgeTrust, type FeedbackState } from './feedback.ts'
 import { redactSecrets } from './secret-scan.ts'
 import { TRIAGE_PROMPT } from './triage-prompt.ts'
 
+// LLM 调用串行执行，每仓库每轮最坏耗时 5 × 60 秒，会推迟主循环的其他步骤。
+
 export function checkIssue(body: string) {
   const sections = new Map<string, string>()
   let section = '',
@@ -63,18 +65,18 @@ const issueSchema = Type.Array(
     pull_request: Type.Optional(Type.Unknown()),
   }),
 )
-const resultSchema = Type.Object(
-  {
-    decision: Type.Union([
-      Type.Literal('accept'),
-      Type.Literal('needs_info'),
-      Type.Literal('ignore'),
-    ]),
-    missing: Type.Array(Type.String()),
-    note: Type.String(),
-  },
-  { additionalProperties: false },
-)
+const resultSchema = Type.Object({
+  decision: Type.Union([
+    Type.Literal('accept'),
+    Type.Literal('needs_info'),
+    Type.Literal('ignore'),
+  ]),
+  missing: Type.Array(Type.String()),
+  note: Type.String(),
+})
+export function escapeIssueDelimiters(text: string) {
+  return text.replace(/<\/?issue-body>/gi, (tag) => tag.replace('<', '&lt;').replace('>', '&gt;'))
+}
 type Input = {
   title: string
   body: string
@@ -102,7 +104,7 @@ export async function classifyIssue(input: Input): Promise<unknown> {
       messages: [
         {
           role: 'user',
-          content: `检查结果：${JSON.stringify(input.checks)}\n<issue-title>\n${input.title}\n</issue-title>\n<issue-body>\n${input.body.slice(0, 20000)}\n</issue-body>`,
+          content: `检查结果：${JSON.stringify(input.checks)}\n<issue-body>\n标题：${escapeIssueDelimiters(input.title)}\n正文：${escapeIssueDelimiters(input.body.slice(0, 20000))}\n</issue-body>`,
           timestamp: Date.now(),
         },
       ],
@@ -121,23 +123,27 @@ export async function classifyIssue(input: Input): Promise<unknown> {
 }
 export function parseTriageResult(input: unknown) {
   if (typeof input === 'string') {
-    const start = input.indexOf('{')
-    if (start < 0) throw new Error('LLM 输出不是 JSON')
     let parsed: unknown
-    for (let end = start + 1; end <= input.length; end++) {
-      if (input[end - 1] !== '}') continue
-      try {
-        parsed = JSON.parse(input.slice(start, end))
-        break
-      } catch {
-        /* 查找完整对象 */
+    for (let start = input.indexOf('{'); start >= 0; start = input.indexOf('{', start + 1)) {
+      for (let end = start + 1; end <= input.length; end++) {
+        if (input[end - 1] !== '}') continue
+        try {
+          const candidate: unknown = JSON.parse(input.slice(start, end))
+          if (Value.Check(resultSchema, candidate)) {
+            parsed = candidate
+            break
+          }
+        } catch {
+          /* 查找完整对象 */
+        }
       }
+      if (parsed) break
     }
     input = parsed
   }
   if (!Value.Check(resultSchema, input)) throw new Error('LLM 输出格式无效')
   return {
-    ...input,
+    decision: input.decision,
     missing: input.missing.slice(0, 10).map((s) => s.slice(0, 200)),
     note: input.note.slice(0, 2000),
   }
@@ -258,7 +264,7 @@ export async function triageShadow({
           authorLogin: item.user.login,
           trust,
           contentHash: hash,
-          issueUpdatedAt: updated,
+          issueUpdatedAt: old?.issueUpdatedAt ?? updated,
           checks: JSON.stringify(checks),
           decision,
           llmDecision,
@@ -267,7 +273,7 @@ export async function triageShadow({
           model: pi.piModel ?? pi.model,
           error,
           alreadyReady:
-            old?.alreadyReady ??
+            (decision ? undefined : old?.alreadyReady) ??
             !!db
               .select()
               .from(issues)
