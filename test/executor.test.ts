@@ -1,5 +1,5 @@
 import { dockerExecutor } from '../src/executor/docker.ts'
-import { parseDockerInfo } from '../src/executor/docker-host.ts'
+import { hostPathOf, parseDockerInfo } from '../src/executor/docker-host.ts'
 import { processExecutor } from '../src/executor/process.ts'
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
@@ -483,4 +483,27 @@ test('未配置网络时自动创建关闭 ICC 的 workling-worker 网络，已�
   expect(network.map((args) => args[2])).toEqual(['inspect', 'create', 'inspect'])
   expect(network[1]).toContain('com.docker.network.bridge.enable_icc=false')
   expect(network[1]!.at(-1)).toBe('workling-worker')
+})
+
+test('主体在容器里时按本容器的挂载把任务目录换算成宿主机路径', async () => {
+  const mounts = JSON.stringify([
+    { Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock' },
+    { Source: '/var/lib/docker/volumes/w_data/_data', Destination: '/data' },
+  ])
+  const calls: string[][] = []
+  const command: Command = async (args) => {
+    calls.push(args)
+    return mounts
+  }
+  expect(await hostPathOf(command, '/data/tasks/a-b-1', true, 'abc123')).toBe(
+    '/var/lib/docker/volumes/w_data/_data/tasks/a-b-1',
+  )
+  expect(calls[0]).toEqual(['docker', 'inspect', '--format', '{{json .Mounts}}', 'abc123'])
+  await expect(hostPathOf(command, '/tmp/x', true, 'abc123')).rejects.toThrow(
+    '不在主体容器的挂载卷里',
+  )
+  await expect(hostPathOf(command, '/database', true, 'abc123')).rejects.toThrow(
+    '不在主体容器的挂载卷里',
+  )
+  expect(await hostPathOf(command, '/tmp/x', false)).toBe('/tmp/x')
 })

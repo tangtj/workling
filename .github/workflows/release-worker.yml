@@ -1,4 +1,4 @@
-# 只发布 worker 镜像，主体不动：推送 worker-v* tag 即可。
+# 只发布 worker 镜像，主体不动：推送 worker-v* tag 即可。主体的 v* 发布也会发布同版本的 worker 镜像。
 # 镜像标签 io.workling.contract 声明契约版本，主体拉起前检查，不兼容时不拉起并在管理页提示。
 # 工作流可写 GHCR，因此不在 pull_request 上触发。
 name: 发布 worker
@@ -55,10 +55,11 @@ jobs:
         id: metadata
         with:
           images: ghcr.io/${{ github.repository }}-worker
+          # 保留 worker- 前缀，避免与主体同版本号的 worker 镜像标签冲突；latest 只由主体发布更新。
           tags: |
-            type=semver,pattern={{raw}},value=${{ env.VERSION }}
+            type=raw,value=${{ env.TAG }}
             type=raw,value=contract-${{ env.CONTRACT }},enable=${{ !contains(env.VERSION, '-') }}
-          flavor: latest=${{ !contains(env.VERSION, '-') }}
+          flavor: latest=false
       - uses: docker/build-push-action@v6
         with:
           context: .

@@ -1,4 +1,5 @@
-# 单容器部署：worker 与主体同在一个容器（本机进程执行器），只适合个人试用；需要隔离请用 systemd + rootless Docker（见 README）。
+# 主体容器通过宿主机的 Docker 为每个任务拉起一个 worker 容器（worker 镜像单独发布，见 WORKLING_WORKER_IMAGE）。
+# 挂载 docker.sock 等同给主体容器宿主机 root 权限；worker 容器本身拿不到 socket，也看不到主体的数据目录。
 # 服务器使用已发布镜像：下载到服务器的部署目录后 docker compose up -d；本地从源码构建请用 docker-compose.build.yaml。
 services:
   workling:
@@ -8,10 +9,16 @@ services:
     env_file: .env
     environment:
       WORKLING_WORKER: ${WORKLING_WORKER:-workling-docker}
+      WORKLING_REQUIRE_DOCKER: 'true'
+      WORKLING_WORKER_IMAGE: ${WORKLING_WORKER_IMAGE:-${WORKLING_IMAGE}-worker:${WORKLING_VERSION:-latest}}
+    # 让容器内的 node 用户能访问宿主机的 docker.sock。
+    group_add:
+      - '${DOCKER_GID:?请在 .env 设置 DOCKER_GID（getent group docker | cut -d: -f3）}'
     ports:
       - '127.0.0.1:7420:7420' # 管理接口只暴露给宿主机本机
     volumes:
       # 默认用命名卷；设置 WORKLING_DATA_DIR 为宿主机目录则改为挂载该目录（需对 uid 1000 可写）。
       - ${WORKLING_DATA_DIR:-workling-data}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
 volumes:
   workling-data:

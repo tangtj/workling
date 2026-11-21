@@ -2,7 +2,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { Command, Environment } from '../runtime/types.ts'
 import type { ExecutorSettings } from '../config/executor.ts'
-import { checkDockerHost } from './docker-host.ts'
+import { checkDockerHost, hostPathOf } from './docker-host.ts'
 import type { Executor } from './index.ts'
 
 // worker 默认放在单独的网络里，不与主体或其他容器共享 compose 网络；enable_icc=false 依赖 Docker 的
@@ -58,6 +58,7 @@ export function dockerExecutor({
       // rootless 时容器内的 root 映射为运行 Docker 的宿主机用户，任务目录的属主才保持一致；
       // 若改用宿主机 uid，会被映射到 subuid，主体无法清理 worker 写下的文件。
       const user = host.rootless ? '0:0' : `${process.getuid!()}:${process.getgid!()}`
+      const source = await hostPathOf(command, spec.taskDir)
       const network = config.taskNetwork ?? DEFAULT_WORKER_NETWORK
       if (!config.taskNetwork) await ensureWorkerNetwork(command)
       const name = `workling-run-${spec.runId}`
@@ -104,7 +105,7 @@ export function dockerExecutor({
           '--network',
           network,
           '-v',
-          `${spec.taskDir}:${inner}`,
+          `${source}:${inner}`,
           ...variables.flatMap((key) => ['-e', key]),
           config.taskImage,
           'bun',

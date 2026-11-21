@@ -1,5 +1,6 @@
 # 本地从源码构建镜像并运行：在仓库根目录执行
 #   docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
+# 同时构建主体镜像 workling:local 与 worker 镜像 workling-worker:local，任务在 worker 容器里运行。
 # 指定版本实测：WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yaml build
 # 构建上下文是仓库根目录；忽略规则在同目录的 Dockerfile.dockerignore。
 services:
@@ -15,10 +16,29 @@ services:
     env_file: ../../.env
     environment:
       WORKLING_WORKER: ${WORKLING_WORKER:-workling-docker}
+      WORKLING_REQUIRE_DOCKER: 'true'
+      WORKLING_WORKER_IMAGE: workling-worker:local
+    # Linux 上用 DOCKER_GID=$(getent group docker | cut -d: -f3) 执行 compose，让 node 用户能访问 docker.sock。
+    group_add:
+      - '${DOCKER_GID:-0}'
+    depends_on:
+      worker-image:
+        condition: service_completed_successfully
     ports:
       - '127.0.0.1:7420:7420' # 管理接口只暴露给宿主机本机
     volumes:
       # 默认用命名卷；设置 WORKLING_DATA_DIR 为宿主机目录则改为挂载该目录（需对 uid 1000 可写）。
       - ${WORKLING_DATA_DIR:-workling-data}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+  # 只用来构建 worker 镜像：启动后立即退出，任务容器由主体按需拉起。
+  worker-image:
+    build:
+      context: ../..
+      dockerfile: worker/Dockerfile
+      args:
+        WORKER_VERSION: '${WORKLING_VERSION:-dev}'
+    image: workling-worker:local
+    command: ['true']
+    restart: 'no'
 volumes:
   workling-data:

@@ -1,4 +1,8 @@
-import { importExecutorSettings, readExecutorSettings } from '../config/executor.ts'
+import {
+  importExecutorSettings,
+  readExecutorSettings,
+  updateExecutorSettings,
+} from '../config/executor.ts'
 import { ensurePassword } from '../web/auth.ts'
 import { eq } from 'drizzle-orm'
 import { openDatabase } from '../db/index.ts'
@@ -18,7 +22,7 @@ import { launchQueued } from './launch.ts'
 import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
-import { checkWorkerImage } from '../executor/worker-image.ts'
+import { ensureWorkerImage } from '../executor/worker-image.ts'
 import { checkDockerHost } from '../executor/docker-host.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
 import { triageIssues, type TriageState } from './triage.ts'
@@ -86,8 +90,17 @@ export async function serve({
     if (ignored.length > 0) log(`以下环境变量已不再生效，请在设置页修改：${ignored.join('、')}`)
     const executorImport = importExecutorSettings(db, env)
     if (executorImport.imported) log('已从环境变量导入执行器配置')
-    if (executorImport.ignored.length > 0)
-      log(`以下环境变量已不再生效，请在设置页修改：${executorImport.ignored.join('、')}`)
+    // 部署要求 Docker 执行器时，旧库里的本机进程执行器一次性切换过来。
+    if (settings.requireDocker && readExecutorSettings(db).sandbox !== 'docker') {
+      updateExecutorSettings(db, { sandbox: 'docker' })
+      log('已按 WORKLING_REQUIRE_DOCKER=true 切换为 Docker 执行器')
+    }
+    // compose 部署由 .env 决定 worker 镜像，随主体版本一起升级；设置了它时每次启动覆盖设置页的任务镜像。
+    const workerImage = env.WORKLING_WORKER_IMAGE?.trim()
+    if (workerImage && readExecutorSettings(db).taskImage !== workerImage) {
+      updateExecutorSettings(db, { taskImage: workerImage })
+      log(`任务镜像已按 WORKLING_WORKER_IMAGE 设为 ${workerImage}`)
+    }
     const password = await ensurePassword(db)
     if (password)
       log(
@@ -141,6 +154,7 @@ export async function serve({
     const triageState: TriageState = { permissions: new Map() }
     let wasPaused = false
     let warnedRootful = false
+    const pulledImages = new Set<string>()
     while (!signal.aborted) {
       const pi = readPiSettings(db)
       const executorSettings = readExecutorSettings(db)
@@ -200,7 +214,8 @@ export async function serve({
               )
             }
             workerError =
-              host.error ?? (await checkWorkerImage(command, executorSettings.taskImage))
+              host.error ??
+              (await ensureWorkerImage(command, executorSettings.taskImage, pulledImages, log))
           }
           if (workerError && workerError !== status.workerError)
             log(`暂停拉起新任务：${workerError}`)

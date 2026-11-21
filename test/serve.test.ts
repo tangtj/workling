@@ -13,6 +13,7 @@ import {
   upgradeSteps,
 } from '../src/db/schema.ts'
 import { readPiSettings } from '../src/config/pi.ts'
+import { readExecutorSettings } from '../src/config/executor.ts'
 import { launch, isAlive, killGroup } from '../src/runtime/process.ts'
 import { launchQueued } from '../src/serve/launch.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
@@ -334,7 +335,7 @@ test('docker 执行器的 worker 镜像不兼容时暂停拉起并记录原因',
   }
 })
 
-test('WORKLING_REQUIRE_DOCKER=true 时拒绝用本机进程执行器拉起', async () => {
+test('WORKLING_REQUIRE_DOCKER=true 时启动切换为 Docker 执行器，WORKLING_WORKER_IMAGE 覆盖任务镜像', async () => {
   const s = await scenario()
   const controller = new AbortController()
   const logs: string[] = []
@@ -347,13 +348,18 @@ test('WORKLING_REQUIRE_DOCKER=true 时拒绝用本机进程执行器拉起', asy
       ...s.options,
       settings: { ...s.options.settings, requireDocker: true },
       signal: controller.signal,
-      env: {},
+      env: { WORKLING_WORKER_IMAGE: 'ghcr.io/a/b-worker:v9' },
       log: (message) => {
         logs.push(message)
         if (message.startsWith('暂停拉起新任务')) controller.abort()
       },
     })
-    expect(logs.some((line) => line.includes('WORKLING_REQUIRE_DOCKER=true'))).toBe(true)
+    expect(logs).toContain('已按 WORKLING_REQUIRE_DOCKER=true 切换为 Docker 执行器')
+    expect(logs).toContain('任务镜像已按 WORKLING_WORKER_IMAGE 设为 ghcr.io/a/b-worker:v9')
+    expect(readExecutorSettings(s.db)).toMatchObject({
+      sandbox: 'docker',
+      taskImage: 'ghcr.io/a/b-worker:v9',
+    })
     expect(s.db.select().from(runs).all()).toEqual([])
   } finally {
     listen.mockRestore()

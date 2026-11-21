@@ -12,7 +12,7 @@ Issue 打上 workling:ready → serve 入队 → 拉起 task → Pi 调用 codex
 
 - [Bun](https://bun.sh) 1.3+
 - [GitHub CLI](https://cli.github.com)（`gh`）与 Git
-- [codex](https://github.com/openai/codex)（本机进程模式下由 Pi 调用；Docker 模式下镜像内已包含）
+- [codex](https://github.com/openai/codex)（本机进程模式下由 Pi 调用；Docker 模式下 worker 镜像内已包含）
 
 ## 安装
 
@@ -27,19 +27,20 @@ bun link    # 可选：注册全局命令 workling
 
 1. **环境变量**：启动前需要的进程级配置，写在项目根目录的 `.env`（Bun 启动时自动加载）。全部可选：
 
-   | 变量                      | 默认值      | 说明                                                                     |
-   | ------------------------- | ----------- | ------------------------------------------------------------------------ |
-   | `WORKLING_WORKSPACE`      | `.runtime`  | 数据目录：数据库与任务目录，相对路径按启动目录解析                       |
-   | `WORKLING_HOST`           | `127.0.0.1` | 管理页监听地址                                                           |
-   | `WORKLING_PORT`           | `7420`      | 管理页端口                                                               |
-   | `WORKLING_WORKER`         | 主机名      | 本机标识，写入运行记录与评论                                             |
-   | `WORKLING_INTERVAL`       | `60`        | 轮询间隔（秒）                                                           |
-   | `WORKLING_TIMEOUT`        | `90`        | 单个任务超时（分钟）                                                     |
-   | `WORKLING_KEEP_RUNS`      | `5`         | 每个 Issue 保留的任务目录数                                              |
-   | `WORKLING_REWORK_LIMIT`   | `3`         | 每个 PR 由 Request changes 自动触发的返工轮数上限，0 表示不自动返工      |
-   | `WORKLING_ALLOWED_HOSTS`  | 无          | 额外允许的访问域名，逗号分隔                                             |
-   | `WORKLING_SECURE_COOKIE`  | `false`     | 通过 HTTPS 访问管理页时设为 `true`                                       |
-   | `WORKLING_REQUIRE_DOCKER` | `false`     | 设为 `true` 时只允许 Docker 执行器（生产部署），本机进程执行器下暂停拉起 |
+   | 变量                      | 默认值      | 说明                                                                           |
+   | ------------------------- | ----------- | ------------------------------------------------------------------------------ |
+   | `WORKLING_WORKSPACE`      | `.runtime`  | 数据目录：数据库与任务目录，相对路径按启动目录解析                             |
+   | `WORKLING_HOST`           | `127.0.0.1` | 管理页监听地址                                                                 |
+   | `WORKLING_PORT`           | `7420`      | 管理页端口                                                                     |
+   | `WORKLING_WORKER`         | 主机名      | 本机标识，写入运行记录与评论                                                   |
+   | `WORKLING_INTERVAL`       | `60`        | 轮询间隔（秒）                                                                 |
+   | `WORKLING_TIMEOUT`        | `90`        | 单个任务超时（分钟）                                                           |
+   | `WORKLING_KEEP_RUNS`      | `5`         | 每个 Issue 保留的任务目录数                                                    |
+   | `WORKLING_REWORK_LIMIT`   | `3`         | 每个 PR 由 Request changes 自动触发的返工轮数上限，0 表示不自动返工            |
+   | `WORKLING_ALLOWED_HOSTS`  | 无          | 额外允许的访问域名，逗号分隔                                                   |
+   | `WORKLING_SECURE_COOKIE`  | `false`     | 通过 HTTPS 访问管理页时设为 `true`                                             |
+   | `WORKLING_REQUIRE_DOCKER` | `false`     | 设为 `true` 时启动即切换并固定为 Docker 执行器（生产部署）                     |
+   | `WORKLING_WORKER_IMAGE`   | 无          | 设置后每次启动把任务镜像设为该值（compose 部署默认与主体同版本的 worker 镜像） |
 
 2. **管理页「设置」**（存数据库）：codex 模型与推理强度、Pi 模型、LLM 接入地址与 Key、提交身份、执行器（本机进程 / Docker 容器及资源限制）。首次启动时会从同名环境变量导入一次，之后以管理页为准。
 
@@ -97,17 +98,18 @@ Docker 相关文件都在 `deploy/docker/`，systemd 相关文件在 `deploy/`�
 
 ### 推荐：Docker
 
-镜像预装了常用命令行工具：`rg`、`fd`、`jq`、`less`、`file`、`tree`、`patch`、`unzip`、`xz`、`ps`、`lsof`、`make`、`python3` 和 `sqlite3`。
+主体与 worker 分成两个镜像：主体镜像（`WORKLING_IMAGE`）只负责调度、Web 和对 GitHub 的写操作，不含 Pi、codex 和 agent 工具；每个任务由主体通过宿主机的 Docker 拉起一个 worker 容器（`WORKLING_IMAGE` 加 `-worker` 后缀，与主体同版本发布）。worker 镜像预装了常用命令行工具：`rg`、`fd`、`jq`、`less`、`file`、`tree`、`patch`、`unzip`、`xz`、`ps`、`lsof`、`make`、`python3` 和 `sqlite3`，新增工具只改 `worker/Dockerfile`。
 
-watch、task、Pi、codex 运行在同一个容器里，设置页的执行器要选「本机进程」（容器内没有 docker 命令）。这种方式下 worker 与主体共用容器、能访问主体的数据目录，只适合个人试用；需要隔离时用下方 systemd + rootless Docker 部署。
+主体容器挂载宿主机的 `/var/run/docker.sock`（等同宿主机 root 权限），并以 `DOCKER_GID` 加入 docker 组；compose 设置了 `WORKLING_REQUIRE_DOCKER=true`，执行器固定为 Docker。worker 容器只挂载自己的任务目录，拿不到 docker.sock，也看不到主体的数据库。worker 镜像不在本机时，主体在第一次拉起前自动 `docker pull`（私有镜像需先在宿主机 `docker login ghcr.io`）。
 
-- **从源码构建并运行**：在仓库根目录准备好 `.env`（可以为空），然后执行
+- **从源码构建并运行**：在仓库根目录准备好 `.env`（可以为空），然后执行（同时构建主体与 worker 镜像）
 
   ```sh
-  docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
+  DOCKER_GID=$(getent group docker | cut -d: -f3) docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
   ```
 
-- **使用已推送的镜像**：把 `deploy/docker/docker-compose.yaml` 和 `deploy/docker/.env.example` 复制到服务器的部署目录，后者改名为 `.env`，填写 `WORKLING_IMAGE` 与 `WORKLING_VERSION`，再执行 `docker compose up -d`。
+- **使用已推送的镜像**：把 `deploy/docker/docker-compose.yaml` 和 `deploy/docker/.env.example` 复制到服务器的部署目录，后者改名为 `.env`，填写 `WORKLING_IMAGE`、`WORKLING_VERSION` 与 `DOCKER_GID`，再执行 `docker compose up -d`。
+- **从单容器版本升级**：旧版本的主体和 worker 在同一个容器里，执行器是「本机进程」。升级时先用新的 `deploy/docker/docker-compose.yaml` 替换部署目录里的同名文件，在 `.env` 里加上 `DOCKER_GID=$(getent group docker | cut -d: -f3)` 的值，再执行 `./update.sh <tag>`。数据卷不用迁移；启动后执行器会自动切换为 Docker，任务镜像取 `WORKLING_WORKER_IMAGE`（默认与主体同版本的 worker 镜像）。
 - **发布与更新**：按下方 tag 流程发布到 GHCR。之后可以在管理页「侧栏版本徽标」在线更新；Dockerfile 或入口脚本变化时执行 `./update.sh <tag>` 拉新镜像。
 
 首次启动的管理密码在日志里：`docker compose logs workling | grep -A1 管理密码`。登录后在「设置」填写 LLM 接入地址与 Key，再登记仓库。数据默认保存在命名卷 `workling-data` 中，重建容器不会丢失；想放到宿主机目录，在 `.env` 里设置 `WORKLING_DATA_DIR`（该目录需对 uid 1000 可写）。
