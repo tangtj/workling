@@ -148,7 +148,8 @@ test('排队期间的新反馈被认领，拉起失败恢复触发反馈和附�
     }
     await launchQueued({
       ...s.options,
-      command: async () => {
+      command: async (args) => {
+        if (args[2]?.endsWith('/parent')) throw new Error('HTTP 404')
         const rows = s.db.select().from(feedback).all()
         expect(rows.map((row) => row.status)).toEqual(['included', 'included', 'included'])
         expect(new Set(rows.map((row) => row.runId)).size).toBe(1)

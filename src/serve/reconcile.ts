@@ -8,6 +8,9 @@ import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { feedback, issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
+import { readParent, readSubIssues } from '../issue/chain.ts'
+import * as Type from 'typebox'
+import * as Value from 'typebox/value'
 import { ghEnv } from '../platform/github.ts'
 import { assertTaskDir, readResult } from '../contract/result.ts'
 import { type PiSettings } from '../config/pi.ts'
@@ -219,6 +222,68 @@ export async function reconcile({
           '--add-label',
           status === 'done' ? 'workling:done' : 'workling:failed',
         ])
+        try {
+          const signal = new AbortController().signal
+          const parent = await readParent({ repo, number: issue.number, command, signal })
+          if (parent) {
+            const subs = await readSubIssues({ repo, number: parent.number, command, signal })
+            const complete = subs
+              .filter(
+                (sub) =>
+                  sub.sameRepo && !(sub.state === 'closed' && sub.stateReason === 'not_planned'),
+              )
+              .every((sub) => {
+                if (sub.state === 'closed' && sub.stateReason === 'completed') return true
+                const row = db
+                  .select()
+                  .from(issueStates)
+                  .where(and(eq(issueStates.repoId, repo.id), eq(issueStates.number, sub.number)))
+                  .get()
+                if (row?.prState === 'merged') return true
+                const last = row?.lastRunId
+                  ? db.select().from(runs).where(eq(runs.id, row.lastRunId)).get()
+                  : undefined
+                return row?.status === 'done' && !!last?.reportResult?.startsWith('完成')
+              })
+            const target =
+              status !== 'done'
+                ? 'workling:failed'
+                : complete
+                  ? 'workling:done'
+                  : 'workling:running'
+            const value: unknown = JSON.parse(
+              await command(
+                ['gh', 'issue', 'view', String(parent.number), '-R', repo.path, '--json', 'labels'],
+                { env: ghEnv(repo.token, repo.host) },
+              ),
+            )
+            const schema = Type.Object({ labels: Type.Array(Type.Object({ name: Type.String() })) })
+            if (!Value.Check(schema, value)) throw new Error('主 Issue 标签格式无效')
+            const labels = value.labels.map((label) => label.name)
+            const others = [
+              'workling:queued',
+              'workling:running',
+              'workling:done',
+              'workling:failed',
+            ].filter((label) => label !== target && labels.includes(label))
+            if (!labels.includes(target) || others.length)
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'edit',
+                  String(parent.number),
+                  '-R',
+                  repo.path,
+                  ...others.flatMap((label) => ['--remove-label', label]),
+                  ...(!labels.includes(target) ? ['--add-label', target] : []),
+                ],
+                { env: ghEnv(repo.token, repo.host) },
+              )
+          }
+        } catch (error) {
+          log(`${repo.ref} #${issue.number} 汇总主 Issue 失败：${errorMessage(error)}`)
+        }
         if (delivery) {
           await publishIssueResult({
             ...delivery,

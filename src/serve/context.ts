@@ -70,6 +70,7 @@ export async function writeRunContext({
   runId,
   kind = 'implement',
   checkout,
+  chain,
   command,
   secrets,
   log,
@@ -81,6 +82,15 @@ export async function writeRunContext({
   runId: number
   kind?: Spec['kind']
   checkout: Spec['repo'] & { start: string }
+  chain?: {
+    parent: number
+    title: string
+    position: number
+    total: number
+    kind: 'free' | 'base' | 'stack'
+    previous?: number
+    branch?: string
+  }
   command: Command
   secrets: string[]
   log: (message: string) => void
@@ -123,6 +133,22 @@ export async function writeRunContext({
       return ''
     }
   }
+
+  if (chain)
+    await write('chain.md', async () =>
+      [
+        '# 子任务位置',
+        '',
+        `- 主 Issue：#${chain.parent} ${chain.title}`,
+        `- 本任务：第 ${chain.position} / ${chain.total} 个子 Issue`,
+        ...(chain.kind === 'stack'
+          ? [`- 上一个子任务：#${chain.previous}，分支 \`${chain.branch}\`（本任务从该分支切出）`]
+          : []),
+        ...(chain.kind === 'base' ? [`- 上一个子任务已合并，本任务从 ${checkout.start} 切出`] : []),
+        '',
+        '只实现本 Issue 的范围；上一个子任务的改动已经在分支里，不要重做或回退。',
+      ].join('\n'),
+    )
 
   await write('feedback.md', async () => {
     const rows = db

@@ -51,6 +51,8 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
     .returning()
     .get()
   const command: Command = async (args, options) => {
+    if (args[0] === 'gh' && args[1] === 'api' && args[2]?.endsWith('/parent'))
+      throw new Error('HTTP 404')
     if (args[0] === 'git') {
       if (args[1] === 'init' && options?.cwd)
         await mkdir(join(options.cwd, 'objects/info'), { recursive: true })

@@ -14,10 +14,15 @@ export const run: Command = (args, options = {}) =>
       stdio: [
         'pipe',
         options.inherit ? 'inherit' : 'pipe',
-        options.quietStderr ? 'ignore' : 'inherit',
+        options.quietStderr ? 'ignore' : 'pipe',
       ],
     })
     let output = ''
+    let stderr = ''
+    child.stderr?.setEncoding('utf8').on('data', (chunk: string) => {
+      stderr += chunk
+      process.stderr.write(chunk)
+    })
     let force: ReturnType<typeof setTimeout> | undefined
     const kill = (signal: NodeJS.Signals): void => {
       if (!child.pid) return
@@ -47,7 +52,7 @@ export const run: Command = (args, options = {}) =>
       if (options.signal?.aborted) kill('SIGKILL')
       cleanup()
       if (options.signal?.aborted) reject(new Error('进程已取消'))
-      else if (code !== 0) reject(new Error(`${args[0]} 退出码 ${code}\n${output}`))
+      else if (code !== 0) reject(new Error(`${args[0]} 退出码 ${code}\n${output}${stderr}`))
       else resolve(output.trim())
     })
   })

@@ -126,6 +126,7 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
         updatedAt: now,
       })
       .run()
+    first.db.run(sql`ALTER TABLE runs DROP COLUMN stack_branch`)
     first.db.run(sql`DROP TABLE triage_records`)
     first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_level`)
     first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
@@ -135,7 +136,7 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
     first.db.run(sql`DROP TABLE feedback_cursors`)
     first.db.run(sql`DROP TABLE trusted_users`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 6)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -179,11 +180,12 @@ test('建议级迁移保留仓库数据并为新旧库创建可空列', async ()
         updatedAt: now,
       })
       .run()
+    first.db.run(sql`ALTER TABLE runs DROP COLUMN stack_branch`)
     for (const name of [...columns, 'auto_queued_at'])
       first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
     first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 3)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -220,6 +222,7 @@ for (const existing of ['rework', 'triage'] as const) {
           updatedAt: now,
         })
         .run()
+      first.db.run(sql`ALTER TABLE runs DROP COLUMN stack_branch`)
       for (const name of [
         'suggested_at',
         'suggest_comment_url',
@@ -230,7 +233,7 @@ for (const existing of ['rework', 'triage'] as const) {
         first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
       first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
       first.db.run(
-        sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)`,
+        sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 3)`,
       )
       if (existing === 'rework') {
         first.db.run(sql`DROP TABLE triage_records`)
