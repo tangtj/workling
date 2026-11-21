@@ -3,7 +3,7 @@ import { and, desc, eq, isNotNull, ne } from 'drizzle-orm'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import { complete } from '@earendil-works/pi-ai/compat'
-import { readPiSettings, type PiSettings } from '../config/pi.ts'
+import { machineLogin, readPiSettings, type PiSettings } from '../config/pi.ts'
 import type { WorklingDatabase } from '../db/index.ts'
 import { issues, repos, triageRecords } from '../db/schema.ts'
 import { docBranch } from '../issue/branch.ts'
@@ -238,6 +238,7 @@ export async function triageIssues({
             env,
             signal,
             permissions: state.permissions,
+            machine: machineLogin(pi.gitEmail),
           })
           if (trust === 'allowlist' || trust === 'write') {
             const checks = checkIssue(body)
