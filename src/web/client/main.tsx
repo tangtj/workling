@@ -15,6 +15,7 @@ import { ReposPage } from './pages/repos.tsx'
 import { RepoPage } from './pages/repo.tsx'
 import { issueDetailOptions, parseDetailId, runDetailOptions } from './issue-detail.ts'
 import { IssuePage } from './pages/issue.tsx'
+import { TriagePage, triageOptions } from './pages/triage.tsx'
 import { RunLogPage } from './pages/run-log.tsx'
 
 const queryClient = new QueryClient()
@@ -59,6 +60,17 @@ const router = createBrowserRouter([
           return null
         },
       })),
+      {
+        path: '/triage',
+        Component: TriagePage,
+        async loader() {
+          await Promise.allSettled([
+            queryClient.fetchQuery(triageOptions),
+            queryClient.fetchQuery(settingsOptions),
+          ])
+          return null
+        },
+      },
       {
         path: '/settings',
         Component: SettingsPage,

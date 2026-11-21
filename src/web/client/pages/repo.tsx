@@ -14,9 +14,9 @@ import { IssueTable, PlatformIcon, StatusChips } from '../issue-table.tsx'
 import { usePageLayout } from '../layout.tsx'
 import { loadTrustedUsers } from '../feedback.ts'
 import { repoRequest } from '../repos.ts'
-import { settingsOptions } from '../settings.ts'
+import { LevelButtons, rate } from './triage.tsx'
 import * as Value from 'typebox/value'
-import { triageSchema } from '../../triage.ts'
+import { triageSchema } from '../../triage-schema.ts'
 import { NotFound } from '../not-found.tsx'
 
 function TrustedUsers({ id, github }: { id: number; github: boolean }) {
@@ -85,138 +85,28 @@ function TrustedUsers({ id, github }: { id: number; github: boolean }) {
   )
 }
 
-function Triage({
-  id,
-  host,
-  path,
-  github,
-}: {
-  id: number
-  host: string
-  path: string
-  github: boolean
-}) {
-  const client = useQueryClient()
-  const settings = useQuery(settingsOptions)
-  const key = ['triage', id]
+function Triage({ id, refName, github }: { id: number; refName: string; github: boolean }) {
   const query = useQuery({
-    queryKey: key,
+    queryKey: ['triage', id],
     queryFn: async () => {
       const body: unknown = await repoRequest(`/api/repos/${id}/triage`, 'GET')
       if (!Value.Check(triageSchema, body)) throw new Error('分诊数据无效')
       return body
     },
   })
-  const mutation = useMutation({
-    mutationFn: (level: string) => repoRequest(`/api/repos/${id}/triage-level`, 'PUT', { level }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: key }),
-  })
-  const data = query.data
   return (
     <section className="card">
       <h2>分诊</h2>
-      <p>
-        影子级只记录结论，建议级会打标签并评论；只分诊受信作者的 Issue；需要
-        <Link to="/settings">设置页</Link>
-        的 LLM 配置。
-      </p>
-      {settings.data && (!settings.data.pi.llmBaseUrl || !settings.data.pi.llmApiKey) && (
-        <p>
-          LLM 未配置，请前往<Link to="/settings">设置页</Link>配置接入地址与 Key。
-        </p>
-      )}
-      <label>
-        分诊级别{' '}
-        <select
-          disabled={!github || !data || mutation.isPending}
-          value={data?.level ?? 'off'}
-          onChange={(event) => {
-            const confirms: Record<string, string> = {
-              suggest: '建议级会对受信作者信息不全的 Issue 打标签并评论。确认开启？',
-              auto: '自动级除建议外，还会在受信作者的 Issue 判定为信息齐全后自动打 workling:ready 开始执行（带 workling:hold 的除外）。确认开启？',
-            }
-            const message = confirms[event.target.value]
-            if (!message || window.confirm(message)) mutation.mutate(event.target.value)
-          }}
-        >
-          <option value="off">关闭</option>
-          <option value="shadow">影子</option>
-          <option value="suggest">建议</option>
-          <option value="auto">自动</option>
-        </select>
-      </label>
-      {(query.error || mutation.error) && (
-        <p className="error-box">{(query.error ?? mutation.error)?.message}</p>
-      )}
-      {data && (
+      {query.data && (
         <>
+          <LevelButtons id={id} refName={refName} level={query.data.level} github={github} />
           <p>
-            接受且 ready：{data.summary.acceptReady} · 接受未 ready：{data.summary.acceptNotReady} ·
-            其他且 ready：{data.summary.otherReady} · 其他未 ready：{data.summary.otherNotReady} ·
-            一致率：
-            {data.summary.total
-              ? `${Math.round(((data.summary.acceptReady + data.summary.otherNotReady) * 100) / data.summary.total)}%`
-              : '—'}
+            一致率 {rate(query.data.summary)} · 样本 {query.data.summary.total}
           </p>
-          <p>
-            建议：{data.summary.suggestions.total} · 已补充：{data.summary.suggestions.edited} ·
-            未修改直接打 ready：{data.summary.suggestions.readyWithoutEdit} · 待跟进：
-            {data.summary.suggestions.pending} · 建议被跳过的比例：
-            {data.summary.suggestions.total
-              ? `${Math.round((data.summary.suggestions.readyWithoutEdit * 100) / data.summary.suggestions.total)}%`
-              : '—'}
-          </p>
-          {data.records.length === 0 && <p>暂无分诊记录</p>}
-          {data.records.map((row) => (
-            <div className="row" key={row.id}>
-              <div>
-                <a
-                  href={`https://${host}/${path}/issues/${row.number}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  #{row.number} {row.title}
-                </a>{' '}
-                · {row.authorLogin} · {row.decision ?? '无结论'}{' '}
-                {row.llmDecision && row.llmDecision !== row.decision && `(LLM: ${row.llmDecision})`}
-                <p>
-                  缺少：{row.missing.join('、') || '无'} ·{' '}
-                  {row.readyAt
-                    ? `ready：${row.readyAt}${row.readyAfterMinutes === null ? '' : `（${row.readyAfterMinutes} 分钟）`}`
-                    : '未 ready'}{' '}
-                  · 分诊：{row.triagedAt}
-                </p>
-                {row.suggestedAt && (
-                  <p>
-                    已提示{' '}
-                    {row.suggestCommentUrl && (
-                      <a href={row.suggestCommentUrl} target="_blank" rel="noopener noreferrer">
-                        评论链接
-                      </a>
-                    )}{' '}
-                    ·{' '}
-                    {row.followUp === 'edited'
-                      ? '已补充'
-                      : row.followUp === 'readyWithoutEdit'
-                        ? '未修改直接打 ready'
-                        : '待跟进'}
-                  </p>
-                )}
-                {row.labelRemovedAt && <p>已摘标签</p>}
-                {row.autoQueuedAt && <p>已自动打 workling:ready：{row.autoQueuedAt}</p>}
-                {(row.note || row.error || row.suggestError) && (
-                  <details>
-                    <summary>说明</summary>
-                    <p>{row.note}</p>
-                    <p>{row.error}</p>
-                    <p>{row.suggestError}</p>
-                  </details>
-                )}
-              </div>
-            </div>
-          ))}
+          <Link to={`/triage?repo=${id}`}>查看分诊记录</Link>
         </>
       )}
+      {query.error && <p className="error-box">{query.error.message}</p>}
     </section>
   )
 }
@@ -268,7 +158,7 @@ export function RepoPage() {
           </p>
         </div>
       </header>
-      <Triage id={repo.id} host={repo.host} path={repo.path} github={repo.platform === 'github'} />
+      <Triage id={repo.id} refName={repo.ref} github={repo.platform === 'github'} />
       <TrustedUsers id={repo.id} github={repo.platform === 'github'} />
       <section className="card">
         <div className="toolbar">

@@ -106,49 +106,56 @@ export function Layout() {
                 </div>
               </div>
               <nav className="nav">
-                {(['overview', 'issues', 'repos', 'settings'] as const).map((key, index) => (
-                  <Link
-                    key={key}
-                    className={active === key ? 'on' : ''}
-                    to={['/', '/issues', '/repos', '/settings'][index]}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
+                {(['overview', 'issues', 'triage', 'repos', 'settings'] as const).map(
+                  (key, index) => (
+                    <Link
+                      key={key}
+                      className={active === key ? 'on' : ''}
+                      to={['/', '/issues', '/triage', '/repos', '/settings'][index]}
                     >
-                      {key === 'overview' ? (
-                        <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z" />
-                      ) : key === 'issues' ? (
-                        <>
-                          <circle cx="12" cy="12" r="8" />
-                          <circle cx="12" cy="12" r="2" />
-                        </>
-                      ) : key === 'repos' ? (
-                        <>
-                          <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" />
-                          <path d="M5 17a3 3 0 0 1 3-3h11" />
-                        </>
-                      ) : (
-                        <>
-                          <circle cx="12" cy="12" r="3" />
-                          <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
-                        </>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        {key === 'overview' ? (
+                          <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z" />
+                        ) : key === 'issues' ? (
+                          <>
+                            <circle cx="12" cy="12" r="8" />
+                            <circle cx="12" cy="12" r="2" />
+                          </>
+                        ) : key === 'triage' ? (
+                          <path d="M4 5h16l-6 7v6l-4 2v-8z" />
+                        ) : key === 'repos' ? (
+                          <>
+                            <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" />
+                            <path d="M5 17a3 3 0 0 1 3-3h11" />
+                          </>
+                        ) : (
+                          <>
+                            <circle cx="12" cy="12" r="3" />
+                            <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+                          </>
+                        )}
+                      </svg>
+                      {['概览', '任务', '分诊', '仓库', '设置'][index]}
+                      {key === 'triage' && sidebar.triagePending > 0 && (
+                        <span className="count triage-warn">{sidebar.triagePending} 待补充</span>
                       )}
-                    </svg>
-                    {['概览', '任务', '仓库', '设置'][index]}
-                    {key === 'repos' && <span className="count">{sidebar.repos.length}</span>}
-                    {key === 'issues' && sidebar.attention > 0 && (
-                      <span className="count hot">{sidebar.attention} 待处理</span>
-                    )}
-                  </Link>
-                ))}
+                      {key === 'repos' && <span className="count">{sidebar.repos.length}</span>}
+                      {key === 'issues' && sidebar.attention > 0 && (
+                        <span className="count hot">{sidebar.attention} 待处理</span>
+                      )}
+                    </Link>
+                  ),
+                )}
               </nav>
               <div className="sidebar-label">已启用仓库</div>
               <div className="repo-nav">
