@@ -98,7 +98,7 @@ Docker 相关文件都在 `deploy/docker/`，systemd 相关文件在 `deploy/`�
 
 ### 推荐：Docker
 
-主体与 worker 分成两个镜像：主体镜像（`WORKLING_IMAGE`）只负责调度、Web 和对 GitHub 的写操作，不含 Pi、codex 和 agent 工具；每个任务由主体通过宿主机的 Docker 拉起一个 worker 容器（`WORKLING_IMAGE` 加 `-worker` 后缀，与主体同版本发布）。worker 镜像预装了常用命令行工具：`rg`、`fd`、`jq`、`less`、`file`、`tree`、`patch`、`unzip`、`xz`、`ps`、`lsof`、`make`、`python3` 和 `sqlite3`，新增工具只改 `worker/Dockerfile`。
+主体与 worker 分成两个镜像：主体镜像（`WORKLING_IMAGE`）负责调度、Web 和对 GitHub 的写操作，带常用命令行工具但不含 codex；每个任务由主体通过宿主机的 Docker 拉起一个 worker 容器（`WORKLING_IMAGE` 加 `-worker` 后缀，与主体同版本发布）。两个镜像都预装了常用命令行工具：`rg`、`fd`、`jq`、`less`、`file`、`tree`、`patch`、`unzip`、`xz`、`ps`、`lsof`、`make`、`python3` 和 `sqlite3`，worker 专用的新工具只加到 `worker/Dockerfile`。
 
 主体容器挂载宿主机的 `/var/run/docker.sock`（等同宿主机 root 权限），并以 `DOCKER_GID` 加入 docker 组；compose 设置了 `WORKLING_REQUIRE_DOCKER=true`，执行器固定为 Docker。worker 容器只挂载自己的任务目录，拿不到 docker.sock，也看不到主体的数据库。worker 镜像不在本机时，主体在第一次拉起前自动 `docker pull`（私有镜像需先在宿主机 `docker login ghcr.io`）。
 

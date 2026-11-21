@@ -2,9 +2,11 @@ FROM node:22-bookworm-slim
 
 COPY --from=oven/bun:1.3.6 /usr/local/bin/bun /usr/local/bin/bun
 
-# 主体镜像只放调度所需的命令：git（镜像缓存与落地）、gh（GitHub 写操作）、docker CLI（拉起 worker 容器）。
-# Pi、codex 与给 agent 用的工具只在 worker/Dockerfile 里，任务一律在 worker 镜像中运行。
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl gnupg sqlite3 \
+# 主体镜像：git（镜像缓存与落地）、gh（GitHub 写操作）、docker CLI（拉起 worker 容器）与常用命令行工具；
+# pi-coding-agent 随依赖安装。不装 codex：实现任务一律在 worker 镜像中运行，worker 专用工具只加到 worker/Dockerfile。
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl gnupg \
+    ripgrep fd-find jq less file tree patch unzip xz-utils procps lsof make python3 sqlite3 \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && mkdir -p -m 755 /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \

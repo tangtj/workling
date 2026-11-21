@@ -98,7 +98,7 @@ Docker files live in `deploy/docker/`; systemd files live in `deploy/`. Either w
 
 ### Recommended: Docker
 
-The host and the worker ship as two images. The host image (`WORKLING_IMAGE`) only schedules, serves the admin UI and performs GitHub writes; it contains no Pi, codex or agent tools. For each task the host launches a worker container through the host's Docker (`WORKLING_IMAGE` with a `-worker` suffix, released with the same version). The worker image includes common command-line tools: `rg`, `fd`, `jq`, `less`, `file`, `tree`, `patch`, `unzip`, `xz`, `ps`, `lsof`, `make`, `python3`, and `sqlite3`; add new tools only to `worker/Dockerfile`.
+The host and the worker ship as two images. The host image (`WORKLING_IMAGE`) schedules, serves the admin UI and performs GitHub writes; it includes common command-line tools but not codex. For each task the host launches a worker container through the host's Docker (`WORKLING_IMAGE` with a `-worker` suffix, released with the same version). Both images include common command-line tools: `rg`, `fd`, `jq`, `less`, `file`, `tree`, `patch`, `unzip`, `xz`, `ps`, `lsof`, `make`, `python3`, and `sqlite3`; add worker-only tools to `worker/Dockerfile`.
 
 The host container mounts the host's `/var/run/docker.sock` (root-equivalent on the host) and joins the docker group via `DOCKER_GID`; compose sets `WORKLING_REQUIRE_DOCKER=true`, so the executor is always Docker. Worker containers mount only their own task directory, never get docker.sock and cannot see the host's database. If the worker image is not present locally, the host runs `docker pull` before the first launch (private images need `docker login ghcr.io` on the host first).
 
