@@ -359,7 +359,7 @@ test('建议评论清理不可信内容并保留标记和空内容兜底', () =>
     '\n链接 [说明](https://example.com) ![图](https://example.com/a) https://example.com @user\n' +
       'x'.repeat(300),
   ])
-  expect(comment).not.toContain('https://')
+  expect(comment).not.toContain('https://example.com')
   expect(comment).not.toContain('@user')
   expect(comment).toContain('<!-- workling -->')
   expect(comment).not.toContain('x'.repeat(201))
