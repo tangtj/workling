@@ -79,7 +79,7 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 
 - workling 的提交署名为 Workling（GitHub 机器账号 [workling-agent](https://github.com/workling-agent)），作者或 `Co-authored-by` 指向它。
 - 进度看 Issue 标签：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`。
-- `workling:needs-info` 由 workling 的分诊管理：信息不全时打上并评论缺什么，补充正文约 10 分钟后重新判断，信息齐全时自动摘掉；不要手动增删。
+- `workling:needs-info` 由 workling 的分诊管理：信息不全时打上并评论缺什么，补充正文后约 1 分钟内重新判断，信息齐全时自动摘掉；不要手动增删。
 - PR 上的 Request changes 会自动触发返工，每个 PR 自动返工有轮数上限（默认 3 轮），超过后需要评论 `/workling <补充说明>` 或 `@workling-agent <补充说明>` 继续；workling 会在原评论线程或汇总评论里逐条说明每条意见的处理结果。
 - 领取时 workling 会在 Issue 下评论；运行中亲自确认的待办项会勾选，修改勾选状态前先评论说明。
 - 失败或要返工：修改 Issue 正文或文档分支上的文档（推送到文档分支），再重新打上 `workling:ready`。

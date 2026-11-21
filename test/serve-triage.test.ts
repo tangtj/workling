@@ -40,7 +40,7 @@ test('输出校验拒绝非法字段，提取 JSON 并限制长度', () => {
   )
 })
 
-test('影子分诊只读取受信且冷静的 Issue，去重并对规则失败降级', async () => {
+test('影子分诊立即处理受信 Issue，去重并对规则失败降级', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'triage-'))
   const conn = await openDatabase(dir)
   try {
@@ -70,17 +70,13 @@ test('影子分诊只读取受信且冷静的 Issue，去重并对规则失败�
       body: '## 目标\nwork',
       user: { id: 1, login: 'user', type: 'User' },
       labels: [],
-      updated_at: '2026-01-01T11:00:00Z',
+      updated_at: now.toISOString(),
     }
     let calls = 0
     const commands: string[][] = []
     const command = async (args: string[]) => {
       commands.push(args)
-      return JSON.stringify([
-        item,
-        { ...item, number: 2, pull_request: {} },
-        { ...item, number: 3, updated_at: now.toISOString() },
-      ])
+      return JSON.stringify([item, { ...item, number: 2, pull_request: {} }])
     }
     const classify = async () => {
       calls++
@@ -101,6 +97,7 @@ test('影子分诊只读取受信且冷静的 Issue，去重并对规则失败�
     expect(calls).toBe(1)
     const row = conn.db.select().from(triageRecords).get()!
     expect(row.decision).toBe('needs_info')
+    expect(row.issueUpdatedAt).toEqual(now)
     expect(row.llmDecision).toBe('accept')
     expect(JSON.parse(row.missing)).toEqual(['缺少「验收」'])
     expect(commands.every((args) => args[1] === 'api' && args[2]?.includes('/issues?'))).toBe(true)
@@ -598,10 +595,15 @@ test('自动级：受信作者 accept 后代打 workling:ready 一次，hold、�
       if (args[1] === 'api') return JSON.stringify(items)
       return ''
     }
+    let decision = 'accept' as 'accept' | 'needs_info'
+    let classifications = 0
     const options = {
       db: conn.db,
       command,
-      classify: async () => ({ decision: 'accept', missing: [], note: '' }),
+      classify: async () => {
+        classifications++
+        return { decision, missing: [], note: '' }
+      },
       state: { permissions: new Map() },
       now,
       log: () => {},
@@ -624,7 +626,7 @@ test('自动级：受信作者 accept 后代打 workling:ready 一次，hold、�
     // 同一条记录不重复打标签；人移除 ready 后也不会被再次加回。
     await triageIssues({ ...options, now: new Date(now.getTime() + 1000) })
     expect(readies()).toHaveLength(1)
-    // 正文在分诊后被修改（哈希不同）且还在冷静期内：不按旧结论动作。
+    // 正文变化后立即重新分诊，不按旧哈希的 accept 结论动作。
     items = [{ ...make(3), body: '## 目标\nnew\n## 验收\ntest' }]
     conn.db
       .insert(triageRecords)
@@ -646,8 +648,24 @@ test('自动级：受信作者 accept 后代打 workling:ready 一次，hold、�
       })
       .run()
     items[0]!.updated_at = new Date(now.getTime() - 60_000).toISOString()
+    decision = 'needs_info'
+    const previousClassifications = classifications
     await triageIssues({ ...options, now: new Date(now.getTime() + 2000) })
+    expect(classifications).toBe(previousClassifications + 1)
+    expect(
+      conn.db
+        .select()
+        .from(triageRecords)
+        .all()
+        .filter((row) => row.number === 3)
+        .map((row) => row.decision),
+    ).toEqual(['accept', 'needs_info'])
     expect(readies()).toHaveLength(1)
+    items[0]!.body += '\n补充信息'
+    decision = 'accept'
+    await triageIssues({ ...options, now: new Date(now.getTime() + 3000) })
+    expect(classifications).toBe(previousClassifications + 2)
+    expect(readies().map(({ args }) => args[3])).toEqual(['1', '3'])
   } finally {
     conn.close()
     await rm(dir, { recursive: true, force: true })

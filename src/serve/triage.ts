@@ -226,7 +226,6 @@ export async function triageIssues({
           .get()
         if (
           calls < 5 &&
-          now.getTime() - updated.getTime() >= 600000 &&
           !(old && (old.decision || now.getTime() - old.triagedAt.getTime() < 3600000))
         ) {
           const trust = await judgeTrust({
@@ -357,7 +356,7 @@ export async function triageIssues({
             }
           }
           // 自动级：信任来自作者（记录只为受信作者生成），动作只是代人打 workling:ready，入队仍走常规轮询。
-          // 结论必须针对当前正文（哈希一致），冷静期由分诊前的 10 分钟等待保证；workling:hold 随时叫停。
+          // 结论必须针对当前正文（哈希一致）；workling:hold 随时叫停。
           if (
             repo.triageLevel === 'auto' &&
             !inFlow &&
