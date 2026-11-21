@@ -145,6 +145,7 @@ test('watch 子进程启动本地接口并在 SIGTERM 后正常退出', async ()
       worker: 'test-worker',
       interval: 60,
       timeout: 90,
+      reworkLimit: 3,
       startedAt: expect.any(String),
       lastPollAt: expect.any(String),
       lastPollError: null,
