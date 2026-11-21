@@ -37,6 +37,9 @@ test.each([
   expect(base[name]).toBe('original')
 })
 
+// 测试可能本身跑在容器里（如 workling 的 worker 容器），任务目录的宿主机路径换算单独测试。
+const samePath = async (path: string) => path
+
 function dockerInfo(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     CgroupVersion: '2',
@@ -77,6 +80,7 @@ test.each([undefined, 'workling-network'])(
     const { config, spec } = await scenario(network)
     const calls: { args: string[]; options?: RunOptions }[] = []
     const executor = dockerExecutor({
+      hostPath: samePath,
       config,
       log: () => {},
       command: async (args, options) => {
@@ -156,6 +160,7 @@ test.each([undefined, 'workling-network'])(
 test('docker start 使用自定义资源与镜像并透传命令失败', async () => {
   const { config, spec } = await scenario()
   const executor = dockerExecutor({
+    hostPath: samePath,
     config: {
       ...config,
       taskCpus: 1.5,
@@ -187,6 +192,7 @@ test.each([
 ])('docker status 解析 inspect 输出 %s', async (output, expected) => {
   const { config, handle } = await scenario()
   const executor = dockerExecutor({
+    hostPath: samePath,
     config,
     log: () => {},
     command: async (args) => {
@@ -208,6 +214,7 @@ test('docker 容器不存在时 status 返回停止且 signal 不抛错，存在
   const calls: string[][] = []
   let missing = true
   const executor = dockerExecutor({
+    hostPath: samePath,
     config,
     log: () => {},
     command: async (args) => {
@@ -232,6 +239,7 @@ test('docker finish 写入容器日志且保留任务日志后删除容器，两
   const logs: string[] = []
   let fail = false
   const executor = dockerExecutor({
+    hostPath: samePath,
     config,
     log: (line) => logs.push(line),
     command: async (args) => {
@@ -266,6 +274,7 @@ test('docker finish 的固定 shell 脚本实际合并 stdout 与 stderr', async
   await chmod(docker, 0o700)
   const logs: string[] = []
   const executor = dockerExecutor({
+    hostPath: samePath,
     config,
     log: (line) => logs.push(line),
     command: (args) =>
@@ -322,7 +331,11 @@ test('createExecutor 按配置启动进程或 Docker，日志错误交给传入�
   }
   expect(await createExecutor(config, command).start(spec)).toEqual({ pid: 321 })
   expect(launch).toHaveBeenCalledTimes(1)
-  expect(await createExecutor({ ...config, sandbox: 'docker' }, command).start(spec)).toEqual({
+  expect(
+    await createExecutor({ ...config, sandbox: 'docker' }, command, undefined, samePath).start(
+      spec,
+    ),
+  ).toEqual({
     container: 'workling-run-12',
   })
   expect(calls[0]!.slice(0, 3)).toEqual(['docker', 'run', '-d'])
@@ -396,7 +409,7 @@ test.skipIf(!dockerAvailable)(
       }
       return runtime.run(args, options)
     }
-    const executor = dockerExecutor({ command, config, log: () => {} })
+    const executor = dockerExecutor({ command, config, log: () => {}, hostPath: samePath })
     const handle = { pid: null, container: `workling-run-${spec.runId}`, taskDir: spec.taskDir }
     try {
       expect(await executor.start(spec)).toEqual({ container: handle.container })
@@ -426,6 +439,7 @@ test('rootless Docker 以容器内 root 运行 worker，cgroup 限制不可用�
   let info = dockerInfo({ SecurityOptions: ['name=seccomp,profile=builtin', 'name=rootless'] })
   const runs: string[][] = []
   const executor = dockerExecutor({
+    hostPath: samePath,
     config,
     log: () => {},
     command: async (args) => {
@@ -466,6 +480,7 @@ test('未配置网络时自动创建关闭 ICC 的 workling-worker 网络，已�
   const calls: string[][] = []
   let exists = false
   const executor = dockerExecutor({
+    hostPath: samePath,
     config,
     log: () => {},
     command: async (args) => {
