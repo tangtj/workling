@@ -1,3 +1,4 @@
+import { AI_NOTICE } from '../src/serve/comment.ts'
 import { eq } from 'drizzle-orm'
 import { processExecutor } from '../src/executor/process.ts'
 import { expect, test } from 'bun:test'
@@ -59,7 +60,7 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
-      'workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n<!-- workling -->',
+      `workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
   } finally {
     await s.dispose()
@@ -114,7 +115,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
-      `workling：已答复。\n\n${commits ? '请 `@someone` 核对 ***' : '（Pi 未写说明）'}\n\n<!-- workling -->`,
+      `workling：已答复。\n\n${commits ? '请 `@someone` 核对 ***' : '（Pi 未写说明）'}\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
     expect(s.logs.some((line) => line.includes('答复模式下存在提交，已忽略'))).toBe(commits > 0)
   } finally {
@@ -197,8 +198,10 @@ test.each([
           })
         if (step === '重读')
           return JSON.stringify({ body: '新标题\r\n- [ ] Run tests \r\n* [x] Renamed\r\n' })
-        if (step === '编辑') edited = options?.input
-        else messages.push(options?.input ?? '')
+        if (step === '编辑') {
+          edited = options?.input
+          expect(edited).not.toContain(AI_NOTICE)
+        } else messages.push(options?.input ?? '')
         return ''
       }) satisfies typeof s.command,
     }
@@ -209,7 +212,7 @@ test.each([
     if (failure === '全部成功') {
       expect(messages).toHaveLength(2)
       expect(messages[0]).toBe(
-        'workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n检查通过 `@someone`\n\n<!-- workling -->',
+        `workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n检查通过 \`@someone\`\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
       )
       expect(messages[1]).toContain('勾选：- [ ] Run tests')
       expect(messages[1]).toContain('取消勾选：* [x] Old')
@@ -493,7 +496,7 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
           (kind === '有报告和 Pi 说明'
             ? '\n\n### Pi 的说明\n\n<code>&#64;someone</code> 检查未通过'
             : '') +
-          '\n\n<!-- workling -->',
+          `\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
       )
       expect(s.logs.filter((line) => line.includes('更新 GitHub 失败'))).toHaveLength(2)
       expect(s.db.select().from(issues).get()?.status).toBe('failed')

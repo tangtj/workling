@@ -1,3 +1,4 @@
+import { AI_NOTICE } from '../src/serve/comment.ts'
 import { afterEach, expect, test } from 'bun:test'
 import { chmod, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -156,16 +157,18 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
     '--body-file',
     '-',
   ])
-  expect(creates[0]?.options?.input).toBe('Closes #42\n\nThanks `@someone` and `@org/team`.')
+  expect(creates[0]?.options?.input).toBe(
+    `Closes #42\n\nThanks \`@someone\` and \`@org/team\`.\n\n\n${AI_NOTICE}`,
+  )
   expect(
     s.calls
       .filter(({ args }) => args[2] === 'comment')
       .map(({ args, options }) => [args[1], options?.input]),
   ).toEqual([
-    ['pr', 'workling：Checked by `@reviewer`.\n\n<!-- workling -->'],
+    ['pr', `workling：Checked by \`@reviewer\`.\n\n\n${AI_NOTICE}\n\n<!-- workling -->`],
     [
       'issue',
-      `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.\n\n<!-- workling -->`,
+      `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     ],
   ])
 })
@@ -218,9 +221,11 @@ test.each([false, true])(
       ['gh', 'pr', 'ready', prUrl],
       ['gh', 'pr', 'comment', prUrl, '--body-file', '-'],
     ])
-    expect(actions[0]?.options?.input).toBe('Closes #42\n\nThanks `@someone` and `@org/team`.')
+    expect(actions[0]?.options?.input).toBe(
+      `Closes #42\n\nThanks \`@someone\` and \`@org/team\`.\n\n\n${AI_NOTICE}`,
+    )
     expect(actions[2]?.options?.input).toBe(
-      'workling：Checked by `@reviewer`.\n\n<!-- workling -->',
+      `workling：Checked by \`@reviewer\`.\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
     expect(s.calls.some(({ args }) => args[2] === 'create')).toBe(false)
     expect(s.logs).toEqual(
@@ -240,7 +245,7 @@ test('正文以 Refs 开头时按部分完成处理且不前置 Closes', async (
   expect(await landRun(s.options)).toEqual(landed)
   const create = s.calls.find(({ args }) => args[2] === 'create')
   expect(create?.args[create.args.indexOf('--title') + 1]).toBe('[部分完成] Ship this')
-  expect(create?.options?.input).toBe('Refs #42\n> 部分完成：后续处理')
+  expect(create?.options?.input).toBe(`Refs #42\n> 部分完成：后续处理\n\n\n${AI_NOTICE}`)
 })
 
 test.each([
@@ -328,7 +333,7 @@ test('PR 查询抛错后清理落地仓库，下轮使用已推送的分支', as
   expect(await landRun(s.options)).toEqual(landed)
   expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
-    'fIxEs #42 by `@someone`',
+    `fIxEs #42 by \`@someone\`\n\n\n${AI_NOTICE}`,
   )
 })
 
@@ -351,9 +356,31 @@ test('有原文反引号时转义提及；两条评论失败只记录，不影�
   expect(await landRun(options)).toEqual(landed)
   await publishIssueResult({ ...options, taskDir: options.run.taskDir, landed })
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
-    'Closes #42\n\n`example <code>&#64;inside</code>` thanks <code>&#64;someone</code>',
+    `Closes #42\n\n\`example <code>&#64;inside</code>\` thanks <code>&#64;someone</code>\n\n\n${AI_NOTICE}`,
   )
   expect(await landRun(options)).toEqual(updated)
   expect(s.logs).toEqual(['a/b #42 发送 PR 评论失败', 'a/b #42 发送 Issue 评论失败'])
   expect(attempts).toBe(2)
+})
+
+test('堆叠 PR 的标识位于堆叠说明之后', async () => {
+  const s = await scenario()
+  await s.commit()
+  await s.deliver()
+  await landRun({ ...s.options, run: { ...s.options.run, stackBranch: 'workling/12-upstream' } })
+  const body = s.calls.find(({ args }) => args[2] === 'create')?.options?.input
+  expect(body).toEndWith(
+    `堆叠于 #12 的分支 \`workling/12-upstream\`，请先审阅并合并上游 PR。\n\n\n${AI_NOTICE}`,
+  )
+})
+
+test('更新 PR 时正文已有标识也只保留一个', async () => {
+  const s = await scenario(branch, false)
+  await s.remote.write(['update-ref', s.ref, s.base])
+  await s.commit()
+  await s.deliver()
+  await writeFile(join(s.out, 'pr-body.md'), `说明\n\n\n${AI_NOTICE}\n`)
+  await landRun(s.options)
+  const body = s.calls.find(({ args }) => args[1] === 'pr' && args[2] === 'edit')?.options?.input
+  expect(body).toBe(`Closes #42\n\n说明\n\n\n${AI_NOTICE}`)
 })

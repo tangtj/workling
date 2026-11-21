@@ -1,3 +1,4 @@
+import { AI_NOTICE } from '../src/serve/comment.ts'
 import { expect, test } from 'bun:test'
 import { eq } from 'drizzle-orm'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
@@ -119,7 +120,7 @@ test('行内评论回到原线程，发送失败的保持 included', async () =>
     expect(body).toContain('`@bob`')
     expect(body).not.toContain('repo-secret')
     expect(body).not.toContain('重复的回复')
-    expect(body).toEndWith('<!-- workling -->')
+    expect(body).toEndWith(`\n\n\n${AI_NOTICE}\n\n<!-- workling -->`)
     const statuses = Object.fromEntries(
       s.db
         .select()

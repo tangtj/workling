@@ -1,6 +1,8 @@
-/** 标记放在处理正文之后，确保截断和脱敏不会移除它。 */
+export const AI_NOTICE = '— Sent via [Workling](https://github.com/tangtj/workling)'
+
+/** 可见标识说明内容由 AI 生成，隐藏标记用于识别自身评论；处理正文后追加以免被移除。 */
 export function markComment(body: string): string {
-  return `${body}\n\n<!-- workling -->`
+  return `${body}\n\n\n${AI_NOTICE}\n\n<!-- workling -->`
 }
 
 export function neutralizeMentions(text: string): string {

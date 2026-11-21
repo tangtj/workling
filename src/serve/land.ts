@@ -1,4 +1,4 @@
-import { markComment, neutralizeMentions } from './comment.ts'
+import { AI_NOTICE, markComment, neutralizeMentions } from './comment.ts'
 import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
@@ -370,7 +370,7 @@ export async function landRun({
       prUrl = existing.url
       try {
         const { title, body } = await prFields()
-        await gh(['pr', 'edit', prUrl, '--title', title, '--body-file', '-'], body)
+        await gh(['pr', 'edit', prUrl, '--title', title, '--body-file', '-'], withAiNotice(body))
       } catch {
         warn('更新 PR')
       }
@@ -402,9 +402,11 @@ export async function landRun({
           '-',
           ...(partial ? ['--draft'] : []),
         ],
-        run.stackBranch
-          ? `${body}\n\n堆叠于 #${run.stackBranch.match(/^workling\/(\d+)-/)?.[1] ?? '?'} 的分支 \`${run.stackBranch}\`，请先审阅并合并上游 PR。`
-          : body,
+        withAiNotice(
+          run.stackBranch
+            ? `${body}\n\n堆叠于 #${run.stackBranch.match(/^workling\/(\d+)-/)?.[1] ?? '?'} 的分支 \`${run.stackBranch}\`，请先审阅并合并上游 PR。`
+            : body,
+        ),
       )
       if (!prUrl) throw new Error('创建 PR 未返回链接')
     }
@@ -422,4 +424,11 @@ export async function landRun({
   } finally {
     await rm(landing, { recursive: true, force: true })
   }
+}
+
+function withAiNotice(body: string): string {
+  let text = body.trimEnd()
+  while (text === AI_NOTICE || text.endsWith(`\n${AI_NOTICE}`))
+    text = text.slice(0, -AI_NOTICE.length).trimEnd()
+  return `${text}\n\n\n${AI_NOTICE}`
 }
