@@ -1,3 +1,4 @@
+import { attentionStages, type Stage } from './stage.ts'
 import { formatDuration } from './format.ts'
 export type IssueRow = {
   id: number
@@ -42,15 +43,32 @@ export function failureReason(issue: Pick<IssueRow, 'lastRun'>): { label: string
   return { label: '失败', advice: '查看日志定位原因' }
 }
 
-export const statuses = ['all', 'running', 'queued', 'failed', 'done', 'canceled'] as const
-export const selectedStatus = (filter: string) => statuses.find((s) => s === filter) ?? 'all'
-export const statusCounts = (items: IssueRow[]) =>
-  Object.fromEntries(
-    statuses.map((s) => [
-      s,
-      s === 'all' ? items.length : items.filter((i) => i.status === s).length,
-    ]),
-  )
+export const stages = [
+  'all',
+  'attention',
+  'queued',
+  'running',
+  'rework',
+  'review',
+  'capped',
+  'failed',
+  'done',
+  'canceled',
+] as const
+export type StageFilter = (typeof stages)[number]
+export const selectedStage = (filter: string): StageFilter =>
+  stages.find((s) => s === filter) ?? 'all'
+export const stageFromParams = (params: URLSearchParams): StageFilter => {
+  const stage = params.get('stage')
+  if (stage !== null) return selectedStage(stage)
+  const legacy = selectedStage(params.get('status') ?? '')
+  return legacy === 'attention' ? 'all' : legacy
+}
+export const matchesStage = (stage: Stage, selected: StageFilter) =>
+  selected === 'all' ||
+  (selected === 'attention' ? attentionStages.includes(stage) : stage === selected)
+export const stageCounts = (items: { stage: Stage }[]) =>
+  Object.fromEntries(stages.map((s) => [s, items.filter((i) => matchesStage(i.stage, s)).length]))
 export const queuePositions = (items: IssueRow[]) =>
   new Map(
     items
@@ -58,10 +76,20 @@ export const queuePositions = (items: IssueRow[]) =>
       .sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime())
       .map((issue, index) => [issue.id, index + 1]),
   )
-export const sortIssues = <T extends IssueRow>(items: T[]) =>
+const stageOrder: Stage[] = [
+  'failed',
+  'capped',
+  'rework',
+  'running',
+  'queued',
+  'review',
+  'done',
+  'canceled',
+]
+export const sortIssues = <T extends IssueRow & { stage: Stage }>(items: T[]) =>
   [...items].sort(
     (a, b) =>
-      Number(b.status === 'running') - Number(a.status === 'running') ||
+      stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage) ||
       b.updatedAt.getTime() - a.updatedAt.getTime(),
   )
 

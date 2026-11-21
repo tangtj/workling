@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router'
-import { labels, statuses, stageText, type IssueRow } from '../issue-view.ts'
+import { labels, stages, type IssueRow } from '../issue-view.ts'
+import { stageLabels, type Stage } from '../stage.ts'
 import { PLATFORM_ICON_PATHS, platformName } from '../platform.ts'
 import { formatTime, prLabel } from '../format.ts'
 import type { IssueList } from './issue-list.ts'
@@ -26,6 +27,14 @@ export function Badge({ status, text }: { status: IssueRow['status']; text?: str
     <span className={`badge badge--${status}`}>
       <span className={`dot dot--${status}`}></span>
       {text ?? labels[status]}
+    </span>
+  )
+}
+export function StageBadge({ stage, text }: { stage: Stage; text?: string }) {
+  return (
+    <span className={`badge badge--${stage}`}>
+      <span className={`dot dot--${stage}`}></span>
+      {text ?? stageLabels[stage]}
     </span>
   )
 }
@@ -72,10 +81,11 @@ export function StatusChips({
 }) {
   const location = useLocation()
   return (
-    <nav className="chips" aria-label="任务状态">
-      {statuses.map((s) => {
+    <nav className="chips" aria-label="任务阶段">
+      {stages.map((s) => {
         const params = new URLSearchParams(location.search)
-        params.set('status', s)
+        params.delete('status')
+        params.set('stage', s)
         return (
           <Link
             key={s}
@@ -83,7 +93,8 @@ export function StatusChips({
             to={`${location.pathname}?${params}`}
             aria-current={selected === s ? 'page' : undefined}
           >
-            {s === 'all' ? '全部' : labels[s]} <span>{counts[s] ?? 0}</span>
+            {s === 'all' ? '全部' : s === 'attention' ? '需要处理' : stageLabels[s]}{' '}
+            <span>{counts[s] ?? 0}</span>
           </Link>
         )
       })}
@@ -106,7 +117,7 @@ export function IssueTable({
       <table>
         <thead>
           <tr>
-            {['Issue', '状态', '阶段/结果', '次数', 'PR', '更新'].map((title) => (
+            {['Issue', '阶段', '分支 / PR', '轮次', '更新'].map((title) => (
               <th key={title}>{title}</th>
             ))}
           </tr>
@@ -115,7 +126,6 @@ export function IssueTable({
           {items.map((issue) => {
             const repo = repos.find((r) => r.id === issue.repoId)
             if (!repo) return null
-            const stage = stageText(issue, now, queuePosition)
             return (
               <tr key={issue.id}>
                 <td>
@@ -140,15 +150,18 @@ export function IssueTable({
                   </div>
                 </td>
                 <td>
-                  <Badge status={issue.status} />
+                  <StageBadge
+                    stage={issue.stage}
+                    text={
+                      issue.stage === 'queued' ? `排队 #${queuePosition.get(issue.id)}` : undefined
+                    }
+                  />
                 </td>
                 <td>
-                  {issue.status === 'failed' ? <span className="reason">{stage}</span> : stage}
-                </td>
-                <td>{issue.runCount}</td>
-                <td>
+                  <div className="mono">{issue.branch ?? '—'}</div>
                   <PR url={issue.prUrl} state={issue.prState} />
                 </td>
+                <td>{issue.rounds}</td>
                 <td>{formatTime(issue.updatedAt, now)}</td>
               </tr>
             )

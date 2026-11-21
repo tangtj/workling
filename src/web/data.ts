@@ -1,12 +1,18 @@
 import { readExecutorSettings } from '../config/executor.ts'
 import { eq } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
-import { issues, repos, runs } from '../db/schema.ts'
+import { feedback, issues, repos, runs } from '../db/schema.ts'
+import { issueStage, type Stage } from './stage.ts'
 import type { ServeStatus } from '../serve/index.ts'
 
 export type Repo = typeof repos.$inferSelect
 export type Run = typeof runs.$inferSelect
-export type Issue = typeof issues.$inferSelect & { repo: Repo; runs: Run[]; lastRun: Run | null }
+export type Issue = typeof issues.$inferSelect & {
+  repo: Repo
+  runs: Run[]
+  lastRun: Run | null
+  stage: Stage
+}
 export type PageData = {
   repos: Repo[]
   issues: Issue[]
@@ -18,6 +24,17 @@ export type PageData = {
 export function pageData(db: WorklingDatabase, now: number, status?: ServeStatus): PageData {
   const allRepos = db.select().from(repos).orderBy(repos.id).all()
   const allRuns = db.select().from(runs).all()
+  const capped = db
+    .select({ issueId: feedback.issueId, createdAt: feedback.createdAt })
+    .from(feedback)
+    .where(eq(feedback.status, 'capped'))
+    .all()
+  const cappedByIssue = new Map<number, Date[]>()
+  for (const item of capped) {
+    const dates = cappedByIssue.get(item.issueId) ?? []
+    dates.push(item.createdAt)
+    cappedByIssue.set(item.issueId, dates)
+  }
   const allIssues = db
     .select({ issue: issues, repo: repos })
     .from(issues)
@@ -32,6 +49,11 @@ export function pageData(db: WorklingDatabase, now: number, status?: ServeStatus
         .filter((run) => run.issueId === issue.id)
         .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime()),
       lastRun: allRuns.find((run) => run.id === issue.lastRunId) ?? null,
+      stage: issueStage({
+        ...issue,
+        lastRun: allRuns.find((run) => run.id === issue.lastRunId) ?? null,
+        cappedFeedbackAt: cappedByIssue.get(issue.id) ?? [],
+      }),
     })),
     now,
     concurrency: readExecutorSettings(db).concurrency,

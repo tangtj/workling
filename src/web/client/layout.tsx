@@ -144,8 +144,8 @@ export function Layout() {
                     </svg>
                     {['概览', '任务', '仓库', '设置'][index]}
                     {key === 'repos' && <span className="count">{sidebar.repos.length}</span>}
-                    {key === 'issues' && sidebar.failed > 0 && (
-                      <span className="count hot">{sidebar.failed} 失败</span>
+                    {key === 'issues' && sidebar.attention > 0 && (
+                      <span className="count hot">{sidebar.attention} 待处理</span>
                     )}
                   </Link>
                 ))}

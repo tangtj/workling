@@ -187,7 +187,7 @@ export function OverviewPage() {
           </div>
           {failed.length > 5 && (
             <div className="card-body">
-              <Link to="/issues?status=failed">查看全部失败</Link>
+              <Link to="/issues?stage=failed">查看全部失败</Link>
             </div>
           )}
         </section>

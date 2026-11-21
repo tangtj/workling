@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
   filterIssues,
-  selectedStatus,
-  statusCounts,
+  stageFromParams,
+  stageCounts,
   queuePositions,
   sortIssues,
+  matchesStage,
 } from '../../issue-view.ts'
 import { issueListOptions } from '../issue-list.ts'
 import { IssueTable, StatusChips } from '../issue-table.tsx'
@@ -35,14 +36,15 @@ export function IssuesPage() {
       </p>
     )
   const data = page.data
-  const selected = selectedStatus(params.get('status') ?? 'all')
+  const selected = stageFromParams(params)
   const repoId = data.repos.find((r) => String(r.id) === params.get('repo'))?.id
   const items = filterIssues(data.issues, repoId, q)
   const submit = (repo: string, query: string) => {
     const next = new URLSearchParams(params)
     next.set('repo', repo)
     next.set('q', query)
-    next.set('status', selected)
+    next.delete('status')
+    next.set('stage', selected)
     void navigate(`/issues?${next}`)
   }
   return (
@@ -55,7 +57,7 @@ export function IssuesPage() {
       </header>
       <section className="card">
         <div className="toolbar">
-          <StatusChips selected={selected} counts={statusCounts(items)} />
+          <StatusChips selected={selected} counts={stageCounts(items)} />
           <form
             method="get"
             action="/issues"
@@ -87,12 +89,12 @@ export function IssuesPage() {
               placeholder="搜索标题或 #编号"
               aria-label="搜索标题或编号"
             />
-            <input name="status" type="hidden" value={selected} />
+            <input name="stage" type="hidden" value={selected} />
             <button className="button">筛选</button>
           </form>
         </div>
         <IssueTable
-          items={sortIssues(items.filter((i) => selected === 'all' || i.status === selected))}
+          items={sortIssues(items.filter((i) => matchesStage(i.stage, selected)))}
           repos={data.repos}
           now={data.now}
           queuePosition={queuePositions(data.issues)}

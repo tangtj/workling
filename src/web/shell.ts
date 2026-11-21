@@ -15,6 +15,7 @@ export const shellSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    attention: Type.Integer({ minimum: 0 }),
     failed: Type.Integer({ minimum: 0 }),
     running: Type.Integer({ minimum: 0 }),
     concurrency: Type.Integer({ minimum: 1 }),
