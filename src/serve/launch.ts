@@ -8,6 +8,7 @@ import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs, feedback } from '../db/schema.ts'
 import { createExecutor, workerEnv, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
+import { readParent, readSubIssues, previousSibling } from '../issue/chain.ts'
 import { docBranch, taskBranch } from '../issue/branch.ts'
 import { readIssue } from '../issue/read.ts'
 import { parseIssueRef } from '../issue/reference.ts'
@@ -23,11 +24,79 @@ import { syncMirror } from './mirror.ts'
 import { selectBatch } from './rework.ts'
 type Log = (message: string) => void
 
+const waiting = new Map<number, string>()
+
+export async function chainGate(
+  db: WorklingDatabase,
+  repo: typeof repos.$inferSelect,
+  issue: typeof issueStates.$inferSelect,
+  command: Command,
+  signal: AbortSignal,
+) {
+  const rework = issue.prState === 'open'
+  try {
+    const parent = await readParent({ repo, number: issue.number, command, signal })
+    if (!parent) return { kind: 'free' as const }
+    const subs = await readSubIssues({ repo, number: parent.number, command, signal })
+    const position = subs.findIndex((sub) => sub.number === issue.number) + 1
+    const parentData: unknown = JSON.parse(
+      await command(['gh', 'api', `repos/${repo.path}/issues/${parent.number}`], {
+        env: ghEnv(repo.token, repo.host),
+        signal,
+      }),
+    )
+    if (
+      !parentData ||
+      typeof parentData !== 'object' ||
+      !('title' in parentData) ||
+      typeof parentData.title !== 'string'
+    )
+      throw new Error('父 Issue 标题格式无效')
+    const chain = { parent: parent.number, title: parentData.title, position, total: subs.length }
+    if (rework) return { kind: 'free' as const, chain }
+    const previous = previousSibling(subs, issue.number)
+    if (!previous) return { kind: 'free' as const, chain }
+    if (!previous.sameRepo)
+      return {
+        kind: 'error' as const,
+        error: `不支持跨仓库的子 Issue（上一个是 #${previous.number}）`,
+      }
+    const row = db
+      .select()
+      .from(issueStates)
+      .where(and(eq(issueStates.repoId, repo.id), eq(issueStates.number, previous.number)))
+      .get()
+    if (
+      row?.prState === 'merged' ||
+      (previous.state === 'closed' && previous.stateReason === 'completed')
+    )
+      return { kind: 'base' as const, chain }
+    const run = row?.lastRunId
+      ? db.select().from(runs).where(eq(runs.id, row.lastRunId)).get()
+      : undefined
+    if (
+      row?.status === 'done' &&
+      row.prState === 'open' &&
+      run?.reportResult?.startsWith('完成') &&
+      run.branch
+    )
+      return { kind: 'stack' as const, branch: run.branch, previous: previous.number, chain }
+    return {
+      kind: 'wait' as const,
+      reason: `上一个子任务 #${previous.number}（${row?.status ?? '无记录'}）`,
+    }
+  } catch (error) {
+    if (rework) return { kind: 'free' as const }
+    return { kind: 'wait' as const, reason: `读取父子关系失败：${errorMessage(error)}` }
+  }
+}
+
 async function prepareCheckout({
   workspace,
   taskDir,
   repo,
   issue,
+  stackOn,
   runId,
   previous,
   kind,
@@ -39,6 +108,7 @@ async function prepareCheckout({
   taskDir: string
   repo: typeof repos.$inferSelect
   issue: { number: number; title: string; body: string }
+  stackOn?: { branch: string }
   runId: number
   previous: { branch: string | null; prState: 'open' | 'merged' | 'closed' | null }
   kind: Spec['kind']
@@ -59,6 +129,7 @@ async function prepareCheckout({
   if (doc && !(await hasRef(branchRef(doc.name)))) return { error: `文档分支「${doc.name}」不存在` }
 
   const continuedBranch =
+    !stackOn &&
     previous.branch?.startsWith(`workling/${issue.number}-`) &&
     (previous.prState === null || previous.prState === 'open') &&
     (await hasRef(branchRef(previous.branch)))
@@ -66,13 +137,19 @@ async function prepareCheckout({
       : undefined
   if (kind === 'rework' && !continuedBranch)
     return { error: `PR 分支「${previous.branch ?? '未知'}」不存在，无法返工` }
+  if (
+    stackOn &&
+    (!stackOn.branch.startsWith('workling/') || !(await hasRef(branchRef(stackOn.branch))))
+  )
+    return { error: `上一个子任务的分支「${stackOn.branch}」不存在` }
   const start =
+    stackOn?.branch ??
     doc?.name ??
     (await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
       env: ghEnv(repo.token, repo.host),
       signal,
     }))
-  if (!doc) await command(['git', 'check-ref-format', branchRef(start)], mirrorOptions)
+  if (!doc && !stackOn) await command(['git', 'check-ref-format', branchRef(start)], mirrorOptions)
   let ref: string
   let branch: string
   if (continuedBranch) {
@@ -155,6 +232,14 @@ export async function launchQueued({
       log(`${repo.ref} #${issue.number} 跳过：M1 只支持 github.com`)
       continue
     }
+    const gate = await chainGate(db, repo, issue, command, signal)
+    if (gate.kind === 'wait') {
+      if (waiting.get(issue.id) !== gate.reason)
+        log(`${repo.ref} #${issue.number} 等待${gate.reason}`)
+      waiting.set(issue.id, gate.reason)
+      continue
+    }
+    waiting.delete(issue.id)
     slots--
     let record: typeof runs.$inferSelect | undefined
     let handle: Awaited<ReturnType<Executor['start']>> | undefined
@@ -241,20 +326,23 @@ export async function launchQueued({
         env: ghEnv(repo.token, repo.host),
       })
       const checkout =
-        included.length && (issue.prState === 'merged' || issue.prState === 'closed')
-          ? { error: 'PR 已合入或关闭，不再返工；新需求请另开 Issue' }
-          : await prepareCheckout({
-              workspace: settings.workspace,
-              taskDir,
-              repo,
-              issue: { number: issue.number, title, body },
-              runId: record.id,
-              previous: { branch: previous?.branch ?? null, prState: issue.prState },
-              kind,
-              pi,
-              command,
-              signal,
-            })
+        gate.kind === 'error'
+          ? { error: gate.error }
+          : included.length && (issue.prState === 'merged' || issue.prState === 'closed')
+            ? { error: 'PR 已合入或关闭，不再返工；新需求请另开 Issue' }
+            : await prepareCheckout({
+                workspace: settings.workspace,
+                taskDir,
+                repo,
+                ...(gate.kind === 'stack' ? { stackOn: { branch: gate.branch } } : {}),
+                issue: { number: issue.number, title, body },
+                runId: record.id,
+                previous: { branch: previous?.branch ?? null, prState: issue.prState },
+                kind,
+                pi,
+                command,
+                signal,
+              })
       if ('error' in checkout) {
         await writeResult(taskDir, {
           exitCode: null,
@@ -265,7 +353,11 @@ export async function launchQueued({
       } else {
         const { start, ...specRepo } = checkout
         db.update(runs)
-          .set({ branch: checkout.branch, baseRef: checkout.baseRef })
+          .set({
+            branch: checkout.branch,
+            baseRef: checkout.baseRef,
+            stackBranch: gate.kind === 'stack' ? gate.branch : null,
+          })
           .where(eq(runs.id, record.id))
           .run()
         await writeRunContext({
@@ -276,6 +368,15 @@ export async function launchQueued({
           runId: record.id,
           kind,
           checkout: { ...specRepo, start },
+          ...(gate.kind !== 'error' && 'chain' in gate && gate.chain
+            ? {
+                chain: {
+                  ...gate.chain,
+                  kind: gate.kind,
+                  ...('previous' in gate ? { previous: gate.previous, branch: gate.branch } : {}),
+                },
+              }
+            : {}),
           command: (args, options) => command(args, { ...options, signal }),
           secrets: [repo.token, pi.llmApiKey ?? ''],
           log,

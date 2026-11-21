@@ -172,7 +172,13 @@ export async function landRun({
   workspace: string
   repo: { host: string; path: string; token: string }
   issue: { number: number; title: string | null }
-  run: { id: number; taskDir: string | null; branch: string | null; baseRef: string | null }
+  run: {
+    id: number
+    taskDir: string | null
+    branch: string | null
+    baseRef: string | null
+    stackBranch?: string | null
+  }
   mirror: string
   command: Command
   remoteUrl?: string
@@ -376,7 +382,8 @@ export async function landRun({
         }
       }
     } else {
-      const base = await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch'])
+      const base =
+        run.stackBranch ?? (await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch']))
       if (!base) throw new Error('无法读取仓库默认分支')
       const { title, body, partial } = await prFields()
       prUrl = await gh(
@@ -395,7 +402,9 @@ export async function landRun({
           '-',
           ...(partial ? ['--draft'] : []),
         ],
-        body,
+        run.stackBranch
+          ? `${body}\n\n堆叠于 #${run.stackBranch.match(/^workling\/(\d+)-/)?.[1] ?? '?'} 的分支 \`${run.stackBranch}\`，请先审阅并合并上游 PR。`
+          : body,
       )
       if (!prUrl) throw new Error('创建 PR 未返回链接')
     }

@@ -75,6 +75,7 @@ export const runs = sqliteTable('runs', {
   logTail: text('log_tail'),
   branch: text('branch'),
   baseRef: text('base_ref'),
+  stackBranch: text('stack_branch'),
 })
 
 export const piSettings = sqliteTable('pi_settings', {

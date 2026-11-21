@@ -256,3 +256,23 @@ test('gh 抛错时 pr.md 记录脱敏错误，仍写出其他上下文', async (
     await s.dispose()
   }
 })
+
+test('链条上下文区分堆叠、已合并与普通 Issue', async () => {
+  const s = await fixture()
+  try {
+    await writeRunContext(s.context)
+    expect(await Bun.file(join(s.context.taskDir, 'input', 'chain.md')).exists()).toBe(false)
+    const chain = { parent: 10, title: '父任务', position: 2, total: 3 }
+    await writeRunContext({
+      ...s.context,
+      chain: { ...chain, kind: 'stack', previous: 1, branch: 'workling/1-first' },
+    })
+    expect(await s.read('chain.md')).toContain('主 Issue：#10 父任务')
+    expect(await s.read('chain.md')).toContain('第 2 / 3 个子 Issue')
+    expect(await s.read('chain.md')).toContain('#1，分支 `workling/1-first`')
+    await writeRunContext({ ...s.context, chain: { ...chain, kind: 'base' } })
+    expect(await s.read('chain.md')).toContain('上一个子任务已合并，本任务从 main 切出')
+  } finally {
+    await s.dispose()
+  }
+})

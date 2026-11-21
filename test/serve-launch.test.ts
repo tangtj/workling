@@ -457,6 +457,7 @@ test.each([
       ...s.options,
       command: (args, options) => {
         if (args[0] === 'git') return remote.git(args, options)
+        if (args[1] === 'api' && args[2]?.endsWith('/parent')) return s.command(args, options)
         if (args[1] === 'api') {
           baseRequests.push(args)
           return Promise.resolve('trunk')
@@ -625,7 +626,7 @@ test.each([
       command: async (args, options) => {
         if (
           (kind === 'fetch' && args.includes('fetch')) ||
-          (kind === '默认分支查询' && args[1] === 'api') ||
+          (kind === '默认分支查询' && args[1] === 'api' && args[4] === '.default_branch') ||
           (kind === '文档分支查询' && args[1] === 'for-each-ref')
         )
           throw new Error(failure)

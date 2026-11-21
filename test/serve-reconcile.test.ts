@@ -87,7 +87,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
     await reconcile({
       ...s.options,
       command: (args, options) => {
-        commands.push(args)
+        if (!args[2]?.endsWith('/parent')) commands.push(args)
         return s.command(args, options)
       },
     })
@@ -454,6 +454,7 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
             endedAt: clock,
             error: '进程丢失',
           })
+          if (args[2]?.endsWith('/parent')) throw new Error('HTTP 404')
           s.calls.push({ args, options })
           throw new Error('API failed')
         },

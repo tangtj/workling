@@ -3,6 +3,7 @@ import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos } from '../db/schema.ts'
+import { readSubIssues } from '../issue/chain.ts'
 import { ghEnv } from '../platform/github.ts'
 import type { Command } from '../runtime/types.ts'
 const issuesSchema = Type.Array(
@@ -110,6 +111,58 @@ export async function pollOnce({
       for (const issue of issues) {
         if (signal.aborted) break
         log(`${row.ref} #${issue.number} ${issue.title} ${issue.url}`)
+        let subs
+        try {
+          subs = await readSubIssues({ repo: row, number: issue.number, command, signal })
+          if (subs.length) {
+            for (const sub of subs) {
+              if (!sub.sameRepo || sub.state !== 'open') continue
+              const existingSub = db
+                .select()
+                .from(issueStates)
+                .where(and(eq(issueStates.repoId, row.id), eq(issueStates.number, sub.number)))
+                .get()
+              if (existingSub && !['failed', 'canceled'].includes(existingSub.status)) continue
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'edit',
+                  String(sub.number),
+                  '-R',
+                  row.path,
+                  '--add-label',
+                  'workling:ready',
+                ],
+                { env: ghEnv(row.token, row.host), signal },
+              )
+            }
+            await command(
+              [
+                'gh',
+                'issue',
+                'edit',
+                String(issue.number),
+                '-R',
+                row.path,
+                '--remove-label',
+                'workling:ready',
+                '--add-label',
+                'workling:running',
+              ],
+              { env: ghEnv(row.token, row.host), signal },
+            )
+            log(
+              `${row.ref} #${issue.number} 主 Issue：展开 ${subs.length} 个子 Issue（${subs.map((sub) => `#${sub.number}`).join(' ')}）`,
+            )
+            continue
+          }
+        } catch (error) {
+          log(
+            `${row.ref} #${issue.number} 展开子 Issue 失败：${error instanceof Error ? error.message : String(error)}`,
+          )
+          continue
+        }
         const existing = db
           .select()
           .from(issueStates)

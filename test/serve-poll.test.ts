@@ -32,6 +32,7 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
         .run()
     const calls: { args: string[]; options?: RunOptions }[] = []
     const command: Command = async (args, options) => {
+      if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
       calls.push({ args, options })
       if (args[1] === 'label' || args[2] === 'edit') return ''
       if (args[4] === 'a/fail') throw new Error('出错')
@@ -119,6 +120,7 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
     const logs: string[] = []
     const calls: string[][] = []
     const command: Command = async (args) => {
+      if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
       calls.push(args)
       if (args[2] !== 'list') return ''
       return JSON.stringify(
@@ -216,7 +218,11 @@ test.each(['queued', 'running'] as const)(
         .returning()
         .get()
       const command: Command = async (args) =>
-        args[2] === 'list' ? JSON.stringify([{ number: 1, title: '新标题', url: 'url1' }]) : ''
+        args[1] === 'api'
+          ? '[]'
+          : args[2] === 'list'
+            ? JSON.stringify([{ number: 1, title: '新标题', url: 'url1' }])
+            : ''
       const poll = () =>
         pollOnce({ db, command, signal: new AbortController().signal, log: () => {} })
       await poll()
@@ -251,6 +257,7 @@ test('标签创建缓存、同步失败重试且不阻塞后续 Issue', async ()
     let failCreate = true
     let failEdit = true
     const command: Command = async (args, options) => {
+      if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
       calls.push({ args, options })
       if (args[1] === 'label' && failCreate) throw new Error('创建失败')
       if (args[2] === 'edit' && args[3] === '1' && failEdit) throw new Error('编辑失败')
