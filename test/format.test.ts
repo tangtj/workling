@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { formatDuration, formatTime, prLabel, relativeTime } from '../src/web/format.ts'
+import { formatDuration, formatTime, prLabel, relativeTime, shortRef } from '../src/web/format.ts'
 
 test('格式化本地时间、时长、相对时间和 PR 编号', () => {
   const now = new Date(2026, 10, 14, 12, 30).getTime()
@@ -9,5 +9,10 @@ test('格式化本地时间、时长、相对时间和 PR 编号', () => {
   expect(formatDuration(61 * 60000)).toBe('1 小时 1 分钟')
   expect(relativeTime(new Date(now - 5 * 60000), now)).toBe('5 分钟前')
   expect(relativeTime(new Date(now - 120 * 60000), now)).toBe('2 小时前')
+  expect(relativeTime(new Date(now - 20 * 1000), now)).toBe('刚刚')
+  expect(relativeTime(new Date(now - 30 * 3600000), now)).toBe('昨天')
+  expect(relativeTime(new Date(now - 72 * 3600000), now)).toBe('3 天前')
   expect(prLabel('https://github.com/a/b/pull/57')).toBe('#57')
+  expect(shortRef('github:tangtj/workling', 67)).toBe('workling#67')
+  expect(shortRef('gitlab:group/sub/app', 3)).toBe('app#3')
 })

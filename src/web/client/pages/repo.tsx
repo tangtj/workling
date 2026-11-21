@@ -96,17 +96,21 @@ function Triage({ id, refName, github }: { id: number; refName: string; github: 
   })
   return (
     <section className="card">
-      <h2>分诊</h2>
-      {query.data && (
-        <>
-          <LevelButtons id={id} refName={refName} level={query.data.level} github={github} />
-          <p>
-            一致率 {rate(query.data.summary)} · 样本 {query.data.summary.total}
-          </p>
-          <Link to={`/triage?repo=${id}`}>查看分诊记录</Link>
-        </>
-      )}
-      {query.error && <p className="error-box">{query.error.message}</p>}
+      <header className="card-head">
+        <h2>分诊</h2>
+        <Link to={`/triage?repo=${id}`}>查看分诊记录</Link>
+      </header>
+      <div className="card-body">
+        {query.data && (
+          <div className="row between">
+            <LevelButtons id={id} refName={refName} level={query.data.level} github={github} />
+            <span className="muted">
+              一致率 <b>{rate(query.data.summary)}</b> · 样本 {query.data.summary.total}
+            </span>
+          </div>
+        )}
+        {query.error && <p className="error-box">{query.error.message}</p>}
+      </div>
     </section>
   )
 }
@@ -161,7 +165,7 @@ export function RepoPage() {
       <Triage id={repo.id} refName={repo.ref} github={repo.platform === 'github'} />
       <TrustedUsers id={repo.id} github={repo.platform === 'github'} />
       <section className="card">
-        <div className="toolbar">
+        <div className="toolbar toolbar--stack">
           <StatusChips selected={selected} counts={stageCounts(items)} />
         </div>
         <IssueTable
@@ -171,8 +175,9 @@ export function RepoPage() {
           queuePosition={queuePositions(data.issues)}
         />
       </section>
-      <p className="muted">
-        Issue 状态由 watch 轮询并同步；在 GitHub 重新打上 workling:ready 可重试。
+      <p className="page-note">
+        Issue 状态由 watch 轮询并同步。失败或 PR 仍开着时，在 Issue 或 PR 评论{' '}
+        <code>/workling 补充说明</code> 或 <code>@workling-agent</code> 即可在同一分支上接着做。
       </p>
     </>
   )

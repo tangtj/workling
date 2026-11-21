@@ -52,16 +52,16 @@ export function IssuesPage() {
       <header className="page-head">
         <div>
           <h1>任务</h1>
-          <p>workling 接手过的全部 Issue，状态由 watch 同步</p>
+          <p>workling 接手过的全部 Issue，按阶段归类；状态由 watch 同步</p>
         </div>
       </header>
       <section className="card">
-        <div className="toolbar">
+        <div className="toolbar toolbar--stack">
           <StatusChips selected={selected} counts={stageCounts(items)} />
           <form
             method="get"
             action="/issues"
-            className="actions"
+            className="filter-row"
             id="issue-filter"
             onSubmit={(e) => {
               e.preventDefault()
@@ -90,7 +90,6 @@ export function IssuesPage() {
               aria-label="搜索标题或编号"
             />
             <input name="stage" type="hidden" value={selected} />
-            <button className="button">筛选</button>
           </form>
         </div>
         <IssueTable
@@ -100,6 +99,10 @@ export function IssuesPage() {
           queuePosition={queuePositions(data.issues)}
         />
       </section>
+      <p className="page-note">
+        失败或 PR 仍开着时，在 Issue 或 PR 评论 <code>/workling 补充说明</code> 或{' '}
+        <code>@workling-agent</code>，就会在同一分支上接着做；只有受信账号的评论算指令。
+      </p>
     </>
   )
 }
