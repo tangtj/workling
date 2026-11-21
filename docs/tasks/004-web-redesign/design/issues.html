@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workling 任务列表</title>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"
+          rel="stylesheet"
+        />
+        <style>
+          body {
+            margin: 0;
+          }
+          .app {
+            --bg: #0d0e10;
+            --surface: #15171a;
+            --surface2: #1c1f23;
+            --line: #272b31;
+            --text: #e8eaed;
+            --muted: #a0a7af;
+            --faint: #858c95;
+            --accent: #82aeff;
+            --run: #82aeff;
+            --wait: #a9afb7;
+            --ok: #62cc93;
+            --bad: #f2915f;
+            --info: #e8b85a;
+            --rework: #bba2ff;
+            --pr: #55cbc4;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+            font-size: 14px;
+            line-height: 1.55;
+            min-height: 100vh;
+          }
+          .app.light {
+            --bg: #f5f6f8;
+            --surface: #ffffff;
+            --surface2: #eff1f4;
+            --line: #e0e3e8;
+            --text: #15171a;
+            --muted: #555c66;
+            --faint: #636a74;
+            --accent: #2456d3;
+            --run: #2456d3;
+            --wait: #575e67;
+            --ok: #1c7843;
+            --bad: #b4431a;
+            --info: #875c00;
+            --rework: #6844c0;
+            --pr: #0d6e67;
+          }
+          a {
+            color: var(--accent);
+            text-decoration: none;
+          }
+          a:hover {
+            text-decoration: underline;
+          }
+          .mono {
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 12.5px;
+          }
+          .layout {
+            display: flex;
+            flex-wrap: wrap;
+            min-height: 100vh;
+          }
+          .side {
+            flex: 1 1 232px;
+            background: var(--surface);
+            border-right: 1px solid var(--line);
+            padding: 20px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+            box-sizing: border-box;
+          }
+          .content {
+            flex: 999 1 560px;
+            min-width: 0;
+            padding: 28px 36px 56px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+          }
+          .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 6px;
+          }
+          .logo {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: var(--text);
+            color: var(--bg);
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+          }
+          .nav {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          .nav a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 10px;
+            border-radius: 8px;
+            color: var(--muted);
+            min-height: 38px;
+            text-decoration: none;
+          }
+          .nav a.on {
+            background: var(--surface2);
+            color: var(--text);
+            font-weight: 500;
+          }
+          .n {
+            margin-left: auto;
+            font-size: 12px;
+            padding: 0 7px;
+            border-radius: 10px;
+            background: var(--surface2);
+            color: var(--muted);
+            line-height: 20px;
+          }
+          .n.hot {
+            color: var(--bad);
+            background: color-mix(in srgb, var(--bad) 16%, transparent);
+          }
+          .n.new {
+            color: var(--info);
+            background: color-mix(in srgb, var(--info) 16%, transparent);
+          }
+          .label {
+            font-size: 12px;
+            color: var(--faint);
+            padding: 0 10px;
+          }
+          .repo-link {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 10px;
+            border-radius: 6px;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+          }
+          .watch {
+            margin-top: auto;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 12px;
+            color: var(--muted);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+          .pips {
+            display: flex;
+            gap: 4px;
+          }
+          .pip {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--line);
+          }
+          .pip.busy {
+            background: var(--run);
+          }
+          .card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            min-width: 0;
+          }
+          h1 {
+            font-size: 22px;
+            margin: 0;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+          }
+          h2 {
+            font-size: 15px;
+            margin: 0;
+            font-weight: 600;
+          }
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            padding: 1px 8px;
+            border-radius: 999px;
+            font-weight: 500;
+            white-space: nowrap;
+            line-height: 20px;
+          }
+          .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            flex: none;
+          }
+          .b-run {
+            color: var(--run);
+            background: color-mix(in srgb, var(--run) 14%, transparent);
+          }
+          .b-wait {
+            color: var(--wait);
+            background: color-mix(in srgb, var(--wait) 14%, transparent);
+          }
+          .b-ok {
+            color: var(--ok);
+            background: color-mix(in srgb, var(--ok) 14%, transparent);
+          }
+          .b-bad {
+            color: var(--bad);
+            background: color-mix(in srgb, var(--bad) 14%, transparent);
+          }
+          .b-info {
+            color: var(--info);
+            background: color-mix(in srgb, var(--info) 14%, transparent);
+          }
+          .b-rework {
+            color: var(--rework);
+            background: color-mix(in srgb, var(--rework) 14%, transparent);
+          }
+          .b-pr {
+            color: var(--pr);
+            background: color-mix(in srgb, var(--pr) 14%, transparent);
+          }
+          .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+            padding: 0 14px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            background: var(--surface2);
+            color: var(--text);
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            box-sizing: border-box;
+          }
+          .btn.primary {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+          }
+          .muted {
+            color: var(--muted);
+          }
+          .faint {
+            color: var(--faint);
+            font-size: 12px;
+          }
+          .chips {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+          }
+          .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 34px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+          }
+          .chip b {
+            font-weight: 500;
+            color: var(--text);
+          }
+          .chip.on {
+            background: var(--surface2);
+            color: var(--text);
+            border-color: var(--faint);
+          }
+          .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--line);
+          }
+          .field {
+            min-height: 36px;
+            box-sizing: border-box;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--text);
+            font: inherit;
+            font-size: 13px;
+            padding: 0 12px;
+          }
+          .scroll {
+            overflow-x: auto;
+          }
+          .tbl {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 900px;
+          }
+          .tbl th {
+            text-align: left;
+            font-weight: 500;
+            font-size: 12px;
+            color: var(--faint);
+            padding: 10px 18px;
+            border-bottom: 1px solid var(--line);
+            white-space: nowrap;
+          }
+          .tbl td {
+            padding: 13px 18px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: middle;
+          }
+          .tbl tr:last-child td {
+            border-bottom: 0;
+          }
+          .steps {
+            display: flex;
+            gap: 3px;
+            width: 110px;
+          }
+          .steps span {
+            flex: 1;
+            height: 5px;
+            border-radius: 3px;
+            background: var(--line);
+          }
+          .legend {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: var(--faint);
+          }
+        </style>
+      </helmet>
+      <div class="app">
+        <div class="layout">
+          <aside class="side">
+            <div class="brand">
+              <span class="logo">W</span>
+              <div>
+                <b>Workling</b>
+                <div class="faint">v0.4.0 · worker 0.2.3</div>
+              </div>
+            </div>
+            <nav class="nav" aria-label="主导航">
+              <a href="overview.html"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z"></path></svg
+                >概览<span class="n hot">4 待处理</span></a
+              >
+              <a class="on" href="issues.html"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="8"></circle>
+                  <circle cx="12" cy="12" r="2"></circle></svg
+                >任务<span class="n">24</span></a
+              >
+              <a href="triage.html"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 5h16l-6 7v6l-4 2v-8z"></path></svg
+                >分诊<span class="n new">3 新</span></a
+              >
+              <a href="#"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"></path>
+                  <path d="M5 17a3 3 0 0 1 3-3h11"></path></svg
+                >仓库<span class="n">3</span></a
+              >
+              <a href="#"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path
+                    d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"
+                  ></path></svg
+                >设置</a
+              >
+            </nav>
+            <div style="display: flex; flex-direction: column; gap: 2px">
+              <div class="label">已启用仓库</div>
+              <a class="repo-link" href="#"><span>tangtj/workling</span><span>9</span></a>
+              <a class="repo-link" href="#"><span>tangtj/notes-site</span><span>2</span></a>
+              <a class="repo-link" href="#"><span>tangtj/pi-workbot</span><span>1</span></a>
+            </div>
+            <div class="watch">
+              <div style="display: flex; align-items: center; gap: 8px; color: var(--text)">
+                <span class="dot" style="color: var(--ok)"></span>watch 运行中
+              </div>
+              <div>rs2 · Docker · 每 60 秒轮询</div>
+              <div>上次轮询 14 秒前</div>
+              <div>名额 2 / 3</div>
+              <div class="pips">
+                <span class="pip busy"></span><span class="pip busy"></span
+                ><span class="pip"></span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <button class="btn" type="button" aria-label="切换主题">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5z"></path>
+                </svg></button
+              ><button class="btn" type="button" style="flex: 1; justify-content: center">
+                退出登录
+              </button>
+            </div>
+          </aside>
+
+          <main class="content">
+            <header
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+                gap: 16px;
+                flex-wrap: wrap;
+              "
+            >
+              <div>
+                <h1>任务</h1>
+                <div class="muted" style="margin-top: 4px">
+                  workling 接手过的全部 Issue，按阶段归类；状态由 watch 同步
+                </div>
+              </div>
+              <div class="legend" aria-label="阶段图例">
+                <span>阶段：</span><span style="color: var(--info)">分诊</span
+                ><span style="color: var(--run)">执行</span><span style="color: var(--pr)">PR</span
+                ><span style="color: var(--rework)">返工</span
+                ><span style="color: var(--ok)">完成</span>
+              </div>
+            </header>
+
+            <section class="card">
+              <div class="toolbar">
+                <div class="chips" role="group" aria-label="按阶段筛选">
+                  <button class="chip on" type="button">全部 <b>24</b></button>
+                  <button class="chip" type="button">
+                    需要处理 <b style="color: var(--bad)">4</b>
+                  </button>
+                  <button class="chip" type="button">信息不全 <b>1</b></button>
+                  <button class="chip" type="button">排队 <b>2</b></button>
+                  <button class="chip" type="button">执行中 <b>2</b></button>
+                  <button class="chip" type="button">PR 待审 <b>4</b></button>
+                  <button class="chip" type="button">返工中 <b>1</b></button>
+                  <button class="chip" type="button">失败 <b>1</b></button>
+                  <button class="chip" type="button">完成 <b>9</b></button>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                  <label style="display: contents"
+                    ><span class="faint" style="position: absolute; left: -9999px">仓库</span
+                    ><select class="field">
+                      <option>全部仓库</option>
+                      <option>tangtj/workling</option>
+                    </select></label
+                  >
+                  <label style="display: contents"
+                    ><span class="faint" style="position: absolute; left: -9999px">搜索</span
+                    ><input class="field" placeholder="搜索标题或 #编号" style="width: 200px"
+                  /></label>
+                </div>
+              </div>
+              <div class="scroll">
+                <table class="tbl">
+                  <thead>
+                    <tr>
+                      <th>Issue</th>
+                      <th>阶段</th>
+                      <th>进度</th>
+                      <th>分支 / PR</th>
+                      <th>轮次</th>
+                      <th>最近动静</th>
+                      <th>更新</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">workling#70</span></div>
+                        <a href="issue-detail.html" style="color: var(--text)"
+                          >PR review 触发返工</a
+                        >
+                      </td>
+                      <td>
+                        <span class="badge b-rework"><span class="dot"></span>返工中</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="已到返工阶段">
+                          <span style="background: var(--info)"></span
+                          ><span style="background: var(--run)"></span
+                          ><span style="background: var(--pr)"></span
+                          ><span style="background: var(--rework)"></span><span></span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="mono muted">workling/70-pr-rework</div>
+                        <a href="#">PR #71</a> <span class="faint">· Changes requested</span>
+                      </td>
+                      <td>3 <span class="faint">/ 上限 3</span></td>
+                      <td class="muted">tangtj 提了 2 条 review 意见</td>
+                      <td class="faint">6 分钟前</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">workling#86</span></div>
+                        <a href="#" style="color: var(--text)">版本面板显示 worker 契约兼容性</a>
+                      </td>
+                      <td>
+                        <span class="badge b-run"><span class="dot"></span>执行中</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="已到执行阶段">
+                          <span style="background: var(--info)"></span
+                          ><span style="background: var(--run)"></span><span></span><span></span
+                          ><span></span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="mono muted">workling/86-worker-contract</div>
+                        <span class="faint">尚无 PR</span>
+                      </td>
+                      <td>1</td>
+                      <td class="muted">codex 修改文件</td>
+                      <td class="faint">12 分钟前</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">workling#88</span></div>
+                        <a href="#" style="color: var(--text)">设置页支持配置自动返工轮数上限</a>
+                      </td>
+                      <td>
+                        <span class="badge b-bad"><span class="dot"></span>失败</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="停在返工阶段">
+                          <span style="background: var(--info)"></span
+                          ><span style="background: var(--run)"></span
+                          ><span style="background: var(--pr)"></span
+                          ><span style="background: var(--bad)"></span><span></span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="mono muted">workling/88-rework-cap</div>
+                        <a href="#">PR #90</a> <span class="faint">· 打开</span>
+                      </td>
+                      <td>2</td>
+                      <td class="muted">测试未通过 · 回复 /workling 可接着改</td>
+                      <td class="faint">40 分钟前</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">notes-site#14</span></div>
+                        <a href="#" style="color: var(--text)">文章页支持目录锚点</a>
+                      </td>
+                      <td>
+                        <span class="badge b-pr"><span class="dot"></span>PR 待审</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="已到 PR 阶段">
+                          <span style="background: var(--info)"></span
+                          ><span style="background: var(--run)"></span
+                          ><span style="background: var(--pr)"></span><span></span><span></span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="mono muted">workling/14-toc-anchor</div>
+                        <a href="#">PR #15</a> <span class="faint">· 无 review</span>
+                      </td>
+                      <td>1</td>
+                      <td class="muted">CI 通过</td>
+                      <td class="faint">6 小时前</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">pi-workbot#9</span></div>
+                        <a href="#" style="color: var(--text)">升级 Pi 到 1.5.2</a>
+                      </td>
+                      <td>
+                        <span class="badge b-wait"><span class="dot"></span>排队 #1</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="分诊已过">
+                          <span style="background: var(--info)"></span><span></span><span></span
+                          ><span></span><span></span>
+                        </div>
+                      </td>
+                      <td><span class="faint">入队后建分支</span></td>
+                      <td>0</td>
+                      <td class="muted">tangtj 打了 workling:ready</td>
+                      <td class="faint">8 分钟前</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">notes-site#12</span></div>
+                        <a href="#" style="color: var(--text)">首页加个暗色模式</a>
+                      </td>
+                      <td>
+                        <span class="badge b-info"><span class="dot"></span>信息不全</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="停在分诊阶段">
+                          <span style="background: var(--info)"></span><span></span><span></span
+                          ><span></span><span></span>
+                        </div>
+                      </td>
+                      <td><span class="faint">—</span></td>
+                      <td>0</td>
+                      <td class="muted">缺少「验收标准」，等作者补充</td>
+                      <td class="faint">2 天前</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">workling#82</span></div>
+                        <a href="#" style="color: var(--text)"
+                          >评论中提及机器账号与 /workling 一样触发</a
+                        >
+                      </td>
+                      <td>
+                        <span class="badge b-ok"><span class="dot"></span>完成</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="已完成">
+                          <span style="background: var(--ok)"></span
+                          ><span style="background: var(--ok)"></span
+                          ><span style="background: var(--ok)"></span
+                          ><span style="background: var(--ok)"></span
+                          ><span style="background: var(--ok)"></span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="mono muted">workling/82-mention-trigger</div>
+                        <a href="#">PR #83</a> <span class="faint">· 已合并</span>
+                      </td>
+                      <td>2</td>
+                      <td class="muted">PR 已合并，Issue 关闭</td>
+                      <td class="faint">昨天</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div><span class="mono muted">workling#80</span></div>
+                        <a href="#" style="color: var(--text)">修复主按钮悬停时背景变白</a>
+                      </td>
+                      <td>
+                        <span class="badge b-ok"><span class="dot"></span>部分完成</span>
+                      </td>
+                      <td>
+                        <div class="steps" aria-label="已完成">
+                          <span style="background: var(--ok)"></span
+                          ><span style="background: var(--ok)"></span
+                          ><span style="background: var(--ok)"></span><span></span
+                          ><span style="background: var(--ok)"></span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="mono muted">workling/80-button-hover</div>
+                        <a href="#">PR #81</a> <span class="faint">· 已合并</span>
+                      </td>
+                      <td>1</td>
+                      <td class="muted">Issue 保持打开，剩 1 项待办</td>
+                      <td class="faint">2 天前</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <p class="faint" style="margin: 0">
+              失败或 PR 仍开着时，在 Issue 或 PR 评论
+              <span class="mono">/workling 补充说明</span> 或
+              @workling-agent，就会在同一分支上接着做；只有受信账号的评论算指令。
+            </p>
+          </main>
+        </div>
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1000}}'
+    >
+      class Component extends DCLogic {
+        renderVals() {
+          return { theme: this.props.theme === 'light' ? 'light' : '' };
+        }
+      }
+    </script>
+  </body>
+</html>

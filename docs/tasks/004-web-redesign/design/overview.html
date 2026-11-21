@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workling 概览</title>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"
+          rel="stylesheet"
+        />
+        <style>
+          body {
+            margin: 0;
+          }
+          .app {
+            --bg: #0d0e10;
+            --surface: #15171a;
+            --surface2: #1c1f23;
+            --line: #272b31;
+            --text: #e8eaed;
+            --muted: #a0a7af;
+            --faint: #858c95;
+            --accent: #82aeff;
+            --run: #82aeff;
+            --wait: #a9afb7;
+            --ok: #62cc93;
+            --bad: #f2915f;
+            --info: #e8b85a;
+            --rework: #bba2ff;
+            --pr: #55cbc4;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+            font-size: 14px;
+            line-height: 1.55;
+            min-height: 100vh;
+          }
+          .app.light {
+            --bg: #f5f6f8;
+            --surface: #ffffff;
+            --surface2: #eff1f4;
+            --line: #e0e3e8;
+            --text: #15171a;
+            --muted: #555c66;
+            --faint: #636a74;
+            --accent: #2456d3;
+            --run: #2456d3;
+            --wait: #575e67;
+            --ok: #1c7843;
+            --bad: #b4431a;
+            --info: #875c00;
+            --rework: #6844c0;
+            --pr: #0d6e67;
+          }
+          a {
+            color: var(--accent);
+            text-decoration: none;
+          }
+          a:hover {
+            text-decoration: underline;
+          }
+          .mono {
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 12.5px;
+          }
+          .layout {
+            display: flex;
+            flex-wrap: wrap;
+            min-height: 100vh;
+          }
+          .side {
+            flex: 1 1 232px;
+            background: var(--surface);
+            border-right: 1px solid var(--line);
+            padding: 20px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+            box-sizing: border-box;
+          }
+          .content {
+            flex: 999 1 560px;
+            min-width: 0;
+            padding: 28px 36px 56px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+          }
+          .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 6px;
+          }
+          .logo {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: var(--text);
+            color: var(--bg);
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+          }
+          .nav {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          .nav a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 10px;
+            border-radius: 8px;
+            color: var(--muted);
+            min-height: 38px;
+            text-decoration: none;
+          }
+          .nav a.on {
+            background: var(--surface2);
+            color: var(--text);
+            font-weight: 500;
+          }
+          .n {
+            margin-left: auto;
+            font-size: 12px;
+            padding: 0 7px;
+            border-radius: 10px;
+            background: var(--surface2);
+            color: var(--muted);
+            line-height: 20px;
+          }
+          .n.hot {
+            color: var(--bad);
+            background: color-mix(in srgb, var(--bad) 16%, transparent);
+          }
+          .n.new {
+            color: var(--info);
+            background: color-mix(in srgb, var(--info) 16%, transparent);
+          }
+          .label {
+            font-size: 12px;
+            color: var(--faint);
+            padding: 0 10px;
+          }
+          .repo-link {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 10px;
+            border-radius: 6px;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+          }
+          .watch {
+            margin-top: auto;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 12px;
+            color: var(--muted);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+          .pips {
+            display: flex;
+            gap: 4px;
+          }
+          .pip {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--line);
+          }
+          .pip.busy {
+            background: var(--run);
+          }
+          .card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            min-width: 0;
+          }
+          .card-h {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--line);
+            flex-wrap: wrap;
+          }
+          h1 {
+            font-size: 22px;
+            margin: 0;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+          }
+          h2 {
+            font-size: 15px;
+            margin: 0;
+            font-weight: 600;
+          }
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            padding: 1px 8px;
+            border-radius: 999px;
+            font-weight: 500;
+            white-space: nowrap;
+            line-height: 20px;
+          }
+          .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            flex: none;
+          }
+          .b-run {
+            color: var(--run);
+            background: color-mix(in srgb, var(--run) 14%, transparent);
+          }
+          .b-wait {
+            color: var(--wait);
+            background: color-mix(in srgb, var(--wait) 14%, transparent);
+          }
+          .b-ok {
+            color: var(--ok);
+            background: color-mix(in srgb, var(--ok) 14%, transparent);
+          }
+          .b-bad {
+            color: var(--bad);
+            background: color-mix(in srgb, var(--bad) 14%, transparent);
+          }
+          .b-info {
+            color: var(--info);
+            background: color-mix(in srgb, var(--info) 14%, transparent);
+          }
+          .b-rework {
+            color: var(--rework);
+            background: color-mix(in srgb, var(--rework) 14%, transparent);
+          }
+          .b-pr {
+            color: var(--pr);
+            background: color-mix(in srgb, var(--pr) 14%, transparent);
+          }
+          .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+            padding: 0 14px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            background: var(--surface2);
+            color: var(--text);
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            box-sizing: border-box;
+          }
+          .btn:hover {
+            text-decoration: none;
+            border-color: var(--faint);
+          }
+          .btn.primary {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+          }
+          .muted {
+            color: var(--muted);
+          }
+          .faint {
+            color: var(--faint);
+            font-size: 12px;
+          }
+          .inbox-row {
+            display: grid;
+            grid-template-columns: 96px minmax(0, 1fr) auto;
+            gap: 16px;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--line);
+          }
+          .inbox-row:last-child {
+            border-bottom: 0;
+          }
+          .slot {
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border-right: 1px solid var(--line);
+            min-width: 0;
+          }
+          .slot:last-child {
+            border-right: 0;
+          }
+          .bar {
+            height: 4px;
+            border-radius: 2px;
+            background: var(--line);
+            overflow: hidden;
+          }
+          .bar span {
+            display: block;
+            height: 100%;
+            background: var(--run);
+          }
+          .stat {
+            padding: 16px 18px;
+            border-right: 1px solid var(--line);
+          }
+          .stat:last-child {
+            border-right: 0;
+          }
+          .stat b {
+            display: block;
+            font-size: 24px;
+            font-weight: 600;
+            margin-top: 4px;
+          }
+          .q-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 18px;
+            border-bottom: 1px solid var(--line);
+          }
+          .q-row:last-child {
+            border-bottom: 0;
+          }
+          .alert {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+            background: color-mix(in srgb, var(--bad) 8%, transparent);
+            flex-wrap: wrap;
+          }
+        </style>
+      </helmet>
+      <div class="app">
+        <div class="layout">
+          <aside class="side">
+            <div class="brand">
+              <span class="logo">W</span>
+              <div>
+                <b>Workling</b>
+                <div class="faint">v0.4.0 · worker 0.2.3</div>
+              </div>
+            </div>
+            <nav class="nav" aria-label="主导航">
+              <a class="on" href="overview.html"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z"></path></svg
+                >概览<span class="n hot">4 待处理</span></a
+              >
+              <a href="issues.html"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="8"></circle>
+                  <circle cx="12" cy="12" r="2"></circle></svg
+                >任务<span class="n">24</span></a
+              >
+              <a href="triage.html"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 5h16l-6 7v6l-4 2v-8z"></path></svg
+                >分诊<span class="n new">3 新</span></a
+              >
+              <a href="#"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"></path>
+                  <path d="M5 17a3 3 0 0 1 3-3h11"></path></svg
+                >仓库<span class="n">3</span></a
+              >
+              <a href="#"
+                ><svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path
+                    d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"
+                  ></path></svg
+                >设置</a
+              >
+            </nav>
+            <div style="display: flex; flex-direction: column; gap: 2px">
+              <div class="label">已启用仓库</div>
+              <a class="repo-link" href="#"><span>tangtj/workling</span><span>9</span></a>
+              <a class="repo-link" href="#"><span>tangtj/notes-site</span><span>2</span></a>
+              <a class="repo-link" href="#"><span>tangtj/pi-workbot</span><span>1</span></a>
+            </div>
+            <div class="watch">
+              <div
+                class="row"
+                style="display: flex; align-items: center; gap: 8px; color: var(--text)"
+              >
+                <span class="dot" style="color: var(--ok)"></span>watch 运行中
+              </div>
+              <div>rs2 · Docker · 每 60 秒轮询</div>
+              <div>上次轮询 14 秒前</div>
+              <div>名额 2 / 3</div>
+              <div class="pips">
+                <span class="pip busy"></span><span class="pip busy"></span
+                ><span class="pip"></span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <button class="btn" type="button" aria-label="切换主题">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5z"></path>
+                </svg></button
+              ><button class="btn" type="button" style="flex: 1; justify-content: center">
+                退出登录
+              </button>
+            </div>
+          </aside>
+
+          <main class="content">
+            <header
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+                gap: 16px;
+                flex-wrap: wrap;
+              "
+            >
+              <div>
+                <h1>概览</h1>
+                <div class="muted" style="margin-top: 4px">
+                  11 月 21 日 周六 · 3 个仓库启用 · 分诊 2 个仓库为影子模式
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                <a class="btn" href="issues.html">全部任务</a
+                ><a class="btn primary" href="#">添加仓库</a>
+              </div>
+            </header>
+
+            <div class="alert" role="status">
+              <span class="badge b-bad"><span class="dot"></span>系统</span>
+              <span style="flex: 1; min-width: 240px"
+                >worker 镜像 <span class="mono">workling-worker:0.3.0</span> 声明契约 v3，主体只支持
+                v2，已暂停拉起新任务；排队中的 2 个 Issue 不受影响。</span
+              >
+              <a class="btn" href="#">查看版本</a>
+            </div>
+
+            <section class="card">
+              <div class="card-h">
+                <h2>需要你处理 <span class="muted" style="font-weight: 400">4</span></h2>
+                <span class="faint">按等待时长排序 · 处理后自动消失</span>
+              </div>
+              <div class="inbox-row">
+                <span class="badge b-bad"><span class="dot"></span>执行失败</span>
+                <div style="min-width: 0">
+                  <div>
+                    <span class="mono muted">workling#88</span>　设置页支持配置自动返工轮数上限
+                  </div>
+                  <div class="faint">第 2 轮返工 · 测试未通过（bun test 3 failed）· 40 分钟前</div>
+                </div>
+                <div style="display: flex; gap: 8px">
+                  <a class="btn" href="#">看日志</a><a class="btn" href="issue-detail.html">打开</a>
+                </div>
+              </div>
+              <div class="inbox-row">
+                <span class="badge b-rework"><span class="dot"></span>返工到上限</span>
+                <div style="min-width: 0">
+                  <div><span class="mono muted">workling#70</span>　PR review 触发返工</div>
+                  <div class="faint">
+                    已自动返工 3 / 3 轮，PR #71 仍有 1 条 Request changes 未处理 · 2 小时前
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px">
+                  <a class="btn" href="#">打开 PR #71</a
+                  ><a class="btn" href="issue-detail.html">打开</a>
+                </div>
+              </div>
+              <div class="inbox-row">
+                <span class="badge b-pr"><span class="dot"></span>PR 待审</span>
+                <div style="min-width: 0">
+                  <div><span class="mono muted">notes-site#14</span>　文章页支持目录锚点</div>
+                  <div class="faint">PR #15 已开 6 小时，没有 review；CI 通过</div>
+                </div>
+                <div style="display: flex; gap: 8px"><a class="btn" href="#">去 review</a></div>
+              </div>
+              <div class="inbox-row">
+                <span class="badge b-info"><span class="dot"></span>信息不全</span>
+                <div style="min-width: 0">
+                  <div><span class="mono muted">notes-site#12</span>　首页加个暗色模式</div>
+                  <div class="faint">
+                    分诊已评论缺少「验收标准」，作者 2 天未补充 · 标签 workling:needs-info
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px">
+                  <a class="btn" href="triage.html">看分诊</a>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-h">
+                <h2>执行中 <span class="muted" style="font-weight: 400">2 / 3</span></h2>
+                <span class="faint">Docker · 每任务 2 CPU / 4g</span>
+              </div>
+              <div
+                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr))"
+              >
+                <div class="slot">
+                  <div style="display: flex; justify-content: space-between; gap: 8px">
+                    <span class="badge b-run"><span class="dot"></span>实现 · 第 1 轮</span
+                    ><span class="faint">12 分钟</span>
+                  </div>
+                  <div>
+                    <span class="mono muted">workling#86</span>　版本面板显示 worker 契约兼容性
+                  </div>
+                  <div class="bar" aria-hidden="true"><span style="width: 55%"></span></div>
+                  <div class="faint">codex 修改文件 · 已改 6 个文件</div>
+                  <a href="#">实时日志</a>
+                </div>
+                <div class="slot">
+                  <div style="display: flex; justify-content: space-between; gap: 8px">
+                    <span class="badge b-rework"><span class="dot"></span>返工 · 第 3 轮</span
+                    ><span class="faint">6 分钟</span>
+                  </div>
+                  <div><span class="mono muted">workling#70</span>　PR review 触发返工</div>
+                  <div class="bar" aria-hidden="true">
+                    <span style="width: 25%; background: var(--rework)"></span>
+                  </div>
+                  <div class="faint">由 tangtj 的 Request changes 触发 · 2 条意见</div>
+                  <a href="#">实时日志</a>
+                </div>
+                <div
+                  class="slot"
+                  style="
+                    justify-content: center;
+                    align-items: center;
+                    color: var(--faint);
+                    min-height: 140px;
+                  "
+                >
+                  空闲名额
+                </div>
+              </div>
+            </section>
+
+            <div
+              style="
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+                gap: 24px;
+              "
+            >
+              <section class="card">
+                <div class="card-h">
+                  <h2>排队 <span class="muted" style="font-weight: 400">2</span></h2>
+                  <span class="faint">名额空出后按顺序拉起</span>
+                </div>
+                <div class="q-row">
+                  <span class="mono faint">1</span><span class="mono muted">pi-workbot#9</span
+                  ><span style="flex: 1; min-width: 0">升级 Pi 到 1.5.2</span
+                  ><span class="faint">等待 8 分钟</span>
+                </div>
+                <div class="q-row">
+                  <span class="mono faint">2</span><span class="mono muted">workling#89</span
+                  ><span style="flex: 1; min-width: 0">分诊记录支持按结论筛选</span
+                  ><span class="faint">等待 3 分钟</span>
+                </div>
+              </section>
+              <section class="card">
+                <div class="card-h">
+                  <h2>最近 24 小时</h2>
+                  <a href="issues.html">全部记录</a>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr))">
+                  <div class="stat"><span class="faint">完成</span><b>7</b></div>
+                  <div class="stat"><span class="faint">返工</span><b>3</b></div>
+                  <div class="stat">
+                    <span class="faint">失败</span><b style="color: var(--bad)">1</b>
+                  </div>
+                  <div class="stat">
+                    <span class="faint">平均用时</span
+                    ><b>18<span style="font-size: 14px; font-weight: 400"> 分</span></b>
+                  </div>
+                </div>
+                <div
+                  style="
+                    padding: 14px 18px;
+                    border-top: 1px solid var(--line);
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 12px;
+                    flex-wrap: wrap;
+                  "
+                >
+                  <span class="muted">分诊（影子）与人工一致率</span
+                  ><span><b>86%</b> <span class="faint">· 22 条样本</span></span>
+                </div>
+              </section>
+            </div>
+          </main>
+        </div>
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1240}}'
+    >
+      class Component extends DCLogic {
+        renderVals() {
+          return { theme: this.props.theme === 'light' ? 'light' : '' };
+        }
+      }
+    </script>
+  </body>
+</html>
