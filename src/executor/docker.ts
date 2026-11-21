@@ -46,10 +46,13 @@ export function dockerExecutor({
   command,
   config,
   log,
+  hostPath = (path) => hostPathOf(command, path),
 }: {
   command: Command
   config: ExecutorSettings
   log: (message: string) => void
+  /** 把任务目录换算成宿主机路径；测试替换它，避免结果取决于测试本身是否跑在容器里。 */
+  hostPath?: (path: string) => Promise<string>
 }): Executor {
   return {
     async start(spec) {
@@ -58,7 +61,7 @@ export function dockerExecutor({
       // rootless 时容器内的 root 映射为运行 Docker 的宿主机用户，任务目录的属主才保持一致；
       // 若改用宿主机 uid，会被映射到 subuid，主体无法清理 worker 写下的文件。
       const user = host.rootless ? '0:0' : `${process.getuid!()}:${process.getgid!()}`
-      const source = await hostPathOf(command, spec.taskDir)
+      const source = await hostPath(spec.taskDir)
       const network = config.taskNetwork ?? DEFAULT_WORKER_NETWORK
       if (!config.taskNetwork) await ensureWorkerNetwork(command)
       const name = `workling-run-${spec.runId}`
