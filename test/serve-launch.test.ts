@@ -76,7 +76,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
           expect(spec.env).not.toHaveProperty('GH_TOKEN')
           expect(await readLlmSecrets(dir)).toBeNull()
           expect(await readSpec(dir)).toEqual({
-            contract: 1,
+            contract: 2,
             kind: 'implement',
             issue: { ref: 'github:a/b#2', title: '测试 Issue' },
             repo: { baseRef, branch: 'workling/2-issue' },
@@ -87,6 +87,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
           expect((await readdir(join(dir, 'input'))).sort()).toEqual([
             'branch.md',
             'docs.md',
+            'feedback.md',
             'issue.json',
             'issue.md',
             'pr.md',
@@ -433,29 +434,6 @@ test('并发名额已满不拉起，保存新上限后下一轮使用数据库�
     })
     expect(starts).toBe(1)
     expect(s.db.select().from(runs).all()).toHaveLength(1)
-  } finally {
-    await s.dispose()
-  }
-})
-
-test('指令触发的重试在领取评论中注明链接', async () => {
-  const s = await scenario()
-  try {
-    const issue = await s.issue(42, 'queued')
-    const triggers = new Map([[issue.id, 'https://github.com/a/b/issues/42#issuecomment-1']])
-    await launchQueued({
-      ...s.options,
-      triggers,
-      executor: fakeExecutor({
-        async start() {
-          return { pid: 123 }
-        },
-      }),
-    })
-    expect(s.calls.find((call) => call.args[2] === 'comment')?.options?.input).toContain(
-      '\n- 触发：https://github.com/a/b/issues/42#issuecomment-1',
-    )
-    expect(triggers.size).toBe(0)
   } finally {
     await s.dispose()
   }

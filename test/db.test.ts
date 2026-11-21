@@ -126,9 +126,8 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
         updatedAt: now,
       })
       .run()
-    first.db.run(sql`DROP TABLE feedback`)
-    first.db.run(sql`DROP TABLE feedback_cursors`)
-    first.db.run(sql`DROP TABLE trusted_users`)
+    first.db.run(sql`ALTER TABLE runs DROP COLUMN kind`)
+    first.db.run(sql`ALTER TABLE feedback DROP COLUMN review_id`)
     first.db.run(
       sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT MAX(created_at) FROM __drizzle_migrations)`,
     )

@@ -17,7 +17,7 @@ import { pollOnce } from './poll.ts'
 import { launchQueued } from './launch.ts'
 import { reconcile } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
-import { retryOnCommand, type RetryState } from './retry.ts'
+import { queueRework } from './rework.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
 type Log = (message: string) => void
 
@@ -130,7 +130,6 @@ export async function serve({
     markHealthy()
     log(`workling 管理接口：http://${settings.host}:${server.port}`)
     const labeledRepos = new Set<number>()
-    const retryState: RetryState = { accounts: new Map(), triggers: new Map() }
     const feedbackState: FeedbackState = { accounts: new Map(), permissions: new Map() }
     let wasPaused = false
     while (!signal.aborted) {
@@ -164,7 +163,7 @@ export async function serve({
           if (!signal.aborted) log(`观察反馈失败：${errorMessage(error)}`)
         }
         try {
-          await retryOnCommand({ db, command, log, signal, state: retryState })
+          await queueRework({ db, command, log, signal })
         } catch (error) {
           if (!signal.aborted) log(`指令重试失败：${errorMessage(error)}`)
         }
@@ -183,7 +182,6 @@ export async function serve({
               pi,
               executorSettings,
               signal,
-              triggers: retryState.triggers,
             })
         } catch (error) {
           log(`拉起任务失败：${errorMessage(error)}`)

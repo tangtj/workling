@@ -3,11 +3,11 @@ import { join } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 
-export const CONTRACT_VERSION = 1
+export const CONTRACT_VERSION = 2
 
 export const specSchema = Type.Object({
   contract: Type.Literal(CONTRACT_VERSION),
-  kind: Type.Literal('implement'),
+  kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
   issue: Type.Object({ ref: Type.String(), title: Type.String() }),
   repo: Type.Object({
     baseRef: Type.String(),

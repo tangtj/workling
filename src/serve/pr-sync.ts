@@ -1,8 +1,8 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import type { WorklingDatabase } from '../db/index.ts'
-import { issues, repos } from '../db/schema.ts'
+import { feedback, issues, repos } from '../db/schema.ts'
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
@@ -71,7 +71,16 @@ export async function syncPullRequests({
       }
       for (const issue of rows) {
         if (signal.aborted) return
-        if (issue.status === 'queued' || issue.status === 'running') continue
+        if (issue.status === 'running') continue
+        if (
+          issue.status === 'queued' &&
+          !db
+            .select({ id: feedback.id })
+            .from(feedback)
+            .where(and(eq(feedback.issueId, issue.id), eq(feedback.status, 'pending')))
+            .get()
+        )
+          continue
         const pr = best.get(issue.number)
         if (!pr) continue
         const prState = pr.state.toLowerCase() as NonNullable<typeof issue.prState>

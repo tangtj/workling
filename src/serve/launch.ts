@@ -1,11 +1,11 @@
 import { markComment } from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
-import { and, count, desc, eq, ne } from 'drizzle-orm'
+import { and, count, desc, eq, ne, inArray } from 'drizzle-orm'
 import { join } from 'node:path'
 import { removeSecrets, writeLlmSecrets } from '../contract/secrets.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../contract/spec.ts'
 import { type WorklingDatabase } from '../db/index.ts'
-import { issues as issueStates, repos, runs } from '../db/schema.ts'
+import { issues as issueStates, repos, runs, feedback } from '../db/schema.ts'
 import { createExecutor, workerEnv, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
 import { docBranch, taskBranch } from '../issue/branch.ts'
@@ -28,6 +28,7 @@ async function prepareCheckout({
   issue,
   runId,
   previous,
+  kind,
   pi,
   command,
   signal,
@@ -38,6 +39,7 @@ async function prepareCheckout({
   issue: { number: number; title: string; body: string }
   runId: number
   previous: { branch: string | null; prState: 'open' | 'merged' | 'closed' | null }
+  kind: Spec['kind']
   pi: PiSettings
   command: Command
   signal: AbortSignal
@@ -60,6 +62,8 @@ async function prepareCheckout({
     (await hasRef(branchRef(previous.branch)))
       ? previous.branch
       : undefined
+  if (kind === 'rework' && !continuedBranch)
+    return { error: `PR 分支「${previous.branch ?? '未知'}」不存在，无法返工` }
   const start =
     doc?.name ??
     (await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
@@ -112,7 +116,6 @@ export async function launchQueued({
   pi,
   executorSettings,
   signal,
-  triggers,
   now = () => new Date(),
   executor = createExecutor(executorSettings, command, log),
 }: {
@@ -123,7 +126,6 @@ export async function launchQueued({
   pi: PiSettings
   executorSettings: ExecutorSettings
   signal: AbortSignal
-  triggers?: Map<number, string>
   now?: () => Date
   executor?: Executor
 }): Promise<void> {
@@ -164,6 +166,36 @@ export async function launchQueued({
         .values({ issueId: issue.id, worker: settings.worker, taskDir, startedAt })
         .returning()
         .get()
+      const included = db.transaction((tx) => {
+        tx.update(feedback)
+          .set({ status: 'included', runId: record!.id })
+          .where(and(eq(feedback.issueId, issue.id), eq(feedback.status, 'pending')))
+          .run()
+        const selected = tx.select().from(feedback).where(eq(feedback.runId, record!.id)).all()
+        const reviewIds = selected
+          .filter((row) => row.source === 'review')
+          .map((row) => row.externalId)
+        if (reviewIds.length)
+          tx.update(feedback)
+            .set({ status: 'included', runId: record!.id })
+            .where(
+              and(
+                eq(feedback.issueId, issue.id),
+                eq(feedback.source, 'review_comment'),
+                inArray(feedback.reviewId, reviewIds),
+                inArray(feedback.status, ['ignored', 'observed']),
+              ),
+            )
+            .run()
+        return tx
+          .select()
+          .from(feedback)
+          .where(eq(feedback.runId, record!.id))
+          .orderBy(feedback.createdAt, feedback.id)
+          .all()
+      })
+      const kind = included.length && issue.prState === 'open' ? 'rework' : 'implement'
+      db.update(runs).set({ kind }).where(eq(runs.id, record.id)).run()
       const previous = db
         .select({ branch: runs.branch })
         .from(runs)
@@ -176,17 +208,21 @@ export async function launchQueued({
         command,
         env: ghEnv(repo.token, repo.host),
       })
-      const checkout = await prepareCheckout({
-        workspace: settings.workspace,
-        taskDir,
-        repo,
-        issue: { number: issue.number, title, body },
-        runId: record.id,
-        previous: { branch: previous?.branch ?? null, prState: issue.prState },
-        pi,
-        command,
-        signal,
-      })
+      const checkout =
+        included.length && (issue.prState === 'merged' || issue.prState === 'closed')
+          ? { error: 'PR 已合入或关闭，不再返工；新需求请另开 Issue' }
+          : await prepareCheckout({
+              workspace: settings.workspace,
+              taskDir,
+              repo,
+              issue: { number: issue.number, title, body },
+              runId: record.id,
+              previous: { branch: previous?.branch ?? null, prState: issue.prState },
+              kind,
+              pi,
+              command,
+              signal,
+            })
       if ('error' in checkout) {
         await writeResult(taskDir, {
           exitCode: null,
@@ -206,6 +242,7 @@ export async function launchQueued({
           repo,
           issue,
           runId: record.id,
+          kind,
           checkout: { ...specRepo, start },
           command: (args, options) => command(args, { ...options, signal }),
           secrets: [repo.token, pi.llmApiKey ?? ''],
@@ -213,7 +250,7 @@ export async function launchQueued({
         })
         await writeSpec(taskDir, {
           contract: CONTRACT_VERSION,
-          kind: 'implement',
+          kind,
           issue: { ref: issueRef, title },
           repo: specRepo,
           model: {
@@ -256,6 +293,11 @@ export async function launchQueued({
           log(`${repo.ref} #${issue.number} 删除任务密钥失败`)
         })
       if (record)
+        db.update(feedback)
+          .set({ status: 'pending', runId: null })
+          .where(eq(feedback.runId, record.id))
+          .run()
+      if (record)
         db.update(runs)
           .set({ endedAt: now(), error: `拉起失败：${errorMessage(error)}` })
           .where(eq(runs.id, record.id))
@@ -283,16 +325,33 @@ export async function launchQueued({
       log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
     }
     try {
-      const trigger = triggers?.get(issue.id)
-      const body = `workling：已领取，开始执行。\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}${trigger ? `\n- 触发：${trigger}` : ''}`
+      const included = db
+        .select()
+        .from(feedback)
+        .where(eq(feedback.runId, record!.id))
+        .orderBy(feedback.createdAt, feedback.id)
+        .all()
+      const names = {
+        issue_comment: 'Issue 评论',
+        pr_comment: 'PR 评论',
+        review_comment: '行内评论',
+        review: 'Review',
+      }
+      const lines = included
+        .slice(0, 10)
+        .map((row) => `- ${names[row.source]} · @${row.authorLogin} · ${row.url}`)
+      if (included.length > 10) lines.push(`等 ${included.length} 条`)
+      const first =
+        record!.kind === 'rework' || (included.length > 0 && issue.prState === 'open')
+          ? 'workling：收到 PR 反馈，开始返工。'
+          : 'workling：已领取，开始执行。'
+      const body = `${first}\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}${lines.length ? `\n\n触发反馈：\n${lines.join('\n')}` : ''}`
       await command(
         ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
         { env: ghEnv(repo.token, repo.host), input: markComment(body) },
       )
     } catch (error) {
       log(`${repo.ref} #${issue.number} 发送领取评论失败：${errorMessage(error)}`)
-    } finally {
-      triggers?.delete(issue.id)
     }
   }
 }

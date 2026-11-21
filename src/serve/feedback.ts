@@ -6,7 +6,13 @@ import { feedback, feedbackCursors, issues, repos, trustedUsers } from '../db/sc
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
-import { matchCommandPrefix } from './retry.ts'
+export function matchCommandPrefix(body: string, login: string): string | null {
+  const trimmed = body.trimStart()
+  const match = /^(\/workling|@[^\s]+)(?=\s|$)/i.exec(trimmed)
+  if (!match || !['/workling', `@${login.toLowerCase()}`].includes(match[1]!.toLowerCase()))
+    return null
+  return trimmed.slice(match[0].length).trim()
+}
 
 const user = Type.Object({ id: Type.Integer(), login: Type.String(), type: Type.String() })
 const common = {
@@ -21,6 +27,7 @@ const comment = Type.Object({
   updated_at: Type.String(),
   issue_url: Type.Optional(Type.String()),
   pull_request_url: Type.Optional(Type.String()),
+  pull_request_review_id: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
   path: Type.Optional(Type.String()),
   line: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
   original_line: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),
@@ -117,6 +124,7 @@ export async function observeFeedback({
         path: string | null,
         line: number | null,
         reviewState: string | null,
+        reviewId: string | null = null,
       ) => {
         const created = new Date(createdAt),
           updated = new Date(updatedAt)
@@ -194,6 +202,7 @@ export async function observeFeedback({
           status: result.isCommand ? ('observed' as const) : ('ignored' as const),
           updatedAt: updated,
           reviewState,
+          reviewId,
         }
         if (old) db.update(feedback).set(values).where(eq(feedback.id, old.id)).run()
         else
@@ -269,6 +278,7 @@ export async function observeFeedback({
             item.path ?? null,
             item.line ?? item.original_line ?? null,
             null,
+            item.pull_request_review_id == null ? null : String(item.pull_request_review_id),
           )
         }
       }
