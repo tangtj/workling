@@ -31,7 +31,7 @@ function CopyPath({ path }: { path: string }) {
   }
 
   return (
-    <button className="button" type="button" onClick={() => void copy()}>
+    <button className="button button--sm" type="button" onClick={() => void copy()}>
       {copiedAt === null ? '复制路径' : '已复制'}
     </button>
   )
@@ -51,67 +51,81 @@ function RunCard({
   onFinished: () => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  // 执行过程单独折叠：只有展开时才拉取事件流，最新一轮默认展开以便实时刷新。
+  const [processOpen, setProcessOpen] = useState(defaultOpen)
   const status = runResult(run)
+  const kind = run.kind === 'rework' ? '返工' : '实现'
   return (
     <div className="run-card">
-      <div className="row between">
-        <div className="row">
-          <strong>
-            第 {attempt} 轮 · {run.kind === 'rework' ? '返工' : '实现'}
-          </strong>
-          <Badge status={status} text={run.error === '进程中断' ? '中断' : undefined} />
-          {run.reportResult && <span>codex：{run.reportResult}</span>}
-        </div>
-        <span className="muted">{run.worker}</span>
-      </div>
-      <div className="run-details">
-        <div>
-          <small>开始</small>
-          {run.kind === 'rework' ? '返工' : '实现'} · {formatTime(run.startedAt, now)}
-        </div>
-        <div>
-          <small>结束</small>
-          {run.endedAt ? formatTime(run.endedAt, now) : '—'}
-        </div>
-        <div>
-          <small>用时</small>
-          {formatDuration((run.endedAt?.getTime() ?? now) - run.startedAt.getTime())}
-        </div>
-        <div>
-          <small>退出码</small>
-          {run.exitCode ?? '—'}
-        </div>
-      </div>
-      {run.error && <div className="error-box">{run.error}</div>}
-      {run.summary && (
-        <details>
-          <summary>Pi 结论</summary>
-          <pre>{run.summary}</pre>
-        </details>
-      )}
-      <details
-        className="run-process"
-        open={open}
-        onToggle={(event) => setOpen(event.currentTarget.open)}
+      <button
+        type="button"
+        className="tl-head tl-toggle"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
       >
-        <summary>执行过程</summary>
-        <RunTimeline
-          variant="compact"
-          runId={run.id}
-          ended={run.endedAt !== null}
-          status={status}
-          enabled={open}
-          logTail={run.logTail}
-          onFinished={onFinished}
-        />
-        <Link to={`/runs/${run.id}/log`}>查看完整时间线</Link>
-      </details>
-      <div className="item row">
-        <span className="muted">任务目录</span>
-        <code className="path">{run.taskDir ?? '—'}</code>
-        <Link to={`/runs/${run.id}/log`}>完整时间线</Link>
-        {run.taskDir && <CopyPath path={run.taskDir} />}
-      </div>
+        <strong>
+          第 {attempt} 轮 · {kind}
+        </strong>
+        <Badge status={status} text={run.error === '进程中断' ? '中断' : undefined} />
+        <span className="tl-time">
+          {formatTime(run.startedAt, now)} –{' '}
+          {run.endedAt
+            ? formatTime(run.endedAt, now)
+            : `已运行 ${formatDuration(now - run.startedAt.getTime())}`}
+        </span>
+        <span className="tl-chevron" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="run-box">
+          <dl className="run-stats">
+            <div>
+              <dt>用时</dt>
+              <dd>{formatDuration((run.endedAt?.getTime() ?? now) - run.startedAt.getTime())}</dd>
+            </div>
+            <div>
+              <dt>退出码</dt>
+              <dd>{run.exitCode ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>codex 结论</dt>
+              <dd>{run.reportResult ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>机器</dt>
+              <dd className="mono">{run.worker}</dd>
+            </div>
+          </dl>
+          {run.error && <p className="run-error">{run.error}</p>}
+          {run.summary && <p className="run-summary">Pi 结论：{run.summary}</p>}
+          <details
+            className="run-process"
+            open={processOpen}
+            onToggle={(event) => setProcessOpen(event.currentTarget.open)}
+          >
+            <summary>执行过程</summary>
+            <RunTimeline
+              variant="compact"
+              runId={run.id}
+              ended={run.endedAt !== null}
+              status={status}
+              enabled={processOpen}
+              logTail={run.logTail}
+              onFinished={onFinished}
+            />
+          </details>
+          <div className="run-foot">
+            <Link to={`/runs/${run.id}/log`}>{run.endedAt ? '完整日志' : '实时日志'}</Link>
+            {run.taskDir && (
+              <>
+                <code className="path" title="任务目录">
+                  {run.taskDir}
+                </code>
+                <CopyPath path={run.taskDir} />
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -121,6 +135,12 @@ const feedbackSources: Record<string, string> = {
   pr_comment: 'PR 评论',
   review_comment: '行内评论',
   review: 'Review',
+}
+const reviewStates: Record<string, string> = {
+  CHANGES_REQUESTED: 'Changes requested',
+  APPROVED: 'Approved',
+  COMMENTED: 'Commented',
+  DISMISSED: 'Dismissed',
 }
 const feedbackTrust: Record<string, string> = {
   self: 'workling 自身',
@@ -202,75 +222,80 @@ export function IssuePage() {
   const prState = issue.prState
     ? { open: '打开中', merged: '已合并', closed: '已关闭' }[issue.prState]
     : '状态未知'
+  const shortBase =
+    issue.baseRef && /^[a-f0-9]{40}$/i.test(issue.baseRef)
+      ? issue.baseRef.slice(0, 7)
+      : issue.baseRef
+  const handled = commands.filter((x) => ['included', 'replied'].includes(x.status)).length
+  const inProgress = commands.filter((x) => ['observed', 'pending'].includes(x.status)).length
+  const capped = commands.filter((x) => x.status === 'capped').length
   return (
     <>
       {error}
       <nav className="breadcrumbs">
-        <Link to="/repos">仓库</Link> / <Link to={`/repos/${issue.repoId}`}>{issue.repo.ref}</Link>{' '}
-        / #{issue.number}
+        <Link to="/issues">任务</Link> /{' '}
+        <Link to={`/repos/${issue.repoId}`}>{issue.repo.path}</Link> / #{issue.number}
       </nav>
       <section className="card issue-header">
-        <div className="row between">
-          <div className="issue-header-main">
-            <div className="row">
-              <strong className="mono">#{issue.number}</strong>{' '}
-              <StageBadge
-                stage={issue.stage}
-                text={
-                  issue.stage === 'running' || issue.stage === 'rework'
-                    ? `${issue.stage === 'running' ? '执行中' : '返工中'} · 第 ${runs.length} 轮`
-                    : undefined
-                }
-              />{' '}
-              {issue.prUrl && (
-                <span className="badge badge--review">
-                  PR {prLabel(issue.prUrl)} · {prState}
-                </span>
-              )}
-            </div>
-            <h1>{issue.title ?? <span className="muted">（未记录标题）</span>}</h1>
-            <p className="muted">
-              {issue.branch && (
-                <>
-                  分支 <code>{issue.branch}</code> ·{' '}
-                </>
-              )}
-              {issue.baseRef && (
-                <>
-                  基于 <code>{issue.baseRef}</code> ·{' '}
-                </>
-              )}
-              首次入队 {formatTime(issue.createdAt, now)} · 共 {runs.length} 轮
-              {runs.length > 0 && <> · 累计 {formatDuration(duration)}</>}
-            </p>
+        <div className="issue-header-main">
+          <div className="issue-header-tags">
+            <span className="mono muted">#{issue.number}</span>
+            <StageBadge
+              stage={issue.stage}
+              text={
+                issue.stage === 'running' || issue.stage === 'rework'
+                  ? `${issue.stage === 'running' ? '执行中' : '返工中'} · 第 ${runs.length} 轮`
+                  : undefined
+              }
+            />
+            {issue.prUrl && (
+              <span className="badge badge--review">
+                PR {prLabel(issue.prUrl)} · {prState}
+              </span>
+            )}
           </div>
-          <div className="row">
+          <h1>{issue.title ?? <span className="muted">（未记录标题）</span>}</h1>
+          <p className="issue-meta">
+            {issue.branch && (
+              <>
+                分支 <code>{issue.branch}</code> ·{' '}
+              </>
+            )}
+            {shortBase && (
+              <>
+                基于 <code title={issue.baseRef ?? undefined}>{shortBase}</code> ·{' '}
+              </>
+            )}
+            首次入队 {formatTime(issue.createdAt, now)} · 共 {runs.length} 轮
+            {runs.length > 0 && <> · 累计 {formatDuration(duration)}</>}
+          </p>
+        </div>
+        <div className="issue-header-actions">
+          <a
+            className="button"
+            href={`https://${issue.repo.host}/${issue.repo.path}/issues/${issue.number}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <PlatformIcon platform={issue.repo.platform} /> 在 {platform} 打开 Issue
+          </a>
+          {issue.prUrl?.startsWith('https://') && (
             <a
-              className="button"
-              href={`https://${issue.repo.host}/${issue.repo.path}/issues/${issue.number}`}
+              className="button button--primary"
+              href={issue.prUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
-              <PlatformIcon platform={issue.repo.platform} /> 在 {platform} 打开 Issue
+              打开 PR {prLabel(issue.prUrl)}
             </a>
-            {issue.prUrl?.startsWith('https://') && (
-              <a
-                className="button button--primary"
-                href={issue.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                打开 PR {prLabel(issue.prUrl)}
-              </a>
-            )}
-          </div>
+          )}
         </div>
       </section>
       <div className="issue-columns">
         <section className="card issue-timeline">
-          <div className="row between">
+          <header className="card-head card-head--wrap">
             <h2>时间线</h2>
-            <div className="timeline-filters" aria-label="时间线筛选">
+            <div className="chips" role="group" aria-label="时间线筛选">
               {(
                 [
                   ['all', '全部'],
@@ -281,7 +306,7 @@ export function IssuePage() {
                 <button
                   key={value}
                   type="button"
-                  className="button"
+                  className="chip"
                   aria-pressed={filter === value}
                   onClick={() => setFilter(value)}
                 >
@@ -289,10 +314,9 @@ export function IssuePage() {
                 </button>
               ))}
             </div>
-          </div>
-          {feedback.isPending && <p className="muted">加载反馈中…</p>}
+          </header>
           {feedback.isError && <p className="error-box">加载反馈失败</p>}
-          <div className="timeline-events">
+          <ol className="timeline">
             {events
               .filter((event) =>
                 filter === 'runs'
@@ -302,42 +326,57 @@ export function IssuePage() {
               .map((event) => {
                 if (event.type === 'queued')
                   return (
-                    <div className="timeline-event" key="queued">
-                      <span className="timeline-dot" aria-hidden="true" />
-                      <strong>workling 首次入队</strong> · {formatTime(issue.createdAt, now)}
-                    </div>
+                    <li className="tl-event" key="queued">
+                      <span className="tl-node" aria-hidden="true" />
+                      <div className="tl-head">
+                        <strong>workling 首次入队</strong>
+                        <span className="tl-time">{formatTime(issue.createdAt, now)}</span>
+                      </div>
+                    </li>
                   )
                 if (event.type === 'triage') {
                   const t = event.item
                   return (
-                    <div className="timeline-event" key={`triage-${t.id}`}>
-                      <span className="timeline-dot timeline-dot--warn" aria-hidden="true" />
-                      <span className="badge">分诊</span> {t.decision ?? '无结论'}
-                      {t.llmDecision && t.llmDecision !== t.decision && (
-                        <> · LLM：{t.llmDecision}</>
-                      )}{' '}
-                      · {formatTime(new Date(t.triagedAt), now)}
-                      {t.missing.length > 0 && <p>缺少：{t.missing.join('、')}</p>}
-                      {t.suggestCommentUrl && (
-                        <a href={t.suggestCommentUrl} target="_blank" rel="noopener noreferrer">
-                          已评论
-                        </a>
+                    <li className="tl-event" key={`triage-${t.id}`}>
+                      <span className="tl-node tl-node--warn" aria-hidden="true" />
+                      <div className="tl-head">
+                        <span className="badge badge--info">分诊</span>
+                        <span>
+                          结论 {t.decision ?? '无结论'}
+                          {t.llmDecision && t.llmDecision !== t.decision && (
+                            <span className="muted">（LLM：{t.llmDecision}）</span>
+                          )}
+                          {t.missing.length > 0 && <>；缺少 {t.missing.join('、')}</>}
+                        </span>
+                        <span className="tl-time">{formatTime(new Date(t.triagedAt), now)}</span>
+                      </div>
+                      {(t.suggestCommentUrl || t.autoQueuedAt) && (
+                        <p className="tl-note">
+                          {t.suggestCommentUrl && (
+                            <a href={t.suggestCommentUrl} target="_blank" rel="noopener noreferrer">
+                              已评论
+                            </a>
+                          )}
+                          {t.suggestCommentUrl && t.autoQueuedAt && ' · '}
+                          {t.autoQueuedAt && '已自动打 ready'}
+                        </p>
                       )}
-                      {t.autoQueuedAt && <span> · 已自动打 ready</span>}
-                    </div>
+                    </li>
                   )
                 }
                 if (event.type === 'run') {
                   const run = event.item
                   const status = runResult(run)
                   return (
-                    <div className="timeline-event" id={`run-${run.id}`} key={`run-${run.id}`}>
+                    <li
+                      className="tl-event tl-event--run"
+                      id={`run-${run.id}`}
+                      key={`run-${run.id}`}
+                    >
                       <span
-                        className={`timeline-dot timeline-dot--run timeline-dot--${status === 'running' && run.kind === 'rework' ? 'rework' : status}`}
+                        className={`tl-node tl-node--run tl-node--${status === 'running' && run.kind === 'rework' ? 'rework' : status}`}
                         aria-hidden="true"
-                      >
-                        {status === 'done' ? '✓' : status === 'failed' ? '×' : '●'}
-                      </span>
+                      />
                       <RunCard
                         run={run}
                         attempt={rounds.get(run.id)!}
@@ -345,39 +384,45 @@ export function IssuePage() {
                         defaultOpen={run.id === runs[0]?.id}
                         onFinished={onFinished}
                       />
-                    </div>
+                    </li>
                   )
                 }
                 const item = event.item
                 const round = item.runId === null ? undefined : rounds.get(item.runId)
+                const source =
+                  item.source === 'review' && item.reviewState
+                    ? `Review · ${reviewStates[item.reviewState] ?? item.reviewState}`
+                    : (feedbackSources[item.source] ?? item.source)
                 return (
-                  <div
-                    className={`timeline-event${item.isCommand ? '' : ' timeline-event--muted'}`}
+                  <li
+                    className={`tl-event${item.isCommand ? '' : ' tl-event--muted'}`}
                     key={`feedback-${item.id}`}
                   >
                     <span
-                      className={`timeline-dot${item.isCommand ? ' timeline-dot--rework' : ''}`}
+                      className={`tl-node${item.isCommand ? ' tl-node--rework' : ''}`}
                       aria-hidden="true"
                     />
-                    <div>
-                      {item.authorLogin} · {feedbackSources[item.source] ?? item.source}
-                      {item.source === 'review' && item.reviewState
-                        ? `（${item.reviewState}）`
-                        : ''}{' '}
-                      · {feedbackTrust[item.trust] ?? item.trust} ·{' '}
-                      {item.isCommand ? '算作指令' : '不算指令'} ·{' '}
-                      {formatTime(new Date(item.createdAt), now)}
+                    <div className="tl-head">
+                      <strong>{item.authorLogin}</strong>
+                      <span className={`badge${item.isCommand ? ' badge--rework' : ''}`}>
+                        {source}
+                      </span>
+                      <span className="tl-time">
+                        {feedbackTrust[item.trust] ?? item.trust} ·{' '}
+                        {item.isCommand ? '算作指令' : '不算指令'} ·{' '}
+                        {formatTime(new Date(item.createdAt), now)}
+                      </span>
                     </div>
-                    <blockquote>
+                    <blockquote className="tl-quote">
                       {item.path && (
-                        <div className="mono">
+                        <div className="tl-quote-path mono">
                           {item.path}
                           {item.line !== null && `:${item.line}`}
                         </div>
                       )}
                       {(item.instruction ?? item.body).slice(0, 300)}
                     </blockquote>
-                    <div>
+                    <p className="tl-note">
                       {(item.status === 'included' || item.status === 'replied') &&
                       round !== undefined ? (
                         <a href={`#run-${item.runId}`}>→ 由第 {round} 轮处理</a>
@@ -387,98 +432,117 @@ export function IssuePage() {
                         '→ 待处理'
                       ) : item.status === 'capped' ? (
                         '→ 超过自动返工上限，未处理'
-                      ) : null}{' '}
-                      ·{' '}
+                      ) : null}
+                      {item.status !== 'ignored' && ' · '}
                       <a href={item.url} target="_blank" rel="noopener noreferrer">
                         查看原评论
                       </a>
-                    </div>
-                  </div>
+                    </p>
+                  </li>
                 )
               })}
-          </div>
+          </ol>
+          {feedback.isPending && <p className="tl-loading muted">加载反馈中…</p>}
         </section>
         <aside className="issue-sidebar">
           <section className="card">
-            <h2>接着推进</h2>
-            {['running', 'rework', 'queued'].includes(issue.stage) ? (
-              <p>正在处理中，新的指令会在本轮结束后接着处理。</p>
-            ) : (
-              <>
-                <p>在 Issue 或 PR 里评论，workling 会在同一分支上接着做：</p>
-                <pre>/workling 补充：…{'\n'}@workling-agent 再看下…</pre>
-                <p className="muted">
-                  只有写权限或受信账号的评论算指令。PR 上的 Request changes 会自动触发返工。
-                </p>
-              </>
-            )}
-          </section>
-          {issue.prUrl && (
-            <section className="card">
-              <div className="row between">
-                <h2>自动返工</h2>
-                {rework.limit !== null && (
-                  <span>
-                    {rework.rounds} / {rework.limit} 轮
-                  </span>
-                )}
-              </div>
-              {rework.limit === null ? (
-                <p>已自动返工 {rework.rounds} 轮</p>
+            <header className="card-head">
+              <h2>接着推进</h2>
+            </header>
+            <div className="card-body">
+              {['running', 'rework', 'queued'].includes(issue.stage) ? (
+                <p>正在处理中，新的指令会在本轮结束后接着处理。</p>
               ) : (
                 <>
-                  <div className="rework-boxes" aria-hidden="true">
-                    {Array.from({ length: rework.limit }, (_, index) => (
-                      <span key={index} className={index < rework.rounds ? 'filled' : ''} />
-                    ))}
-                  </div>
-                  <p>
-                    {rework.rounds >= rework.limit
-                      ? '已用完。之后的 Request changes 只记录，需要评论 /workling 才会继续。'
-                      : `还可自动返工 ${rework.limit - rework.rounds} 轮`}
+                  <p>在 Issue 或 PR 里评论，workling 会在同一分支上接着做：</p>
+                  <pre className="hint-code">/workling 补充：…{'\n'}@workling-agent 再看下…</pre>
+                  <p className="card-note">
+                    只有写权限或受信账号的评论算指令。PR 上的 Request changes 会自动触发返工。
                   </p>
                 </>
               )}
+            </div>
+          </section>
+          {issue.prUrl && (
+            <section className="card">
+              <header className="card-head">
+                <h2>自动返工</h2>
+                {rework.limit !== null && (
+                  <span className="muted">
+                    {rework.rounds} / {rework.limit} 轮
+                  </span>
+                )}
+              </header>
+              <div className="card-body">
+                {rework.limit === null ? (
+                  <p>已自动返工 {rework.rounds} 轮</p>
+                ) : (
+                  <>
+                    {rework.limit > 0 && (
+                      <div className="rework-bars" aria-hidden="true">
+                        {Array.from({ length: rework.limit }, (_, index) => (
+                          <span key={index} className={index < rework.rounds ? 'filled' : ''} />
+                        ))}
+                      </div>
+                    )}
+                    <p className="card-note">
+                      {rework.rounds >= rework.limit
+                        ? '已用完。之后的 Request changes 只记录，需要评论 /workling 才会继续。'
+                        : `还可自动返工 ${rework.limit - rework.rounds} 轮`}
+                    </p>
+                  </>
+                )}
+              </div>
             </section>
           )}
           <section className="card">
-            <h2>反馈</h2>
-            {feedback.isError ? (
-              <p>加载失败</p>
-            ) : feedback.isPending ? (
-              <p>加载中…</p>
-            ) : items.length === 0 ? (
-              <p className="muted">暂无反馈</p>
-            ) : (
-              <>
-                <p>
-                  指令：{commands.length} 条 · 已处理{' '}
-                  {commands.filter((x) => ['included', 'replied'].includes(x.status)).length} ·
-                  处理中 {commands.filter((x) => ['observed', 'pending'].includes(x.status)).length}
-                  {commands.some((x) => x.status === 'capped') &&
-                    ` · 超上限 ${commands.filter((x) => x.status === 'capped').length}`}
-                </p>
-                <p>不算指令：{items.length - commands.length} 条</p>
-                {latest && (
-                  <p>
-                    最近：{latest.authorLogin} · {relativeTime(new Date(latest.createdAt), now)}
-                  </p>
-                )}
-              </>
-            )}
+            <header className="card-head">
+              <h2>反馈</h2>
+            </header>
+            <div className="card-body">
+              {feedback.isError ? (
+                <p>加载失败</p>
+              ) : feedback.isPending ? (
+                <p className="muted">加载中…</p>
+              ) : items.length === 0 ? (
+                <p className="muted">暂无反馈</p>
+              ) : (
+                <dl className="kv-list">
+                  <dt>指令</dt>
+                  <dd>
+                    {commands.length} 条 · 已处理 {handled} · 处理中 {inProgress}
+                    {capped > 0 && ` · 超上限 ${capped}`}
+                  </dd>
+                  <dt>不算指令</dt>
+                  <dd>{items.length - commands.length} 条</dd>
+                  {latest && (
+                    <>
+                      <dt>最近</dt>
+                      <dd>
+                        {latest.authorLogin} · {relativeTime(new Date(latest.createdAt), now)}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+              )}
+            </div>
           </section>
           <section className="card">
-            <h2>交付</h2>
-            <p>
-              分支：<code className="path">{issue.branch ?? '—'}</code>
-            </p>
-            <p>
-              PR：
-              <PR url={issue.prUrl} state={issue.prState} />
-            </p>
-            <p>
-              任务目录：<code className="path">{runs[0]?.taskDir ?? '—'}</code>
-            </p>
+            <header className="card-head">
+              <h2>交付</h2>
+            </header>
+            <div className="card-body">
+              <dl className="kv-list">
+                <dt>分支</dt>
+                <dd className="mono">{issue.branch ?? '—'}</dd>
+                <dt>PR</dt>
+                <dd>
+                  <PR url={issue.prUrl} state={issue.prState} />
+                </dd>
+                <dt>任务目录</dt>
+                <dd className="mono path">{runs[0]?.taskDir ?? '—'}</dd>
+              </dl>
+            </div>
           </section>
         </aside>
       </div>

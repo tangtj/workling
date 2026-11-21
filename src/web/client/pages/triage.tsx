@@ -6,6 +6,8 @@ import { triageOverviewSchema, type TriageData } from '../../triage-schema.ts'
 import { repoRequest } from '../repos.ts'
 import { settingsOptions } from '../settings.ts'
 import { usePageLayout } from '../layout.tsx'
+import { relativeTime } from '../../format.ts'
+import { IssueRef } from '../issue-table.tsx'
 
 export const triageOptions = {
   queryKey: ['triage-overview'],
@@ -46,12 +48,11 @@ export function LevelButtons({
     auto: '自动级除建议外，还会在受信作者的 Issue 判定为信息齐全后自动打 workling:ready 开始执行（带 workling:hold 的除外）。确认开启？',
   }
   return (
-    <div>
-      <div role="group" aria-label={`${refName} 分诊级别`} className="level-group">
+    <div className="level-control">
+      <div role="group" aria-label={`${refName} 分诊级别`} className="segmented">
         {levels.map(([value, label]) => (
           <button
             type="button"
-            className={`button${level === value ? ' selected' : ''}`}
             aria-pressed={level === value}
             disabled={!github || mutation.isPending}
             key={value}
@@ -81,14 +82,6 @@ function mismatch(row: TriageData['records'][number]) {
       ((row.decision === 'needs_info' || row.decision === 'ignore') && !!row.readyAt))
   )
 }
-function ago(at: string) {
-  const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 60000))
-  return minutes < 60
-    ? `${minutes} 分钟前`
-    : minutes < 1440
-      ? `${Math.floor(minutes / 60)} 小时前`
-      : `${Math.floor(minutes / 1440)} 天前`
-}
 export function TriagePage() {
   const { setActive } = usePageLayout()
   useEffect(() => {
@@ -111,6 +104,13 @@ export function TriagePage() {
     (row) =>
       filter === 'all' || (filter === 'mismatch' ? mismatch(row) : row.followUp === 'pending'),
   )
+  const percent = (part: number, total: number) =>
+    total ? `${Math.round((part * 100) / total)}%` : '—'
+  const filters = [
+    ['all', '全部', records.length],
+    ['mismatch', '只看不一致', records.filter(mismatch).length],
+    ['pending', '等作者补充', records.filter((r) => r.followUp === 'pending').length],
+  ] as const
   return (
     <>
       <header className="page-head">
@@ -123,13 +123,18 @@ export function TriagePage() {
         </div>
       </header>
       {settings.data && (!settings.data.pi.llmBaseUrl || !settings.data.pi.llmApiKey) && (
-        <p>
+        <p className="notice">
           LLM 未配置，请前往<Link to="/settings">设置页</Link>配置接入地址与 Key。
         </p>
       )}
       <section className="card">
-        <h2>各仓库级别</h2>
-        <div className="triage-table">
+        <header className="card-head">
+          <h2>各仓库级别</h2>
+          <span className="muted">
+            关闭 → 影子（只记录）→ 建议（评论缺什么）→ 自动（直接打 ready）
+          </span>
+        </header>
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -143,8 +148,8 @@ export function TriagePage() {
               {data.repos.map((repo) => (
                 <tr key={repo.id}>
                   <td>
-                    <Link className="mono" to={`/repos/${repo.id}`}>
-                      {repo.ref}
+                    <Link className="mono repo-link" to={`/repos/${repo.id}`}>
+                      {repo.path}
                     </Link>
                   </td>
                   <td>
@@ -155,8 +160,8 @@ export function TriagePage() {
                       github={repo.platform === 'github'}
                     />
                   </td>
-                  <td>{rate(repo.summary)}</td>
-                  <td>{repo.summary.total}</td>
+                  <td className="num strong">{rate(repo.summary)}</td>
+                  <td className="num">{repo.summary.total}</td>
                 </tr>
               ))}
             </tbody>
@@ -165,71 +170,98 @@ export function TriagePage() {
       </section>
       <div className="triage-grid">
         <section className="card">
-          <h2>机器结论 × 人工动作</h2>
-          <div className="triage-table">
-            <table>
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>人工打了 ready</th>
-                  <th>人工没打 ready</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th>机器 accept</th>
-                  <td className="triage-agree">{summary.acceptReady} 一致</td>
-                  <td className="triage-disagree">{summary.acceptNotReady} 机器放宽了</td>
-                </tr>
-                <tr>
-                  <th>机器其他</th>
-                  <td className="triage-disagree">{summary.otherReady} 机器卡严了</td>
-                  <td className="triage-agree">{summary.otherNotReady} 一致</td>
-                </tr>
-              </tbody>
-            </table>
+          <header className="card-head">
+            <h2>机器结论 × 人工动作</h2>
+            <span className="muted">{summary.total} 条样本</span>
+          </header>
+          <div className="card-body">
+            <div className="matrix" role="table" aria-label="机器结论与人工动作对照">
+              <div role="row" className="matrix-row matrix-head">
+                <span role="columnheader"></span>
+                <span role="columnheader">人工打了 ready</span>
+                <span role="columnheader">人工没打 ready</span>
+              </div>
+              {(
+                [
+                  [
+                    '机器 accept',
+                    [summary.acceptReady, '一致', true],
+                    [summary.acceptNotReady, '机器放宽了', false],
+                  ],
+                  [
+                    '机器其他',
+                    [summary.otherReady, '机器卡严了', false],
+                    [summary.otherNotReady, '一致', true],
+                  ],
+                ] as const
+              ).map(([label, ...cells]) => (
+                <div role="row" className="matrix-row" key={label}>
+                  <span role="rowheader">{label}</span>
+                  {cells.map(([value, text, agree]) => (
+                    <div
+                      role="cell"
+                      key={text + String(agree)}
+                      className={`matrix-cell ${agree ? 'matrix-cell--agree' : 'matrix-cell--disagree'}`}
+                    >
+                      <strong>{value}</strong>
+                      <span>{text}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <p className="card-note">
+              一致率 = 对角线 {summary.acceptReady + summary.otherNotReady} / {summary.total} ={' '}
+              {rate(summary)}
+            </p>
           </div>
-          <p>
-            一致率 = {summary.acceptReady + summary.otherNotReady} / {summary.total} ={' '}
-            {rate(summary)}
-          </p>
         </section>
         <section className="card">
-          <h2>建议的效果</h2>
-          <p>
-            已评论建议 {suggestions.total} · 作者补充了 {suggestions.edited} · 未改直接 ready{' '}
-            {suggestions.readyWithoutEdit}
-          </p>
-          <p>
-            被跳过的比例{' '}
-            {suggestions.total
-              ? `${Math.round((suggestions.readyWithoutEdit * 100) / suggestions.total)}%`
-              : '—'}
-            ，{suggestions.pending} 条仍在等作者
-          </p>
+          <header className="card-head">
+            <h2>建议的效果</h2>
+            <span className="muted">建议级仓库</span>
+          </header>
+          <div className="card-body">
+            <div className="stat-row">
+              <div>
+                <span>已评论建议</span>
+                <strong>{suggestions.total}</strong>
+              </div>
+              <div>
+                <span>作者补充了</span>
+                <strong className="text-done">{suggestions.edited}</strong>
+              </div>
+              <div>
+                <span>未改直接 ready</span>
+                <strong className="text-failed">{suggestions.readyWithoutEdit}</strong>
+              </div>
+            </div>
+            <p className="card-note">
+              被跳过的比例 {percent(suggestions.readyWithoutEdit, suggestions.total)}，
+              {suggestions.pending} 条仍在等作者
+            </p>
+          </div>
         </section>
       </div>
       <section className="card">
-        <h2>分诊记录</h2>
-        <div className="toolbar">
-          {(
-            [
-              ['all', '全部', records.length],
-              ['mismatch', '只看不一致', records.filter(mismatch).length],
-              ['pending', '等作者补充', records.filter((r) => r.followUp === 'pending').length],
-            ] as const
-          ).map(([value, label, count]) => (
-            <button
-              className={`button${filter === value ? ' selected' : ''}`}
-              key={value}
-              onClick={() => setFilter(value)}
-            >
-              {label} {count}
-            </button>
-          ))}
-          <label>
-            仓库{' '}
+        <header className="card-head card-head--wrap">
+          <h2>分诊记录</h2>
+          <div className="head-tools">
+            <div className="chips" role="group" aria-label="分诊记录筛选">
+              {filters.map(([value, label, count]) => (
+                <button
+                  type="button"
+                  className="chip"
+                  aria-pressed={filter === value}
+                  key={value}
+                  onClick={() => setFilter(value)}
+                >
+                  {label} <span>{count}</span>
+                </button>
+              ))}
+            </div>
             <select
+              aria-label="仓库"
               value={params.get('repo') ?? ''}
               onChange={(e) => {
                 const next = new URLSearchParams(params)
@@ -238,19 +270,19 @@ export function TriagePage() {
                 setParams(next)
               }}
             >
-              <option value="">全部</option>
+              <option value="">全部仓库</option>
               {data.repos.map((repo) => (
                 <option key={repo.id} value={repo.id}>
                   {repo.ref}
                 </option>
               ))}
             </select>
-          </label>
-        </div>
+          </div>
+        </header>
         {visible.length === 0 ? (
-          <p>暂无分诊记录</p>
+          <p className="empty">暂无分诊记录</p>
         ) : (
-          <div className="triage-table">
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -261,7 +293,9 @@ export function TriagePage() {
                   <th>人工</th>
                   <th>跟进</th>
                   <th>分诊时间</th>
-                  <th></th>
+                  <th>
+                    <span className="sr-only">说明</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -269,62 +303,81 @@ export function TriagePage() {
                   const repo = data.repos.find((r) => r.id === row.repoId)
                   return (
                     <Fragment key={row.id}>
-                      <tr className={mismatch(row) ? 'triage-disagree' : ''}>
+                      <tr className={mismatch(row) ? 'row-disagree' : ''}>
                         <td>
-                          <a
-                            href={`https://${repo?.host}/${repo?.path}/issues/${row.number}`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            <span className="mono">
-                              {row.repoRef}#{row.number}
-                            </span>{' '}
-                            {row.title}
-                          </a>
+                          <div className="issue-cell">
+                            <IssueRef repoRef={row.repoRef} number={row.number} />
+                            <a
+                              className="issue-title"
+                              href={`https://${repo?.host}/${repo?.path}/issues/${row.number}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {row.title}
+                            </a>
+                          </div>
+                        </td>
+                        <td className="nowrap">
+                          {row.authorLogin}{' '}
+                          <small>· {row.trust === 'write' ? '写权限' : '受信账号'}</small>
                         </td>
                         <td>
-                          {row.authorLogin}
-                          <br />
-                          <small>{row.trust === 'write' ? '写权限' : '受信账号'}</small>
-                        </td>
-                        <td>
-                          <span
-                            className={`badge ${row.decision === 'accept' ? 'badge--done' : row.decision === 'ignore' ? 'badge--queued' : 'triage-warn'}`}
-                          >
-                            {row.decision ?? '无结论'}
-                          </span>
-                          {row.llmDecision && row.llmDecision !== row.decision && (
-                            <div>LLM：{row.llmDecision}</div>
+                          {row.decision ? (
+                            <span
+                              className={`badge badge--plain ${row.decision === 'accept' ? 'badge--done' : row.decision === 'ignore' ? 'badge--queued' : 'badge--info'}`}
+                            >
+                              {row.decision}
+                            </span>
+                          ) : (
+                            <span className="muted">无结论</span>
                           )}
-                          {!row.decision && row.error && <small>{row.error}</small>}
+                          {row.llmDecision && row.llmDecision !== row.decision && (
+                            <div className="cell-sub">LLM：{row.llmDecision}</div>
+                          )}
+                          {!row.decision && row.error && (
+                            <div className="cell-sub">{row.error}</div>
+                          )}
                         </td>
                         <td>{row.missing.join('、') || '—'}</td>
-                        <td>
+                        <td className="nowrap">
                           {row.autoQueuedAt
                             ? '自动 ready'
                             : row.readyAt
                               ? `ready${row.readyAfterMinutes === null ? '' : ` · ${row.readyAfterMinutes} 分钟`}`
                               : '未 ready'}
                         </td>
-                        <td>
+                        <td className="nowrap">
                           {row.suggestCommentUrl && (
-                            <a href={row.suggestCommentUrl} target="_blank" rel="noreferrer">
-                              已评论{' '}
-                            </a>
+                            <>
+                              <a href={row.suggestCommentUrl} target="_blank" rel="noreferrer">
+                                已评论
+                              </a>{' '}
+                            </>
                           )}
-                          {row.followUp === 'edited'
-                            ? '已补充'
-                            : row.followUp === 'readyWithoutEdit'
-                              ? '未改直接 ready'
-                              : row.followUp === 'pending'
-                                ? '等作者'
-                                : '—'}
+                          <small>
+                            {row.followUp === 'edited'
+                              ? '· 已补充'
+                              : row.followUp === 'readyWithoutEdit'
+                                ? '· 未改直接 ready'
+                                : row.followUp === 'pending'
+                                  ? '· 等作者'
+                                  : row.suggestCommentUrl
+                                    ? ''
+                                    : '—'}
+                          </small>
                         </td>
-                        <td>{ago(row.triagedAt)}</td>
+                        <td
+                          className="nowrap muted"
+                          title={new Date(row.triagedAt).toLocaleString()}
+                        >
+                          {relativeTime(new Date(row.triagedAt), Date.now())}
+                        </td>
                         <td>
                           {(row.note || row.error || row.suggestError) && (
                             <button
-                              className="button"
+                              type="button"
+                              className="button button--sm"
+                              aria-expanded={expanded.includes(row.id)}
                               onClick={() =>
                                 setExpanded(
                                   expanded.includes(row.id)
@@ -339,7 +392,7 @@ export function TriagePage() {
                         </td>
                       </tr>
                       {expanded.includes(row.id) && (
-                        <tr key={`${row.id}-details`}>
+                        <tr className="row-details">
                           <td colSpan={8}>
                             {[row.note, row.error, row.suggestError].filter(Boolean).join(' · ')}
                           </td>

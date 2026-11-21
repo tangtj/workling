@@ -17,7 +17,21 @@ export function formatDuration(ms: number): string {
 
 export function relativeTime(date: Date, now: number): string {
   const minutes = Math.max(0, Math.floor((now - date.getTime()) / 60000))
-  return minutes < 60 ? `${minutes} 分钟前` : `${Math.floor(minutes / 60)} 小时前`
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} 小时前`
+  const days = Math.floor(minutes / (24 * 60))
+  return days === 1 ? '昨天' : `${days} 天前`
+}
+
+/** 表格里只显示仓库名与编号（`github:tangtj/workling` + 67 → `workling#67`），完整 ref 放 title。 */
+export function shortRef(repoRef: string, number: number): string {
+  const name =
+    repoRef
+      .slice(repoRef.indexOf(':') + 1)
+      .split('/')
+      .pop() || repoRef
+  return `${name}#${number}`
 }
 
 export function prLabel(url: string): string {

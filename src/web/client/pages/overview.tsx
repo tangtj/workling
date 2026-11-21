@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { formatDuration, formatTime, relativeTime } from '../../format.ts'
+import { formatDuration, relativeTime } from '../../format.ts'
 import { failureReason } from '../../issue-view.ts'
 import { overviewModel, runResult, type OverviewIssue } from '../../overview-view.ts'
-import { Badge, PR } from '../issue-table.tsx'
+import { Badge, IssueRef, PR } from '../issue-table.tsx'
 import { overviewOptions } from '../overview.ts'
 import { usePageLayout } from '../layout.tsx'
 import { useRefreshPaused } from '../refresh-pause.ts'
@@ -12,11 +12,12 @@ import { useRefreshPaused } from '../refresh-pause.ts'
 const Title = ({ issue }: { issue: OverviewIssue }) => (
   <>{issue.title ?? <span className="muted">（未记录标题）</span>}</>
 )
-const IssueLink = ({ issue }: { issue: OverviewIssue }) => (
-  <Link to={`/issues/${issue.id}`} className="mono">
-    {issue.repoRef} #{issue.number}
-  </Link>
-)
+const attentionLabels = {
+  failed: '执行失败',
+  capped: '返工到上限',
+  review: 'PR 待审',
+  needs_info: '信息不全',
+} as const
 export function OverviewPage() {
   const page = useQuery(overviewOptions)
   const paused = useRefreshPaused()
@@ -78,8 +79,10 @@ export function OverviewPage() {
       </header>
       {alerts.map((alert) => (
         <div className="overview-alert" key={alert.kind} role="alert">
-          <span className="badge badge--failed">系统</span>
-          <span>{alert.message}</span>
+          <span className="badge badge--failed">
+            <span className="dot dot--failed"></span>系统
+          </span>
+          <span className="overview-alert-text">{alert.message}</span>
           {alert.kind === 'worker' && (
             <button
               type="button"
@@ -93,27 +96,33 @@ export function OverviewPage() {
       ))}
       <section className="card">
         <div className="card-head">
-          <h2>需要你处理 {attention.length}</h2>
+          <h2>
+            需要你处理 <span className="n">{attention.length}</span>
+          </h2>
           <span className="muted">按等待时长排序，处理后自动消失</span>
         </div>
         {attention.map((item) => (
           <article className="attention-row" key={`${item.kind}-${item.repoId}-${item.number}`}>
-            <span className={`badge badge--${item.kind === 'needs_info' ? 'info' : item.kind}`}>
-              {
-                {
-                  failed: '执行失败',
-                  capped: '返工到上限',
-                  review: 'PR 待审',
-                  needs_info: '信息不全',
-                }[item.kind]
-              }
+            <span
+              className={`badge attention-badge badge--${item.kind === 'needs_info' ? 'info' : item.kind}`}
+            >
+              <span
+                className={`dot dot--${item.kind === 'needs_info' ? 'info' : item.kind}`}
+              ></span>
+              {attentionLabels[item.kind]}
             </span>
             <div className="attention-main">
-              <div>
-                <span className="mono">
-                  {item.repoRef}#{item.number}
-                </span>{' '}
-                {item.title ?? '（未记录标题）'}
+              <div className="attention-title">
+                <IssueRef repoRef={item.repoRef} number={item.number} />
+                {item.issueId !== null ? (
+                  <Link className="issue-title" to={`/issues/${item.issueId}`}>
+                    {item.title ?? '（未记录标题）'}
+                  </Link>
+                ) : (
+                  <a className="issue-title" href={item.url} target="_blank" rel="noreferrer">
+                    {item.title ?? '（未记录标题）'}
+                  </a>
+                )}
               </div>
               <div className="li-meta">
                 {item.reason} · {relativeTime(new Date(item.since), now)}
@@ -121,22 +130,22 @@ export function OverviewPage() {
             </div>
             <div className="actions attention-actions">
               {item.kind === 'failed' && item.logRunId !== null && (
-                <Link className="button" to={`/runs/${item.logRunId}/log`}>
+                <Link className="button button--sm" to={`/runs/${item.logRunId}/log`}>
                   看日志
                 </Link>
               )}
               {(item.kind === 'capped' || item.kind === 'review') && item.prUrl && (
-                <a className="button" href={item.prUrl} target="_blank" rel="noreferrer">
+                <a className="button button--sm" href={item.prUrl} target="_blank" rel="noreferrer">
                   {item.kind === 'capped' ? '打开 PR' : '去 review'}
                 </a>
               )}
               {(item.kind === 'failed' || item.kind === 'capped') && item.issueId !== null && (
-                <Link className="button" to={`/issues/${item.issueId}`}>
+                <Link className="button button--sm" to={`/issues/${item.issueId}`}>
                   打开
                 </Link>
               )}
               {item.kind === 'needs_info' && (
-                <Link className="button" to={`/triage?repo=${item.repoId}`}>
+                <Link className="button button--sm" to={`/triage?repo=${item.repoId}`}>
                   看分诊
                 </Link>
               )}
@@ -148,7 +157,10 @@ export function OverviewPage() {
       <section className="card overview-slots">
         <div className="card-head">
           <h2>
-            执行中 {running.length} / {concurrency}
+            执行中{' '}
+            <span className="n">
+              {running.length} / {concurrency}
+            </span>
           </h2>
         </div>
         <div className="slots">
@@ -158,18 +170,19 @@ export function OverviewPage() {
               <article className="slot" key={issue.id}>
                 <div className="slot-top">
                   <span className={`badge badge--${run?.kind === 'rework' ? 'rework' : 'running'}`}>
+                    <span
+                      className={`dot dot--${run?.kind === 'rework' ? 'rework' : 'running'}`}
+                    ></span>
                     {run?.kind === 'rework' ? '返工' : '实现'} · 第 {issue.round} 轮
                   </span>
-                  {run && (
-                    <span>已运行 {formatDuration(Math.max(0, now - run.startedAt.getTime()))}</span>
-                  )}
+                  {run && <span>{formatDuration(Math.max(0, now - run.startedAt.getTime()))}</span>}
                 </div>
-                <Link className="slot-title" to={`/issues/${issue.id}`}>
-                  <span className="mono">
-                    {issue.repoRef}#{issue.number}
-                  </span>{' '}
-                  <Title issue={issue} />
-                </Link>
+                <div className="slot-title">
+                  <IssueRef repoRef={issue.repoRef} number={issue.number} />
+                  <Link className="issue-title" to={`/issues/${issue.id}`}>
+                    <Title issue={issue} />
+                  </Link>
+                </div>
                 {run && (
                   <div className="slot-foot">
                     <Link to={`/runs/${run.id}/log`}>实时日志</Link>
@@ -185,21 +198,27 @@ export function OverviewPage() {
           ))}
         </div>
       </section>
-      <div className="grid g-2">
+      <div className="grid g-2 overview-grid">
         <section className="card">
           <div className="card-head">
-            <h2>排队 {queued.length}</h2>
+            <h2>
+              排队 <span className="n">{queued.length}</span>
+            </h2>
+            <span className="muted">名额空出后按顺序拉起</span>
           </div>
           <div className="list">
             {queued.map((issue, index) => (
               <article key={issue.id} className="li">
                 <span className={`qnum${index === 0 ? ' next' : ''}`}>{index + 1}</span>
                 <div className="li-main">
-                  <Link className="li-title" to={`/issues/${issue.id}`}>
-                    <Title issue={issue} />
-                  </Link>
+                  <div className="attention-title">
+                    <IssueRef repoRef={issue.repoRef} number={issue.number} />
+                    <Link className="issue-title" to={`/issues/${issue.id}`}>
+                      <Title issue={issue} />
+                    </Link>
+                  </div>
                   <div className="li-meta">
-                    {issue.repoRef} #{issue.number} · {relativeTime(issue.updatedAt, now)}入队
+                    {relativeTime(issue.updatedAt, now)}入队
                     {index === 0 && ' · 下一个拉起'}
                   </div>
                 </div>
@@ -212,18 +231,16 @@ export function OverviewPage() {
           <div className="card-head">
             <h2>最近 24 小时</h2>
           </div>
-          <div className="kpis">
+          <div className="kpis kpis--4">
             {[
-              ['完成数', recent.filter(({ run }) => runResult(run) === 'done').length],
+              ['完成', recent.filter(({ run }) => runResult(run) === 'done').length],
               ['返工', reworked],
-              ['失败数', recent.filter(({ run }) => runResult(run) === 'failed').length],
+              ['失败', recent.filter(({ run }) => runResult(run) === 'failed').length],
               ['平均用时', meanMs === null ? '—' : formatDuration(meanMs)],
             ].map(([label, value]) => (
               <div key={label} className="kpi">
                 <span>{label}</span>
-                <strong className={label === '失败数' ? 'overview-failed' : undefined}>
-                  {value}
-                </strong>
+                <strong className={label === '失败' ? 'text-failed' : undefined}>{value}</strong>
               </div>
             ))}
           </div>
@@ -239,11 +256,15 @@ export function OverviewPage() {
               <tbody>
                 {recent.slice(0, 10).map(({ issue, run }) => (
                   <tr key={run.id}>
-                    <td>{formatTime(run.endedAt!, now)}</td>
+                    <td className="nowrap muted" title={run.endedAt!.toLocaleString()}>
+                      {relativeTime(run.endedAt!, now)}
+                    </td>
                     <td>
                       <div className="issue-cell">
-                        <IssueLink issue={issue} />
-                        <Title issue={issue} />
+                        <IssueRef repoRef={issue.repoRef} number={issue.number} />
+                        <Link className="issue-title" to={`/issues/${issue.id}`}>
+                          <Title issue={issue} />
+                        </Link>
                       </div>
                     </td>
                     <td>
@@ -256,7 +277,9 @@ export function OverviewPage() {
                         }
                       />
                     </td>
-                    <td>{formatDuration(run.endedAt!.getTime() - run.startedAt.getTime())}</td>
+                    <td className="nowrap">
+                      {formatDuration(run.endedAt!.getTime() - run.startedAt.getTime())}
+                    </td>
                     <td>
                       <PR url={issue.prUrl} state={issue.prState} />
                     </td>

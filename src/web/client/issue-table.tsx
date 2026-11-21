@@ -1,9 +1,17 @@
 import { Link, useLocation } from 'react-router'
 import { labels, stages, type IssueRow } from '../issue-view.ts'
 import { stageLabels, type Stage } from '../stage.ts'
-import { PLATFORM_ICON_PATHS, platformName } from '../platform.ts'
-import { formatTime, prLabel } from '../format.ts'
+import { PLATFORM_ICON_PATHS } from '../platform.ts'
+import { relativeTime, prLabel, shortRef } from '../format.ts'
 import type { IssueList } from './issue-list.ts'
+
+export function IssueRef({ repoRef, number }: { repoRef: string; number: number }) {
+  return (
+    <span className="ref mono" title={`${repoRef} #${number}`}>
+      {shortRef(repoRef, number)}
+    </span>
+  )
+}
 
 type Issue = IssueList['issues'][number]
 type Repo = IssueList['repos'][number]
@@ -58,14 +66,14 @@ export function PR({
           rel="noopener noreferrer"
           aria-label="查看 PR"
         >
-          {variant === 'detail' ? '查看 PR ↗' : prLabel(url)}
+          {variant === 'detail' ? '查看 PR ↗' : `PR ${prLabel(url)}`}
         </a>
       ) : (
         <span>{url}</span>
       )}{' '}
       {state && (
-        <span className={`badge badge--pr-${state}`}>
-          {{ open: '打开中', merged: '已合并', closed: '已关闭' }[state]}
+        <span className="pr-state">
+          · {{ open: '打开中', merged: '已合并', closed: '已关闭' }[state]}
         </span>
       )}
     </>
@@ -94,7 +102,9 @@ export function StatusChips({
             aria-current={selected === s ? 'page' : undefined}
           >
             {s === 'all' ? '全部' : s === 'attention' ? '需要处理' : stageLabels[s]}{' '}
-            <span>{counts[s] ?? 0}</span>
+            <span className={s === 'attention' && (counts[s] ?? 0) > 0 ? 'chip-alert' : undefined}>
+              {counts[s] ?? 0}
+            </span>
           </Link>
         )
       })}
@@ -114,7 +124,7 @@ export function IssueTable({
 }) {
   return (
     <div className="table-wrap">
-      <table>
+      <table className="issue-table">
         <thead>
           <tr>
             {['Issue', '阶段', '分支 / PR', '轮次', '更新'].map((title) => (
@@ -130,23 +140,10 @@ export function IssueTable({
               <tr key={issue.id}>
                 <td>
                   <div className="issue-cell">
-                    <span className="ref mono">
-                      {repo.ref} #{issue.number}
-                    </span>
-                    <div>
-                      <Link to={`/issues/${issue.id}`}>
-                        {issue.title ?? <span className="muted">（未记录标题）</span>}
-                      </Link>{' '}
-                      <a
-                        href={`https://${repo.host}/${repo.path}/issues/${issue.number}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`在 ${platformName[repo.platform]} 打开`}
-                        title={`在 ${platformName[repo.platform]} 打开`}
-                      >
-                        <PlatformIcon platform={repo.platform} />
-                      </a>
-                    </div>
+                    <IssueRef repoRef={repo.ref} number={issue.number} />
+                    <Link className="issue-title" to={`/issues/${issue.id}`}>
+                      {issue.title ?? <span className="muted">（未记录标题）</span>}
+                    </Link>
                   </div>
                 </td>
                 <td>
@@ -158,11 +155,17 @@ export function IssueTable({
                   />
                 </td>
                 <td>
-                  <div className="mono">{issue.branch ?? '—'}</div>
-                  <PR url={issue.prUrl} state={issue.prState} />
+                  <div className="branch mono">{issue.branch ?? '—'}</div>
+                  {issue.prUrl && (
+                    <div className="pr-line">
+                      <PR url={issue.prUrl} state={issue.prState} />
+                    </div>
+                  )}
                 </td>
-                <td>{issue.rounds}</td>
-                <td>{formatTime(issue.updatedAt, now)}</td>
+                <td className="num">{issue.rounds}</td>
+                <td className="nowrap muted" title={issue.updatedAt.toLocaleString()}>
+                  {relativeTime(issue.updatedAt, now)}
+                </td>
               </tr>
             )
           })}
