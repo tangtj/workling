@@ -91,12 +91,12 @@
 
 每个阶段一个 Issue。四个阶段都改 `src/web/`，**前一个合入后再就绪下一个**。
 
-| 阶段 | 内容                                                             | 文档                                               |
-| ---- | ---------------------------------------------------------------- | -------------------------------------------------- |
-| 1    | 颜色 token、阶段派生函数、任务列表与仓库详情按阶段筛选、侧栏计数 | [stage-1-issue-stages.md](stage-1-issue-stages.md) |
-| 2    | 分诊页 `/triage`：跨仓库接口、侧栏入口；仓库详情分诊卡片缩成摘要 | [stage-2-triage.md](stage-2-triage.md)             |
-| 3    | 概览：系统告警、需要你处理、执行名额显示轮次与类型               | [stage-3-overview.md](stage-3-overview.md)         |
-| 4    | Issue 详情：时间线合并分诊 / 运行 / 反馈，右侧栏                 | [stage-4-issue-detail.md](stage-4-issue-detail.md) |
+| 阶段 | 内容                                                             | 文档                                               | Issue                                               |
+| ---- | ---------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------- |
+| 1    | 颜色 token、阶段派生函数、任务列表与仓库详情按阶段筛选、侧栏计数 | [stage-1-issue-stages.md](stage-1-issue-stages.md) | [#83](https://github.com/tangtj/workling/issues/83) |
+| 2    | 分诊页 `/triage`：跨仓库接口、侧栏入口；仓库详情分诊卡片缩成摘要 | [stage-2-triage.md](stage-2-triage.md)             | [#84](https://github.com/tangtj/workling/issues/84) |
+| 3    | 概览：系统告警、需要你处理、执行名额显示轮次与类型               | [stage-3-overview.md](stage-3-overview.md)         | [#85](https://github.com/tangtj/workling/issues/85) |
+| 4    | Issue 详情：时间线合并分诊 / 运行 / 反馈，右侧栏                 | [stage-4-issue-detail.md](stage-4-issue-detail.md) | [#86](https://github.com/tangtj/workling/issues/86) |
 
 阶段 3 依赖阶段 2 抽出的分诊计算函数；阶段 3、4 依赖阶段 1 的 `issueStage`。
 
