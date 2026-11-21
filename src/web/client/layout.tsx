@@ -15,13 +15,35 @@ async function fetchShell({ signal }: { signal: AbortSignal }): Promise<ShellDat
   return data
 }
 
-function secondsAgo(at: string, now: string) {
-  const seconds = Math.max(0, Math.floor((Date.parse(now) - Date.parse(at)) / 1000))
-  return seconds < 60
-    ? `${seconds} 秒前`
-    : seconds < 3600
-      ? `${Math.floor(seconds / 60)} 分钟前`
-      : `${Math.floor(seconds / 3600)} 小时前`
+function elapsedSeconds(at: string, now: string) {
+  return Math.max(0, (Date.parse(now) - Date.parse(at)) / 1000)
+}
+
+// 距下次轮询的倒计时圆环：用负的 animation-delay 从已过去的时长处开始，
+// 按服务端 now 计算已过时间，避免依赖浏览器时钟与服务端一致。
+function PollRing({
+  lastPollAt,
+  now,
+  interval,
+}: {
+  lastPollAt: string
+  now: string
+  interval: number
+}) {
+  const elapsed = elapsedSeconds(lastPollAt, now)
+  return (
+    <svg className="poll-ring" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" pathLength="100" />
+      <circle
+        className="poll-ring-progress"
+        cx="8"
+        cy="8"
+        r="6"
+        pathLength="100"
+        style={{ animationDuration: `${interval}s`, animationDelay: `-${elapsed}s` }}
+      />
+    </svg>
+  )
 }
 
 function useTheme() {
@@ -174,30 +196,27 @@ export function Layout() {
                 >
                   {sidebar.watch ? (
                     <>
-                      <div>
-                        <span className="dot dot--done"></span> watch 运行中
-                      </div>
-                      <div>
-                        {sidebar.watch.worker} · 每 {sidebar.watch.interval} 秒轮询
-                      </div>
-                      <div>
-                        上次轮询{' '}
-                        {sidebar.watch.lastPollAt
-                          ? secondsAgo(sidebar.watch.lastPollAt, sidebar.now)
-                          : '—'}
-                      </div>
-                      <div className="watch-slots">
-                        名额 {sidebar.running} / {sidebar.concurrency}
-                      </div>
-                      <div className="slots-mini">
-                        {Array.from(
-                          { length: Math.max(sidebar.running, sidebar.concurrency) },
-                          (_, index) => (
-                            <span
-                              key={index}
-                              className={`slot-pip${index < sidebar.running ? ' busy' : ''}`}
-                            ></span>
-                          ),
+                      <div className="watch-head">
+                        <span className="dot dot--done"></span>
+                        <div className="slots-mini">
+                          {Array.from(
+                            { length: Math.max(sidebar.running, sidebar.concurrency) },
+                            (_, index) => (
+                              <span
+                                key={index}
+                                className={`slot-pip${index < sidebar.running ? ' busy' : ''}`}
+                              ></span>
+                            ),
+                          )}
+                        </div>
+                        {sidebar.watch.lastPollAt && (
+                          <PollRing
+                            // 每次轮询换 key 重建元素，让动画从新的起点开始
+                            key={sidebar.watch.lastPollAt}
+                            lastPollAt={sidebar.watch.lastPollAt}
+                            now={sidebar.now}
+                            interval={sidebar.watch.interval}
+                          />
                         )}
                       </div>
                       {sidebar.watch.lastPollError && (
