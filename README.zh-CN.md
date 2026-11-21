@@ -86,7 +86,7 @@ bun run start          # 或 workling serve
 | `workling cancel <issue 引用>` | 取消运行中的任务                       |
 | `workling reset-password`      | 重置管理密码，已登录会话全部失效       |
 
-未执行 `bun link` 时把 `workling` 换成 `bun src/cli.ts`。`task` 与 `read` 是内部命令，由 serve 和 Pi 调用。`cancel`、`reset-password` 要在启动 serve 的同一目录执行，或设置相同的 `WORKLING_WORKSPACE`。Issue 引用格式：`github:owner/repo#12` 或 `https://github.com/owner/repo/issues/12`。
+未执行 `bun link` 时把 `workling` 换成 `bun src/cli.ts`。`cancel`、`reset-password` 要在启动 serve 的同一目录执行，或设置相同的 `WORKLING_WORKSPACE`。Issue 引用格式：`github:owner/repo#12` 或 `https://github.com/owner/repo/issues/12`。
 
 登录后也可在设置页修改密码；忘记密码时使用 `workling reset-password`。
 
@@ -158,6 +158,19 @@ bun run check          # 格式、lint、类型检查与测试
 bun run format         # 格式化
 bun run db:generate    # 修改 src/db/schema.ts 后生成迁移
 ```
+
+### 单独运行 worker
+
+worker 不依赖 serve：给它一个准备好的运行目录（`spec.json`、`input/`、`repo/`），它就会拉起 Pi 并把产出写进 `out/`。内置样例可以用来比较不同提示词或模型的效果：
+
+```sh
+workling-worker samples                                        # 列出 worker/samples/ 下的样例
+workling-worker prepare add-function /tmp/run-a                # 展开成运行目录，基点固定
+workling-worker prepare add-function /tmp/run-b --codex-model gpt-6-luna --effort low
+workling-worker run /tmp/run-a                                 # 执行，产出在 /tmp/run-a/out/
+```
+
+未执行 `bun link` 时把 `workling-worker` 换成 `bun worker/cli.ts`。需要自定义模型服务时在运行目录写入 `secrets/llm.json`（`{ baseUrl, apiKey, api }`），否则使用本机 codex / Pi 的登录。
 
 开发约定见 [AGENTS.md](AGENTS.md)。
 

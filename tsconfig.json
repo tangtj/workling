@@ -11,5 +11,5 @@
     "types": ["bun"]
   },
   "include": ["src", "worker", "test", "drizzle.config.ts"],
-  "exclude": ["src/web/client"]
+  "exclude": ["src/web/client", "worker/samples"]
 }

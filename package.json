@@ -4,7 +4,8 @@
   "private": true,
   "license": "MIT",
   "bin": {
-    "workling": "src/cli.ts"
+    "workling": "src/cli.ts",
+    "workling-worker": "worker/cli.ts"
   },
   "type": "module",
   "scripts": {

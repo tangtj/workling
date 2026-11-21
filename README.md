@@ -86,7 +86,7 @@ Without an AI assistant, copy the files under [templates/repo/](templates/repo/)
 | `workling cancel <issue ref>` | Cancel a running task                                       |
 | `workling reset-password`     | Reset the admin password and sign out all sessions          |
 
-Without `bun link`, replace `workling` with `bun src/cli.ts`. `task` and `read` are internal commands invoked by serve and Pi. Run `cancel` and `reset-password` from the directory serve was started in, or set the same `WORKLING_WORKSPACE`. Issue references look like `github:owner/repo#12` or `https://github.com/owner/repo/issues/12`.
+Without `bun link`, replace `workling` with `bun src/cli.ts`. Run `cancel` and `reset-password` from the directory serve was started in, or set the same `WORKLING_WORKSPACE`. Issue references look like `github:owner/repo#12` or `https://github.com/owner/repo/issues/12`.
 
 After signing in, you can change the password on the settings page; use `workling reset-password` if you forget it.
 
@@ -158,6 +158,19 @@ bun run check          # format check, lint, type check and tests
 bun run format         # format the code
 bun run db:generate    # generate a migration after editing src/db/schema.ts
 ```
+
+### Running the worker alone
+
+The worker does not need serve: give it a prepared run directory (`spec.json`, `input/`, `repo/`) and it runs Pi and writes its outputs to `out/`. The bundled samples help compare prompts or models:
+
+```sh
+workling-worker samples                                        # list samples in worker/samples/
+workling-worker prepare add-function /tmp/run-a                # expand into a run directory with a fixed base commit
+workling-worker prepare add-function /tmp/run-b --codex-model gpt-6-luna --effort low
+workling-worker run /tmp/run-a                                 # run it; outputs land in /tmp/run-a/out/
+```
+
+Without `bun link`, replace `workling-worker` with `bun worker/cli.ts`. To use a custom model endpoint, write `secrets/llm.json` (`{ baseUrl, apiKey, api }`) into the run directory; otherwise the local codex / Pi login is used.
 
 Contribution conventions are in [AGENTS.md](AGENTS.md) (Chinese).
 
