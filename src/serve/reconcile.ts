@@ -1,4 +1,4 @@
-import { markComment } from './comment.ts'
+import { markComment, neutralizeMentions } from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
@@ -16,7 +16,7 @@ import { extractSummary, reportExcerpt } from '../task/summary.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
-import { landRun, neutralizeMentions, publishIssueResult, readRunIssueComment } from './land.ts'
+import { landRun, publishIssueResult, readRunIssueComment } from './land.ts'
 import { mirrorPath } from './mirror.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void

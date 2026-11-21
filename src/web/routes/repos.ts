@@ -27,6 +27,7 @@ function responseRepo(row: typeof repos.$inferSelect) {
   return {
     ...row,
     token: maskToken(row.token),
+    triageSince: row.triageSince?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -85,6 +86,34 @@ export function reposRoutes(deps: AppDeps): Hono {
       .where(eq(triageRecords.repoId, repo.id))
       .orderBy(desc(triageRecords.triagedAt), desc(triageRecords.id))
       .all()
+    const followUp = (row: typeof triageRecords.$inferSelect) => {
+      if (!row.suggestedAt) return null
+      if (
+        rows.some(
+          (other) =>
+            other.number === row.number &&
+            other.contentHash !== row.contentHash &&
+            (other.triagedAt > row.suggestedAt! ||
+              (other.triagedAt.getTime() === row.suggestedAt!.getTime() && other.id > row.id)),
+        )
+      )
+        return 'edited' as const
+      const issue = db
+        .select()
+        .from(issues)
+        .where(and(eq(issues.repoId, repo.id), eq(issues.number, row.number)))
+        .get()
+      if (issue && issue.createdAt > row.suggestedAt) return 'readyWithoutEdit' as const
+      return 'pending' as const
+    }
+    const suggestions = { total: 0, edited: 0, readyWithoutEdit: 0, pending: 0 }
+    for (const row of rows) {
+      const follow = followUp(row)
+      if (follow) {
+        suggestions.total++
+        suggestions[follow]++
+      }
+    }
     const records = rows
       .filter((row) => {
         if (seen.has(row.number)) return false
@@ -104,6 +133,9 @@ export function reposRoutes(deps: AppDeps): Hono {
           missing: JSON.parse(row.missing) as unknown,
           issueUpdatedAt: row.issueUpdatedAt.toISOString(),
           triagedAt: row.triagedAt.toISOString(),
+          suggestedAt: row.suggestedAt?.toISOString() ?? null,
+          labelRemovedAt: row.labelRemovedAt?.toISOString() ?? null,
+          followUp: followUp(row),
           readyAt: issue?.createdAt.toISOString() ?? null,
           readyAfterMinutes:
             issue && !row.alreadyReady
@@ -111,7 +143,14 @@ export function reposRoutes(deps: AppDeps): Hono {
               : null,
         }
       })
-    const summary = { total: 0, acceptReady: 0, acceptNotReady: 0, otherReady: 0, otherNotReady: 0 }
+    const summary = {
+      suggestions,
+      total: 0,
+      acceptReady: 0,
+      acceptNotReady: 0,
+      otherReady: 0,
+      otherNotReady: 0,
+    }
     // 列表展示最新尝试；最新尝试失败时，汇总沿用该 Issue 最近一次有结论的记录。
     for (const latest of records) {
       const row = rows.find((item) => item.number === latest.number && item.decision)
@@ -134,12 +173,12 @@ export function reposRoutes(deps: AppDeps): Hono {
     if (repo.platform !== 'github') return c.json({ error: '暂只支持 GitHub' }, 400)
     const body: unknown = await c.req.json().catch(() => null)
     const schema = Type.Object(
-      { level: Type.Union([Type.Literal('off'), Type.Literal('shadow')]) },
+      { level: Type.Union([Type.Literal('off'), Type.Literal('shadow'), Type.Literal('suggest')]) },
       { additionalProperties: false },
     )
     if (!Value.Check(schema, body)) return c.json({ error: '分诊级别无效' }, 400)
     db.update(repos)
-      .set({ triageLevel: body.level, updatedAt: new Date() })
+      .set({ triageLevel: body.level, triageSince: new Date(), updatedAt: new Date() })
       .where(eq(repos.id, repo.id))
       .run()
     return c.json(body)

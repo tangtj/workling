@@ -12,6 +12,7 @@ const issuesSchema = Type.Array(
 type Log = (message: string) => void
 
 export const WORKLING_LABELS = [
+  { name: 'workling:needs-info', color: 'FBCA04', description: '信息不全，补充正文后会重新分诊' },
   { name: 'workling:ready', color: '0E8A16', description: '等待 workling 领取' },
   { name: 'workling:queued', color: 'C5DEF5', description: 'workling 已入队' },
   { name: 'workling:running', color: '1D76DB', description: 'workling 执行中' },

@@ -19,7 +19,7 @@ import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
-import { triageShadow, type TriageState } from './triage.ts'
+import { triageIssues, type TriageState } from './triage.ts'
 type Log = (message: string) => void
 
 export type ServeStatus = {
@@ -161,7 +161,7 @@ export async function serve({
       }
       if (!signal.aborted) {
         try {
-          await triageShadow({ db, command, log, signal, state: triageState })
+          await triageIssues({ db, command, log, signal, state: triageState })
         } catch (error) {
           if (!signal.aborted) log(`分诊失败：${errorMessage(error)}`)
         }

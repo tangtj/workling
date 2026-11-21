@@ -96,6 +96,7 @@ test('分诊接口展示最新尝试并按最近结论统计四格，支持切�
     const data = await response.json()
     expect(data.level).toBe('shadow')
     expect(data.summary).toEqual({
+      suggestions: { total: 0, edited: 0, readyWithoutEdit: 0, pending: 0 },
       total: 4,
       acceptReady: 1,
       acceptNotReady: 1,
@@ -111,6 +112,97 @@ test('分诊接口展示最新尝试并按最近结论统计四格，支持切�
       readyAfterMinutes: null,
     })
     expect((await put(repo.id, 'off')).status).toBe(200)
+  } finally {
+    conn.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('级别切换写入时间下限并统计各类建议跟进', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'triage-followup-'))
+  const conn = await openDatabase(dir)
+  try {
+    const now = new Date('2026-01-01T12:00:00Z')
+    const repo = conn.db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'x',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()
+    const app = reposRoutes({ db: conn.db, options: { workspace: dir } })
+    for (const level of ['shadow', 'suggest', 'off'] as const) {
+      conn.db.update(repos).set({ triageSince: now }).run()
+      const before = Date.now()
+      const response = await app.request(`/api/repos/${repo.id}/triage-level`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ level }),
+      })
+      expect(response.status).toBe(200)
+      const updated = conn.db.select().from(repos).get()!
+      expect(updated.triageLevel).toBe(level)
+      expect(updated.triageSince!.getTime()).toBeGreaterThanOrEqual(
+        Math.floor(before / 1000) * 1000,
+      )
+    }
+    const insert = (number: number, hash: string, minute: number, suggested: boolean) =>
+      conn.db
+        .insert(triageRecords)
+        .values({
+          repoId: repo.id,
+          number,
+          title: 'task',
+          authorId: '1',
+          authorLogin: 'user',
+          trust: 'write',
+          contentHash: hash,
+          issueUpdatedAt: now,
+          checks: JSON.stringify({ missingSections: [], invalidDirectives: [] }),
+          missing: '[]',
+          decision: 'needs_info',
+          llmDecision: 'needs_info',
+          alreadyReady: false,
+          attempts: 1,
+          triagedAt: new Date(now.getTime() + minute * 60000),
+          suggestedAt: suggested ? new Date(now.getTime() + minute * 60000) : null,
+          suggestCommentUrl: suggested ? 'https://example.com/comment' : null,
+        })
+        .run()
+    insert(1, 'a', 1, true)
+    insert(1, 'b', 2, false)
+    insert(2, 'a', 1, true)
+    insert(3, 'a', 1, true)
+    insert(4, 'a', 1, false)
+    conn.db
+      .insert(issues)
+      .values({
+        repoId: repo.id,
+        number: 2,
+        status: 'queued',
+        createdAt: new Date(now.getTime() + 120000),
+        updatedAt: now,
+      })
+      .run()
+    const data = await (await app.request(`/api/repos/${repo.id}/triage`)).json()
+    expect(data.summary.suggestions).toEqual({
+      total: 3,
+      edited: 1,
+      readyWithoutEdit: 1,
+      pending: 1,
+    })
+    expect(data.records.find((r: { number: number }) => r.number === 2)).toMatchObject({
+      followUp: 'readyWithoutEdit',
+      suggestCommentUrl: 'https://example.com/comment',
+    })
+    expect(data.records.find((r: { number: number }) => r.number === 3).followUp).toBe('pending')
+    expect(data.records.find((r: { number: number }) => r.number === 4).followUp).toBeNull()
   } finally {
     conn.close()
     await rm(dir, { recursive: true, force: true })
