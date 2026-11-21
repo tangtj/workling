@@ -39,9 +39,10 @@ export function createExecutor(
   config: ExecutorSettings,
   command: Command,
   log: (message: string) => void = console.error,
+  hostPath?: (path: string) => Promise<string>,
 ): Executor {
   const process = processExecutor()
-  const docker = dockerExecutor({ command, config, log })
+  const docker = dockerExecutor({ command, config, log, hostPath })
   // 切换执行器后，进行中的运行仍须由启动它的执行器管理。
   const forRun = (run: RunHandle) => (run.container !== null ? docker : process)
   return {
