@@ -170,25 +170,6 @@ code {
   color: var(--muted);
   font-size: 13px;
 }
-.button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 8px 14px;
-  min-height: 36px;
-}
-.button--primary {
-  background: var(--accent);
-  color: var(--surface);
-  border-color: var(--accent);
-}
-.button--wide {
-  width: 100%;
-}
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -982,8 +963,10 @@ label.checkbox {
 .button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 34px;
+  min-height: 34px;
   padding: 0 14px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -992,18 +975,41 @@ label.checkbox {
   color: var(--text);
   white-space: nowrap;
 }
+.button--wide {
+  width: 100%;
+}
 .button:hover {
   text-decoration: none;
   background: var(--surface-2);
+}
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.button:disabled:hover {
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+.button--primary:disabled:hover {
+  background: var(--text);
+  border-color: var(--text);
 }
 .button--primary {
   background: var(--text);
   border-color: var(--text);
   color: var(--surface);
 }
+.button--primary:hover {
+  background: color-mix(in srgb, var(--text) 85%, var(--surface));
+  border-color: color-mix(in srgb, var(--text) 85%, var(--surface));
+}
 .button--danger {
   color: var(--failed);
   border-color: color-mix(in srgb, var(--failed) 40%, var(--border));
+}
+.button--danger:hover {
+  background: var(--surface-2);
+  color: var(--failed);
 }
 .button--sm {
   height: 28px;
@@ -1743,9 +1749,6 @@ body {
 .card:has(> .card-head),
 .card:has(> .toolbar) {
   padding: 0;
-}
-.button {
-  min-height: 34px;
 }
 .button--sm {
   min-height: 28px;
