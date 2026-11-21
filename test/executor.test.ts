@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createExecutor, workerEnv, type RunHandle, type StartSpec } from '../src/executor/index.ts'
 import * as runtime from '../src/runtime/process.ts'
-import { CLI } from '../src/runtime/paths.ts'
+import { WORKER_CLI } from '../src/runtime/paths.ts'
 import type { Command, RunOptions } from '../src/runtime/types.ts'
 import { parseExecutorSettings } from '../src/config/executor.ts'
 
@@ -115,7 +115,7 @@ test.each([undefined, 'workling-network'])(
           'workling:local',
           'bun',
           '--no-env-file',
-          'src/cli.ts',
+          'worker/cli.ts',
           'task',
           spec.ref,
           inner,
@@ -263,7 +263,14 @@ test('processExecutor 保持 launch 参数与日志、isTaskAlive 校验、killG
   const { spec, handle } = await scenario()
   const executor = processExecutor({
     launch(args, options) {
-      expect(args).toEqual([process.execPath, '--no-env-file', CLI, 'task', spec.ref, spec.taskDir])
+      expect(args).toEqual([
+        process.execPath,
+        '--no-env-file',
+        WORKER_CLI,
+        'task',
+        spec.ref,
+        spec.taskDir,
+      ])
       expect(options).toEqual({ env: spec.env, log: join(spec.taskDir, 'task.log') })
       return 123
     },

@@ -21,7 +21,7 @@ COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile --ignore-scripts --production
 COPY src/ ./src/
 COPY drizzle/ ./drizzle/
-COPY configs/ ./configs/
+COPY worker/ ./worker/
 COPY tsconfig.json ./
 # 在线更新比较 Dockerfile 与入口脚本，运行环境变化时拒绝在线更新。
 COPY deploy/docker/Dockerfile ./deploy/docker/Dockerfile

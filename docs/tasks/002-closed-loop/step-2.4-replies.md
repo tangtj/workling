@@ -62,7 +62,7 @@ readReplies(dir): Promise<Reply[]>   // 文件不存在返回 []；最多读 1 M
 
 ## 5. Pi 提示词
 
-`configs/workling/AGENTS.md`：有本轮反馈时，把逐条处理说明写到 `out/replies.json`（每个 `F<id>` 一条，`feedbackId` 写数字），说明已改 / 未改及原因；`out/issue-comment.md` 只写本轮总结，不再逐条列出。
+`worker/configs/AGENTS.md`（原 `configs/workling/AGENTS.md`）：有本轮反馈时，把逐条处理说明写到 `out/replies.json`（每个 `F<id>` 一条，`feedbackId` 写数字），说明已改 / 未改及原因；`out/issue-comment.md` 只写本轮总结，不再逐条列出。
 
 ## 6. Web
 

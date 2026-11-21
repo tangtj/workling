@@ -63,7 +63,7 @@ export function dockerExecutor({
           config.taskImage,
           'bun',
           '--no-env-file',
-          'src/cli.ts',
+          'worker/cli.ts',
           'task',
           spec.ref,
           inner,

@@ -169,13 +169,13 @@ src/
 ├── config/      配置：环境变量、Pi、执行器
 ├── db/          数据库 schema 与连接
 ├── serve/       常驻服务：轮询、拉起、对账
-├── task/        单次任务：克隆仓库、拉起 Pi、任务目录约定
+├── contract/    主体与 worker 的契约：spec、产出、任务目录与报告格式
 ├── executor/    执行器：本机进程 / Docker
 ├── issue/       Issue 引用解析与读取
 ├── platform/    GitHub 调用
 ├── web/         管理页：路由、页面、静态资源
 └── runtime/     子进程、路径等底层工具
-configs/         Pi 的工作约定（系统提示）
+worker/          worker：单次运行入口、Pi 编排、Pi 工作约定（configs/）
 drizzle/         数据库迁移
 deploy/          Docker 与 systemd 部署文件
 ```

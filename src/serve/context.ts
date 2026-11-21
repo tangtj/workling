@@ -11,7 +11,7 @@ import { feedbackSourceNames } from './replies.ts'
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
-import { assertTaskDir } from '../task/dir.ts'
+import { assertTaskDir } from '../contract/result.ts'
 import { redactSecrets } from './secret-scan.ts'
 
 const login = Type.Object({ login: Type.String() })

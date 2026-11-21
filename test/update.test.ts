@@ -75,6 +75,7 @@ async function fixture(different: boolean | 'entrypoint' = false) {
     join(imageRoot, 'deploy/docker'),
     data,
     join(source, 'src'),
+    join(source, 'worker'),
     join(source, 'drizzle/meta'),
     join(source, 'deploy/docker'),
   ])
@@ -83,6 +84,7 @@ async function fixture(different: boolean | 'entrypoint' = false) {
     'package.json': '{}',
     'bun.lock': '{}',
     'src/cli.ts': '',
+    'worker/cli.ts': '',
     'drizzle/meta/_journal.json': '{}',
     'deploy/docker/Dockerfile': different === true ? 'FROM different' : 'FROM image',
     'deploy/docker/entrypoint.sh': different === 'entrypoint' ? 'different' : 'entrypoint',

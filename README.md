@@ -169,13 +169,13 @@ src/
 ├── config/      configuration: environment, Pi, executor
 ├── db/          database schema and connection
 ├── serve/       long-running service: polling, launching, reconciliation
-├── task/        a single task: clone, run Pi, task directory contract
+├── contract/    host–worker contract: spec, outputs, task directory and report format
 ├── executor/    executors: local process / Docker
 ├── issue/       Issue reference parsing and reading
 ├── platform/    GitHub calls
 ├── web/         admin UI: routes, views, static assets
 └── runtime/     subprocess, path and other low-level helpers
-configs/         Pi working conventions (system prompt)
+worker/          worker: single-run entry, Pi orchestration, Pi conventions (configs/)
 drizzle/         database migrations
 deploy/          Docker and systemd deployment files
 ```

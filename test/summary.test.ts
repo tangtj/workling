@@ -7,7 +7,7 @@ import {
   reportExcerpt,
   reportOutcome,
   reportResultLine,
-} from '../src/task/summary.ts'
+} from '../src/contract/report.ts'
 
 test.each([
   ['# 结果\n\n部分完成。尚不能…', '部分完成。尚不能…', 'partial'],

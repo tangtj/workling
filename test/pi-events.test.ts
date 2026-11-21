@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createPiEventFormatter } from '../src/task/pi-events.ts'
+import { createPiEventFormatter } from '../worker/pi-events.ts'
 
 test('工具开始格式化多行命令、截断、路径回退并隐藏密钥', () => {
   const f = createPiEventFormatter({ secrets: ['secret'], now: () => new Date(2026, 0, 1) })

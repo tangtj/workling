@@ -6,7 +6,7 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
 } from '@earendil-works/pi-coding-agent'
-import noBashTimeout from '../configs/workling/extensions/no-bash-timeout.ts'
+import noBashTimeout from '../worker/configs/extensions/no-bash-timeout.ts'
 
 test('扩展移除 bash timeout，保留其他输入和工具调用且不阻止执行', async () => {
   let handler: ExtensionHandler<ToolCallEvent, ToolCallEventResult> | undefined

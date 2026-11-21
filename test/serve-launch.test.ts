@@ -14,7 +14,7 @@ import { issues, repos, runs } from '../src/db/schema.ts'
 import { parsePiSettings, readPiSettings, updatePiSettings } from '../src/config/pi.ts'
 import { launchQueued } from '../src/serve/launch.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
-import { readResult } from '../src/task/dir.ts'
+import { readResult } from '../src/contract/result.ts'
 import { localRemote } from './helpers/git.ts'
 import { baseRef, fakeExecutor, clock, scenario } from './helpers/serve.ts'
 

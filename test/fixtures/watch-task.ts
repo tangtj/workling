@@ -1,4 +1,4 @@
-import { writeResult } from '../../src/task/dir.ts'
+import { writeResult } from '../../src/contract/result.ts'
 import { readSpec } from '../../src/contract/spec.ts'
 import { writeDeliveryFixture } from '../helpers/delivery.ts'
 

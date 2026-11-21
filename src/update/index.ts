@@ -21,7 +21,7 @@ import { ROOT } from '../runtime/paths.ts'
 import { run } from '../runtime/process.ts'
 import type { Command } from '../runtime/types.ts'
 import { readVersion, compareVersions, validTag } from '../runtime/version.ts'
-import { redact } from '../task/summary.ts'
+import { redact } from '../contract/report.ts'
 import { downloadTarball, listReleases, repoPath, type UpdateFetch } from './github.ts'
 import { readState, writeState, type UpdateState } from './state.ts'
 
@@ -356,6 +356,7 @@ export async function startUpdate({
           for (const file of [
             'package.json',
             'src/cli.ts',
+            'worker/cli.ts',
             'drizzle/meta/_journal.json',
             'deploy/docker/Dockerfile',
             'deploy/docker/entrypoint.sh',
