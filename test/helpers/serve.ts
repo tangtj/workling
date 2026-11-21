@@ -64,6 +64,8 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
       return ''
     }
     if (args[0] === 'gh' && args[1] === 'api' && args[4] === '.default_branch') return 'main'
+    if (args[1] === 'issue' && args[2] === 'view' && args.at(-1) === 'labels')
+      return JSON.stringify({ labels: [{ name: 'workling:running' }] })
     calls.push({ args, options })
     if (args[0] === 'gh' && args[1] === 'issue' && args[2] === 'view')
       return JSON.stringify({

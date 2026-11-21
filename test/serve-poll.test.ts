@@ -33,6 +33,8 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
     const calls: { args: string[]; options?: RunOptions }[] = []
     const command: Command = async (args, options) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
+      if (args[2] === 'view' && args.at(-1) === 'labels')
+        return JSON.stringify({ labels: [{ name: 'workling:ready' }] })
       calls.push({ args, options })
       if (args[1] === 'label' || args[2] === 'edit') return ''
       if (args[4] === 'a/fail') throw new Error('出错')
@@ -121,6 +123,12 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
     const calls: string[][] = []
     const command: Command = async (args) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
+      if (args[2] === 'view' && args.at(-1) === 'labels')
+        return JSON.stringify({
+          labels: ['ready', 'running', 'done', 'failed'].map((name) => ({
+            name: `workling:${name}`,
+          })),
+        })
       calls.push(args)
       if (args[2] !== 'list') return ''
       return JSON.stringify(
@@ -171,6 +179,11 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
       '4',
       '7',
     ])
+    for (const edit of calls.filter(
+      (args) => args[2] === 'edit' && ['1', '2'].includes(args[3]!),
+    )) {
+      for (const label of ['running', 'done', 'failed']) expect(edit).toContain(`workling:${label}`)
+    }
     await pollOnce({
       db,
       command,
@@ -258,6 +271,8 @@ test('标签创建缓存、同步失败重试且不阻塞后续 Issue', async ()
     let failEdit = true
     const command: Command = async (args, options) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
+      if (args[2] === 'view' && args.at(-1) === 'labels')
+        return JSON.stringify({ labels: [{ name: 'workling:ready' }] })
       calls.push({ args, options })
       if (args[1] === 'label' && failCreate) throw new Error('创建失败')
       if (args[2] === 'edit' && args[3] === '1' && failEdit) throw new Error('编辑失败')

@@ -21,6 +21,7 @@ import type { Settings } from '../config/env.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import { landRun, publishIssueResult, readRunIssueComment } from './land.ts'
 import { mirrorPath } from './mirror.ts'
+import { setStatusLabel } from './status-label.ts'
 import { publishReplies } from './replies.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
@@ -210,18 +211,16 @@ export async function reconcile({
         }
       }
       if (repo.platform === 'github') {
-        await sync([
-          'gh',
-          'issue',
-          'edit',
-          String(issue.number),
-          '-R',
-          repo.path,
-          '--remove-label',
-          'workling:running',
-          '--add-label',
-          status === 'done' ? 'workling:done' : 'workling:failed',
-        ])
+        try {
+          await setStatusLabel({
+            repo,
+            number: issue.number,
+            target: status === 'done' ? 'done' : 'failed',
+            command,
+          })
+        } catch (error) {
+          log(`${repo.ref} #${issue.number} 更新 GitHub 失败：${errorMessage(error)}`)
+        }
         try {
           const signal = new AbortController().signal
           const parent = await readParent({ repo, number: issue.number, command, signal })
