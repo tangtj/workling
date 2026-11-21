@@ -1,4 +1,4 @@
-<!-- workling 接入文档 v3，来源 https://github.com/tangtj/workling/tree/main/templates -->
+<!-- workling 接入文档 v4，来源 https://github.com/tangtj/workling/tree/main/templates -->
 
 # 用 workling 推进开发
 
@@ -52,7 +52,11 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 
 ## 验收
 
-- [ ] <可检查的结果：命令、测试、页面表现>
+- [ ] <可检查的结果：命令、测试、文件内容>
+
+## 人工验收
+
+- [ ] <需要人在浏览器或真实环境确认的项；workling 不据此判定是否完成>
 
 ## 不做
 
@@ -66,6 +70,8 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 模型：<可选，覆盖默认 codex 模型>
 强度：<可选，覆盖默认推理强度>
 ```
+
+「验收」只写执行方能用命令、测试、文件内容核对的项；页面视觉、浏览器交互、真实环境部署等写进可选的「人工验收」，不据此判定任务是否完成。
 
 `分支：`、`模型：`、`强度：` 各占一行，冒号用中文全角冒号。
 
