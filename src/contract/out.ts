@@ -35,6 +35,16 @@ export const checklistSchema = Type.Array(
 
 export type ChecklistItem = Type.Static<typeof checklistSchema>[number]
 
+export const repliesSchema = Type.Array(
+  Type.Object({
+    feedbackId: Type.Integer({ minimum: 1 }),
+    body: Type.String({ minLength: 1, maxLength: 10_000 }),
+  }),
+  { maxItems: 100 },
+)
+
+export type Reply = Type.Static<typeof repliesSchema>[number]
+
 export function missingOutput(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
 }
@@ -92,6 +102,22 @@ export async function readChecklist(dir: string): Promise<ChecklistItem[]> {
     throw new Error('out/checklist.json 不是有效的 JSON', { cause })
   }
   if (!Value.Check(checklistSchema, value)) throw new Error('out/checklist.json 的结构无效')
+  return value
+}
+
+export async function readReplies(dir: string): Promise<Reply[]> {
+  const raw = await readOutputFile(dir, 'replies.json', 1024 * 1024).catch((error: unknown) => {
+    if (missingOutput(error)) return undefined
+    throw error
+  })
+  if (!raw) return []
+  let value: unknown
+  try {
+    value = JSON.parse(raw.toString('utf8'))
+  } catch (cause) {
+    throw new Error('out/replies.json 不是有效的 JSON', { cause })
+  }
+  if (!Value.Check(repliesSchema, value)) throw new Error('out/replies.json 的结构无效')
   return value
 }
 

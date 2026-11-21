@@ -1,0 +1,7 @@
+{
+  "kind": "implement",
+  "issue": { "ref": "github:example/calc#1", "title": "增加 subtract 函数" },
+  "branch": "workling/1-subtract",
+  "model": { "codex": "gpt-6.1-terra", "effort": "medium" },
+  "git": { "name": "Workling", "email": "workling@example.invalid" }
+}

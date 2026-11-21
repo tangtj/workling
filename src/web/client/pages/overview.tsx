@@ -76,7 +76,7 @@ export function OverviewPage() {
           </Link>
         </div>
       </header>
-      <div className={`health${status?.lastPollError ? ' warn' : ''}`}>
+      <div className={`health${status?.lastPollError || status?.workerError ? ' warn' : ''}`}>
         {status ? (
           <>
             <span>
@@ -88,6 +88,7 @@ export function OverviewPage() {
               并发 {running.length} / {concurrency} · 超时 {status.timeout} 分钟
             </span>
             {status.lastPollError && <span>{status.lastPollError}</span>}
+            {status.workerError && <span>暂停拉起：{status.workerError}</span>}
           </>
         ) : (
           <span>

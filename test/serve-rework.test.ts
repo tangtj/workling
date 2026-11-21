@@ -16,14 +16,14 @@ import { clock, scenario } from './helpers/serve.ts'
 import { launchQueued } from '../src/serve/launch.ts'
 import { recoverOrphanFeedback } from '../src/serve/reconcile.ts'
 import { run as ignoreOldFeedback } from '../src/upgrade/steps/v0.3.0-01-ignore-observed-feedback.ts'
-import { readResult } from '../src/task/dir.ts'
+import { readResult } from '../src/contract/result.ts'
 import { fakeExecutor } from './helpers/serve.ts'
 import { localRemote } from './helpers/git.ts'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readSpec } from '../src/contract/spec.ts'
 import { writeOutResult } from '../src/contract/out.ts'
-import { writeResult } from '../src/task/dir.ts'
+import { writeResult } from '../src/contract/result.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
 
 test('只选择运行后当前 PR 或 Issue 的待观察反馈，并且入队一次', async () => {
@@ -388,7 +388,7 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
       .where(eq(issues.id, issue.id))
       .run()
     const date = new Date(clock.getTime() + 1000)
-    s.db
+    const review = s.db
       .insert(feedback)
       .values({
         repoId: issue.repoId,
@@ -408,7 +408,8 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
         updatedAt: date,
         seenAt: date,
       })
-      .run()
+      .returning()
+      .get()
     await queueRework(s.options)
     expect(s.db.select().from(issues).get()?.status).toBe('queued')
     for (let i = 0; i < 10; i++)
@@ -469,6 +470,13 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
             commits: 1,
           })
           await writeFile(join(out, 'pr-body.md'), 'Updated')
+          await writeFile(
+            join(out, 'replies.json'),
+            JSON.stringify([
+              { feedbackId: review.id, body: '已改：content.txt 改为 reworked' },
+              { feedbackId: 9999, body: '不属于本次运行' },
+            ]),
+          )
           await writeResult(taskDir, {
             exitCode: 0,
             signal: null,
@@ -497,6 +505,25 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
     expect(await remote.write(['rev-parse', `refs/heads/${branch}`])).toBe(tip)
     expect(await remote.write(['merge-base', '--is-ancestor', priorTip, tip])).toBe('')
     expect(s.calls.filter(({ args }) => args[1] === 'pr' && args[2] === 'create')).toHaveLength(0)
+    const prReply = s.calls.find(
+      ({ args, options }) =>
+        args[1] === 'pr' && args[2] === 'comment' && options?.input?.includes('反馈处理说明'),
+    )?.options?.input
+    expect(prReply).toContain(`F${review.id} · Review（CHANGES_REQUESTED）`)
+    expect(prReply).toContain('已改：content.txt 改为 reworked')
+    expect(prReply).not.toContain('不属于本次运行')
+    const issueReply = s.calls.find(
+      ({ args, options }) =>
+        args[1] === 'issue' && args[2] === 'comment' && options?.input?.includes('反馈处理说明'),
+    )?.options?.input
+    expect(issueReply).toContain('本轮未单独说明')
+    expect(
+      s.db
+        .select()
+        .from(feedback)
+        .all()
+        .every((row) => row.status === 'replied'),
+    ).toBe(true)
   } finally {
     await s.dispose()
   }

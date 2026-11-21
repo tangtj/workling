@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readIssue } from '../src/issue/read.ts'
-import { createTaskDir } from '../src/task/dir.ts'
+import { createTaskDir } from '../src/serve/task-dir.ts'
 import { parseIssueRef } from '../src/issue/reference.ts'
 import type { Command } from '../src/runtime/types.ts'
 

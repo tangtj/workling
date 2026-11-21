@@ -1,0 +1,75 @@
+# 只发布 worker 镜像，主体不动：推送 worker-v* tag 即可。主体的 v* 发布也会发布同版本的 worker 镜像。
+# 镜像标签 io.workling.contract 声明契约版本，主体拉起前检查，不兼容时不拉起并在管理页提示。
+# 工作流可写 GHCR，因此不在 pull_request 上触发。
+name: 发布 worker
+on:
+  push:
+    tags: ['worker-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要发布的 tag，如 worker-v0.1.0
+        required: true
+concurrency:
+  group: release-worker
+  cancel-in-progress: false
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 30
+    steps:
+      - name: 校验标签
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$EVENT_NAME" == push ]]; then TAG="$REF_NAME"; else TAG="$INPUT_TAG"; fi
+          [[ "$TAG" =~ ^worker-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo '非法 tag' >&2; exit 1; }
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#worker-}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+      - name: 安装依赖并检查
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run check
+      - name: 读取契约版本
+        run: |
+          contract=$(bun -e 'import { CONTRACT_VERSION } from "./src/contract/spec.ts"; console.log(CONTRACT_VERSION)')
+          echo "CONTRACT=$contract" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}-worker
+          # 保留 worker- 前缀，避免与主体同版本号的 worker 镜像标签冲突；latest 只由主体发布更新。
+          tags: |
+            type=raw,value=${{ env.TAG }}
+            type=raw,value=contract-${{ env.CONTRACT }},enable=${{ !contains(env.VERSION, '-') }}
+          flavor: latest=false
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: worker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            WORKER_VERSION=${{ env.VERSION }}
+            WORKER_CONTRACT=${{ env.CONTRACT }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker

@@ -2,7 +2,45 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { Command, Environment } from '../runtime/types.ts'
 import type { ExecutorSettings } from '../config/executor.ts'
+import { checkDockerHost, hostPathOf } from './docker-host.ts'
 import type { Executor } from './index.ts'
+
+// worker 默认放在单独的网络里，不与主体或其他容器共享 compose 网络；enable_icc=false 依赖 Docker 的
+// iptables 规则禁止同网段容器互访（Linux 上生效，Docker Desktop 实测不生效）。仍可出网访问 LLM 与包管理源；
+// 主体只监听宿主机 127.0.0.1，Linux bridge 网络中的容器访问不到宿主机回环地址上的管理端口。
+export const DEFAULT_WORKER_NETWORK = 'workling-worker'
+
+async function ensureWorkerNetwork(command: Command): Promise<void> {
+  try {
+    await command(['docker', 'network', 'inspect', DEFAULT_WORKER_NETWORK], { quietStderr: true })
+    return
+  } catch {
+    // 不存在时创建；并发创建失败时再确认一次。
+  }
+  try {
+    await command(
+      [
+        'docker',
+        'network',
+        'create',
+        '--driver',
+        'bridge',
+        '--opt',
+        'com.docker.network.bridge.enable_icc=false',
+        '--label',
+        'io.workling.network=worker',
+        DEFAULT_WORKER_NETWORK,
+      ],
+      { quietStderr: true },
+    )
+  } catch (error) {
+    await command(['docker', 'network', 'inspect', DEFAULT_WORKER_NETWORK], {
+      quietStderr: true,
+    }).catch(() => {
+      throw error
+    })
+  }
+}
 
 export function dockerExecutor({
   command,
@@ -15,6 +53,14 @@ export function dockerExecutor({
 }): Executor {
   return {
     async start(spec) {
+      const host = await checkDockerHost(command)
+      if (host.error) throw new Error(host.error)
+      // rootless 时容器内的 root 映射为运行 Docker 的宿主机用户，任务目录的属主才保持一致；
+      // 若改用宿主机 uid，会被映射到 subuid，主体无法清理 worker 写下的文件。
+      const user = host.rootless ? '0:0' : `${process.getuid!()}:${process.getgid!()}`
+      const source = await hostPathOf(command, spec.taskDir)
+      const network = config.taskNetwork ?? DEFAULT_WORKER_NETWORK
+      if (!config.taskNetwork) await ensureWorkerNetwork(command)
       const name = `workling-run-${spec.runId}`
       const inner = `/data/tasks/${basename(spec.taskDir)}`
       await mkdir(join(spec.taskDir, 'home'), { mode: 0o700 })
@@ -45,7 +91,7 @@ export function dockerExecutor({
           `workling.issue=${spec.ref}`,
           '--init',
           '--user',
-          `${process.getuid!()}:${process.getgid!()}`,
+          user,
           '--cap-drop',
           'ALL',
           '--security-opt',
@@ -56,14 +102,15 @@ export function dockerExecutor({
           config.taskMemory,
           '--pids-limit',
           String(config.taskPids),
-          ...(config.taskNetwork ? ['--network', config.taskNetwork] : []),
+          '--network',
+          network,
           '-v',
-          `${spec.taskDir}:${inner}`,
+          `${source}:${inner}`,
           ...variables.flatMap((key) => ['-e', key]),
           config.taskImage,
           'bun',
           '--no-env-file',
-          'src/cli.ts',
+          'worker/cli.ts',
           'task',
           spec.ref,
           inner,

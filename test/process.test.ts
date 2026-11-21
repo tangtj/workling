@@ -182,7 +182,7 @@ test('task 进程组收到 SIGKILL 时，同组假 Pi 在两秒内结束', async
 })
 
 test('streamProcess 处理 UTF-8 分块、LF、CRLF 和末尾残留并返回退出码', async () => {
-  const { streamProcess } = await import('../src/runtime/process.ts')
+  const { streamProcess } = await import('../worker/process.ts')
   const lines: string[] = []
   const script = String.raw`const b = Buffer.from('甲\u2028乙\r\n丙\n尾'); process.stdout.write(b.subarray(0, 1)); setTimeout(() => { process.stdout.write(b.subarray(1, 8)); setTimeout(() => { process.stdout.write(b.subarray(8)); process.exitCode = 7 }, 10) }, 10)`
   expect(
@@ -192,7 +192,7 @@ test('streamProcess 处理 UTF-8 分块、LF、CRLF 和末尾残留并返回退�
 })
 
 test('streamProcess 中止时结束进程组', async () => {
-  const { streamProcess } = await import('../src/runtime/process.ts')
+  const { streamProcess } = await import('../worker/process.ts')
   const controller = new AbortController()
   const pending = streamProcess(
     [process.execPath, '-e', "console.log('ready'); setInterval(() => {}, 1000)"],

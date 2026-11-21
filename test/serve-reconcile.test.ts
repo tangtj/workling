@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { writeOutResult } from '../src/contract/out.ts'
 import { writeLlmSecrets } from '../src/contract/secrets.ts'
 import { issues, runs } from '../src/db/schema.ts'
-import { writeResult } from '../src/task/dir.ts'
+import { writeResult } from '../src/contract/result.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
 import { fakeExecutor, clock, scenario } from './helpers/serve.ts'
 

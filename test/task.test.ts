@@ -9,17 +9,13 @@ import { CONTRACT_VERSION, writeSpec, type Spec } from '../src/contract/spec.ts'
 import { ROOT } from '../src/runtime/paths.ts'
 import { isAlive } from '../src/runtime/process.ts'
 import type { Command, Environment } from '../src/runtime/types.ts'
-import {
-  assertTaskDir,
-  createTaskDir,
-  readResult,
-  taskDirName,
-  writeResult,
-} from '../src/task/dir.ts'
-import { runTask } from '../src/task/index.ts'
+import { assertTaskDir, readResult, writeResult } from '../src/contract/result.ts'
+import { createTaskDir, taskDirName } from '../src/serve/task-dir.ts'
+import { runTask } from '../worker/task.ts'
 import { localRemote } from './helpers/git.ts'
 
-const ref = parseIssueRef('github:a/b#12')
+const ref = 'github:a/b#12'
+const issueRef = parseIssueRef(ref)
 const spec: Spec = {
   contract: CONTRACT_VERSION,
   kind: 'implement',
@@ -68,12 +64,12 @@ async function until(check: () => Promise<boolean> | boolean) {
 test('任务目录名使用 UTC，创建权限 0700 且拒绝重名和非法目录层级', async () => {
   const workspace = await temp()
   const now = new Date('2026-11-14T10:30:00Z')
-  expect(taskDirName(ref, now)).toBe('a-b-12-20261114T103000Z')
-  const dir = await createTaskDir(workspace, ref, now)
-  expect(dir).toBe(join(workspace, 'tasks', taskDirName(ref, now)))
+  expect(taskDirName(issueRef, now)).toBe('a-b-12-20261114T103000Z')
+  const dir = await createTaskDir(workspace, issueRef, now)
+  expect(dir).toBe(join(workspace, 'tasks', taskDirName(issueRef, now)))
   expect((await stat(dir)).mode & 0o777).toBe(0o700)
   expect((await stat(join(workspace, 'tasks'))).mode & 0o777).toBe(0o700)
-  await expect(createTaskDir(workspace, ref, now)).rejects.toThrow()
+  await expect(createTaskDir(workspace, issueRef, now)).rejects.toThrow()
   expect(assertTaskDir(workspace, dir)).toBe(dir)
   for (const path of [
     workspace,
@@ -108,7 +104,7 @@ test('result 原子写入后正常往返，缺失、半截 JSON 和错误形状�
 
 async function setupTask({ pi, docBranch }: { pi?: string; docBranch?: string } = {}) {
   const workspace = await temp()
-  const dir = await prepareTask(await createTaskDir(workspace, ref), pi, docBranch)
+  const dir = await prepareTask(await createTaskDir(workspace, issueRef), pi, docBranch)
   const record = join(dir, 'pi.json')
   const env: Environment = {
     ...process.env,
@@ -158,9 +154,9 @@ test('runTask 使用已准备的工作副本，假 Pi 收到两个分支和正�
     '--session-dir',
     join(options.dir, 'pi-session'),
     '--append-system-prompt',
-    join(ROOT, 'configs/workling/AGENTS.md'),
+    join(ROOT, 'worker/configs/AGENTS.md'),
     '--extension',
-    join(ROOT, 'configs/workling/extensions/no-bash-timeout.ts'),
+    join(ROOT, 'worker/configs/extensions/no-bash-timeout.ts'),
     '--model',
     'test-provider/model',
     '--',
@@ -317,7 +313,7 @@ test('runTask 使用指定的 Pi 模型和默认入口，拒绝不支持的引�
       return { code: 0, signal: null }
     },
   })
-  for (const other of [{ ...ref, host: 'enterprise.example' }, parseIssueRef('gitlab:a/b#12')])
+  for (const other of ['github:enterprise.example/a/b#12', 'gitlab:a/b#12'])
     await expect(runTask({ ...base, ref: other })).rejects.toThrow('task 目前只支持 github.com')
 })
 
@@ -534,7 +530,7 @@ test('runTask 中止时结束假 Pi 与其子进程并返回信号', async () =>
 })
 
 test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
-  const prompt = await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')
+  const prompt = await readFile(join(ROOT, 'worker/configs/AGENTS.md'), 'utf8')
   expect(prompt).toContain('<任务目录>/input/issue.md')
   expect(prompt).toContain('<任务目录>/input/attachments/')
   const [steps, prohibitions] = prompt.split('## 禁止')
@@ -557,7 +553,7 @@ test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
 })
 
 test('Pi 工作约定对部分完成的 PR 使用 Refs，不写关闭关键字', async () => {
-  const prompt = await readFile(join(ROOT, 'configs/workling/AGENTS.md'), 'utf8')
+  const prompt = await readFile(join(ROOT, 'worker/configs/AGENTS.md'), 'utf8')
   expect(prompt).toContain('正文第一行为 `Closes #<号>`')
   expect(prompt).toContain('标题为 `[部分完成] <Issue 标题>`')
   expect(prompt).toContain('正文第一行为 `Refs #<号>`')

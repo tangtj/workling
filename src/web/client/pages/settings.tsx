@@ -417,7 +417,9 @@ function SettingsCard({
             max: '65536',
             required: true,
           })}
-          {input('taskNetwork', '网络', { hint: '留空表示 Docker 默认' })}
+          {input('taskNetwork', '网络', {
+            hint: '留空时使用 workling 自动创建的独立网络 workling-worker',
+          })}
         </fieldset>
       </div>
     )

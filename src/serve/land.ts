@@ -67,7 +67,7 @@ function preparePr(title: string, body: string, number: number, outcome: 'comple
   return { title, body, partial }
 }
 
-async function runOutDir(taskDir: string): Promise<string> {
+export async function runOutDir(taskDir: string): Promise<string> {
   const out = join(taskDir, 'out')
   if (!(await lstat(taskDir)).isDirectory() || !(await lstat(out)).isDirectory())
     throw new Error('任务目录或 out/ 不是普通目录')

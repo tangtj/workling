@@ -1,4 +1,8 @@
-import { importExecutorSettings, readExecutorSettings } from '../config/executor.ts'
+import {
+  importExecutorSettings,
+  readExecutorSettings,
+  updateExecutorSettings,
+} from '../config/executor.ts'
 import { ensurePassword } from '../web/auth.ts'
 import { eq } from 'drizzle-orm'
 import { openDatabase } from '../db/index.ts'
@@ -18,6 +22,8 @@ import { launchQueued } from './launch.ts'
 import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
+import { ensureWorkerImage } from '../executor/worker-image.ts'
+import { checkDockerHost } from '../executor/docker-host.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
 import { triageIssues, type TriageState } from './triage.ts'
 type Log = (message: string) => void
@@ -29,6 +35,8 @@ export type ServeStatus = {
   startedAt: Date
   lastPollAt: Date | null
   lastPollError: string | null
+  /** docker 执行器的 worker 镜像不兼容时的原因；此时暂停拉起新任务。 */
+  workerError?: string | null
 }
 
 function waitForNext(seconds: number, signal: AbortSignal): Promise<void> {
@@ -67,6 +75,7 @@ export async function serve({
     startedAt: new Date(),
     lastPollAt: null,
     lastPollError: null,
+    workerError: null,
   }
   let server: ReturnType<typeof Bun.serve> | undefined
   try {
@@ -81,8 +90,17 @@ export async function serve({
     if (ignored.length > 0) log(`以下环境变量已不再生效，请在设置页修改：${ignored.join('、')}`)
     const executorImport = importExecutorSettings(db, env)
     if (executorImport.imported) log('已从环境变量导入执行器配置')
-    if (executorImport.ignored.length > 0)
-      log(`以下环境变量已不再生效，请在设置页修改：${executorImport.ignored.join('、')}`)
+    // 部署要求 Docker 执行器时，旧库里的本机进程执行器一次性切换过来。
+    if (settings.requireDocker && readExecutorSettings(db).sandbox !== 'docker') {
+      updateExecutorSettings(db, { sandbox: 'docker' })
+      log('已按 WORKLING_REQUIRE_DOCKER=true 切换为 Docker 执行器')
+    }
+    // compose 部署由 .env 决定 worker 镜像，随主体版本一起升级；设置了它时每次启动覆盖设置页的任务镜像。
+    const workerImage = env.WORKLING_WORKER_IMAGE?.trim()
+    if (workerImage && readExecutorSettings(db).taskImage !== workerImage) {
+      updateExecutorSettings(db, { taskImage: workerImage })
+      log(`任务镜像已按 WORKLING_WORKER_IMAGE 设为 ${workerImage}`)
+    }
     const password = await ensurePassword(db)
     if (password)
       log(
@@ -135,6 +153,8 @@ export async function serve({
     const feedbackState: FeedbackState = { accounts: new Map(), permissions: new Map() }
     const triageState: TriageState = { permissions: new Map() }
     let wasPaused = false
+    let warnedRootful = false
+    const pulledImages = new Set<string>()
     while (!signal.aborted) {
       const pi = readPiSettings(db)
       const executorSettings = readExecutorSettings(db)
@@ -171,7 +191,7 @@ export async function serve({
           if (!signal.aborted) log(`观察反馈失败：${errorMessage(error)}`)
         }
         try {
-          await queueRework({ db, command, log, signal })
+          await queueRework({ db, command, log, signal, reworkLimit: settings.reworkLimit })
         } catch (error) {
           if (!signal.aborted) log(`指令重试失败：${errorMessage(error)}`)
         }
@@ -181,7 +201,26 @@ export async function serve({
           const paused = launchPaused()
           if (paused && !wasPaused) log('在线更新进行中，暂停拉起新任务')
           wasPaused = paused
-          if (!paused)
+          let workerError: string | null = null
+          if (settings.requireDocker && executorSettings.sandbox !== 'docker')
+            workerError =
+              '已设置 WORKLING_REQUIRE_DOCKER=true，本机进程执行器不可用；请在设置页把执行器改为 Docker'
+          else if (executorSettings.sandbox === 'docker') {
+            const host = await checkDockerHost(command)
+            if (!host.error && !host.rootless && !warnedRootful) {
+              warnedRootful = true
+              log(
+                '提示：Docker 不是 rootless 模式，worker 容器逃逸即获得宿主机 root；建议改用 rootless Docker 并设置 DOCKER_HOST',
+              )
+            }
+            workerError =
+              host.error ??
+              (await ensureWorkerImage(command, executorSettings.taskImage, pulledImages, log))
+          }
+          if (workerError && workerError !== status.workerError)
+            log(`暂停拉起新任务：${workerError}`)
+          status.workerError = workerError
+          if (!paused && !workerError)
             await launchQueued({
               db,
               command,

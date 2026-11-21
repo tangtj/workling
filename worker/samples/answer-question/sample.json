@@ -1,0 +1,7 @@
+{
+  "kind": "implement",
+  "issue": { "ref": "github:example/greeter#2", "title": "greet 遇到空名字时会怎样？" },
+  "branch": "workling/2-greet",
+  "model": { "codex": "gpt-6.1-terra", "effort": "low" },
+  "git": { "name": "Workling", "email": "workling@example.invalid" }
+}

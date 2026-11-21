@@ -1,11 +1,7 @@
 #!/usr/bin/env bun
 // @env node
 import { and, eq } from 'drizzle-orm'
-import { appendFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { issues, repos, runs } from './db/schema.ts'
-import { runTask } from './task/index.ts'
-import { assertTaskDir, writeResult } from './task/dir.ts'
 import { resetPassword } from './web/auth.ts'
 import { openDatabase } from './db/index.ts'
 import { parseIssueRef } from './issue/reference.ts'
@@ -22,8 +18,6 @@ const usage = `用法：bun src/cli.ts <命令>
   serve                  启动服务：轮询 Issue、拉起任务、对账、管理页
   cancel <issue 引用>    取消运行中的任务
   reset-password         重置管理密码
-内部命令（由 watch 调用，不要手动运行）：
-  task <issue 引用> <任务目录>
 支持的引用格式：
   github:owner/repo#12
   gitlab:group/sub/proj#3
@@ -88,51 +82,6 @@ export async function main(args: string[]): Promise<number> {
   if (command === 'serve') {
     await withShutdown((signal) => serve({ settings: readSettings(), signal }))
     return 0
-  }
-  if (command === 'task') {
-    if (!ref || !args[2] || args.length !== 3)
-      throw new Error('用法：bun src/cli.ts task <issue 引用> <任务目录>')
-    const issue = parseIssueRef(ref, process.env.WORKLING_GITLAB_HOST || 'gitlab.com')
-    const settings = readSettings()
-    const dir = assertTaskDir(settings.workspace, args[2])
-    return withShutdown(async (signal) => {
-      let exitCode = 1
-      let result: Parameters<typeof writeResult>[1]
-      try {
-        const out =
-          process.env.WORKLING_TASK_TEE === '1'
-            ? (line: string) => {
-                console.log(line)
-                appendFileSync(join(dir, 'task.log'), `${line}\n`)
-              }
-            : undefined
-        const status = await runTask({
-          ref: issue,
-          dir,
-          command: run,
-          env: process.env,
-          signal,
-          out,
-        })
-        result = {
-          exitCode: status.code,
-          signal: status.signal,
-          finishedAt: new Date().toISOString(),
-          error: status.error,
-        }
-        exitCode = signal.aborted ? 1 : (status.code ?? 1)
-      } catch (error) {
-        result = {
-          exitCode: null,
-          signal: null,
-          finishedAt: new Date().toISOString(),
-          error: error instanceof Error ? error.message : String(error),
-        }
-      }
-      if (signal.aborted) result.signal = 'SIGTERM'
-      await writeResult(dir, result)
-      return exitCode
-    })
   }
   console.log(usage)
   return 0

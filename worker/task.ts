@@ -1,19 +1,26 @@
 import { appendFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { readPiOutcome, writeOutResult } from '../contract/out.ts'
-import { readLlmSecrets } from '../contract/secrets.ts'
-import { CONTRACT_VERSION, readSpec } from '../contract/spec.ts'
-import type { IssueRef } from '../issue/reference.ts'
-import { errorMessage } from '../runtime/errors.ts'
-import { PI_CLI, ROOT } from '../runtime/paths.ts'
-import { streamProcess } from '../runtime/process.ts'
-import { createPiEventFormatter, duration, time } from '../task/pi-events.ts'
-import type { Command, Environment, ExitStatus } from '../runtime/types.ts'
-import { redact, reportOutcome } from './summary.ts'
+import { join, resolve } from 'node:path'
+import { readPiOutcome, writeOutResult } from '../src/contract/out.ts'
+import { readLlmSecrets } from '../src/contract/secrets.ts'
+import { CONTRACT_VERSION, readSpec } from '../src/contract/spec.ts'
+import { createPiEventFormatter, duration, time } from './pi-events.ts'
+import {
+  errorMessage,
+  streamProcess,
+  type Command,
+  type Environment,
+  type ExitStatus,
+} from './process.ts'
+import { redact, reportOutcome } from '../src/contract/report.ts'
+
+const PI_CLI = resolve(
+  import.meta.dirname,
+  '../node_modules/@earendil-works/pi-coding-agent/dist/cli.js',
+)
 
 export async function runTask(options: {
-  ref: IssueRef
+  ref: string
   dir: string
   command: Command
   env: Environment
@@ -24,10 +31,10 @@ export async function runTask(options: {
   now?: () => Date
 }): Promise<ExitStatus & { error?: string }> {
   const { ref, dir, command, signal } = options
-  if (ref.platform !== 'github' || ref.host !== 'github.com')
-    throw new Error('task 目前只支持 github.com')
+  const match = /^github:([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(ref)
+  if (!match) throw new Error('task 目前只支持 github.com')
+  const [issueRef, project, iid] = [match[0], match[1]!, match[2]!]
   const spec = await readSpec(dir)
-  const issueRef = `github:${ref.project}#${ref.iid}`
   if (spec.issue.ref !== issueRef)
     throw new Error(`spec.json 的 Issue 引用与任务参数不一致：需要 ${issueRef}`)
   const issuePath = join(dir, 'input', 'issue.md')
@@ -105,7 +112,7 @@ export async function runTask(options: {
   const branchStatus = spec.repo.continued
     ? `接续此前运行的工作分支，当前末端 ${spec.repo.baseRef}`
     : `基于 ${spec.repo.baseRef}`
-  const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（${issueRef}）
+  const instruction = `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
 仓库目录：${repo}
 任务分支：${spec.repo.branch}（已检出，${branchStatus}）${spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''}
 运行类型：${spec.kind}
@@ -130,9 +137,9 @@ codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
       '--session-dir',
       join(dir, 'pi-session'),
       '--append-system-prompt',
-      join(ROOT, 'configs/workling/AGENTS.md'),
+      join(import.meta.dirname, 'configs/AGENTS.md'),
       '--extension',
-      join(ROOT, 'configs/workling/extensions/no-bash-timeout.ts'),
+      join(import.meta.dirname, 'configs/extensions/no-bash-timeout.ts'),
       ...modelArgs,
       '--',
       instruction,

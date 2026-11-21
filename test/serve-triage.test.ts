@@ -557,3 +557,104 @@ test('建议限额、时间下限、流程状态和正文变更控制动作', as
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('自动级：受信作者 accept 后代打 workling:ready 一次，hold、正文变更和切换前记录不动作', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'triage-auto-'))
+  const conn = await openDatabase(dir)
+  try {
+    const now = new Date('2026-01-01T12:00:00Z')
+    const repo = conn.db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'token',
+        triageLevel: 'auto',
+        triageSince: new Date('2026-01-01T11:30:00Z'),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()
+    conn.db
+      .insert(trustedUsers)
+      .values({ repoId: repo.id, userId: '1', login: 'user', createdAt: now })
+      .run()
+    updatePiSettings(conn.db, { llmBaseUrl: 'https://example.com', llmApiKey: 'key' })
+    const make = (number: number, labels: string[] = []) => ({
+      number,
+      title: `task ${number}`,
+      body: '## 目标\nwork\n## 验收\ntest',
+      user: { id: 1, login: 'user', type: 'User' },
+      labels: labels.map((name) => ({ name })),
+      updated_at: '2026-01-01T11:00:00Z',
+    })
+    let items = [make(1), make(2, ['workling:hold'])]
+    const calls: { args: string[]; input?: string }[] = []
+    const command = async (args: string[], options?: { input?: string }) => {
+      calls.push({ args, input: options?.input })
+      if (args[1] === 'api') return JSON.stringify(items)
+      return ''
+    }
+    const options = {
+      db: conn.db,
+      command,
+      classify: async () => ({ decision: 'accept', missing: [], note: '' }),
+      state: { permissions: new Map() },
+      now,
+      log: () => {},
+      signal: new AbortController().signal,
+    }
+    await triageIssues(options)
+    const readies = () =>
+      calls.filter(({ args }) => args.includes('--add-label') && args.includes('workling:ready'))
+    expect(readies().map(({ args }) => args[3])).toEqual(['1'])
+    const comment = calls.find(({ args }) => args[2] === 'comment')
+    expect(comment?.args[3]).toBe('1')
+    expect(comment?.input).toContain('workling:hold')
+    expect(comment?.input).toContain('<!-- workling -->')
+    const record = conn.db
+      .select()
+      .from(triageRecords)
+      .all()
+      .find((row) => row.number === 1)
+    expect(record?.autoQueuedAt).toEqual(now)
+    // 同一条记录不重复打标签；人移除 ready 后也不会被再次加回。
+    await triageIssues({ ...options, now: new Date(now.getTime() + 1000) })
+    expect(readies()).toHaveLength(1)
+    // 正文在分诊后被修改（哈希不同）且还在冷静期内：不按旧结论动作。
+    items = [{ ...make(3), body: '## 目标\nnew\n## 验收\ntest' }]
+    conn.db
+      .insert(triageRecords)
+      .values({
+        repoId: repo.id,
+        number: 3,
+        title: 'task 3',
+        authorId: '1',
+        authorLogin: 'user',
+        trust: 'allowlist',
+        contentHash: 'old-hash',
+        issueUpdatedAt: now,
+        checks: '{}',
+        decision: 'accept',
+        missing: '[]',
+        alreadyReady: false,
+        attempts: 1,
+        triagedAt: now,
+      })
+      .run()
+    items[0]!.updated_at = new Date(now.getTime() - 60_000).toISOString()
+    await triageIssues({ ...options, now: new Date(now.getTime() + 2000) })
+    expect(readies()).toHaveLength(1)
+  } finally {
+    conn.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('建议评论按级别标注来源，自动入队评论带标记', () => {
+  expect(suggestComment(['范围'], [], '自动级')).toContain('（自动分诊 · 自动级）')
+  expect(suggestComment(['范围'])).toContain('（自动分诊 · 建议级）')
+})

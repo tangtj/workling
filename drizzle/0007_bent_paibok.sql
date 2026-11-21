@@ -1,0 +1,1 @@
+ALTER TABLE `triage_records` ADD `auto_queued_at` integer;

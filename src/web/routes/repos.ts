@@ -135,6 +135,7 @@ export function reposRoutes(deps: AppDeps): Hono {
           triagedAt: row.triagedAt.toISOString(),
           suggestedAt: row.suggestedAt?.toISOString() ?? null,
           labelRemovedAt: row.labelRemovedAt?.toISOString() ?? null,
+          autoQueuedAt: row.autoQueuedAt?.toISOString() ?? null,
           followUp: followUp(row),
           readyAt: issue?.createdAt.toISOString() ?? null,
           readyAfterMinutes:
@@ -173,7 +174,14 @@ export function reposRoutes(deps: AppDeps): Hono {
     if (repo.platform !== 'github') return c.json({ error: '暂只支持 GitHub' }, 400)
     const body: unknown = await c.req.json().catch(() => null)
     const schema = Type.Object(
-      { level: Type.Union([Type.Literal('off'), Type.Literal('shadow'), Type.Literal('suggest')]) },
+      {
+        level: Type.Union([
+          Type.Literal('off'),
+          Type.Literal('shadow'),
+          Type.Literal('suggest'),
+          Type.Literal('auto'),
+        ]),
+      },
       { additionalProperties: false },
     )
     if (!Value.Check(schema, body)) return c.json({ error: '分诊级别无效' }, 400)

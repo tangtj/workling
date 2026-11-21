@@ -9,7 +9,12 @@ export const repoSchema = Type.Object(
     path: Type.String(),
     token: Type.String(),
     enabled: Type.Boolean(),
-    triageLevel: Type.Union([Type.Literal('off'), Type.Literal('shadow'), Type.Literal('suggest')]),
+    triageLevel: Type.Union([
+      Type.Literal('off'),
+      Type.Literal('shadow'),
+      Type.Literal('suggest'),
+      Type.Literal('auto'),
+    ]),
     triageSince: Type.Union([Type.String(), Type.Null()]),
     createdAt: Type.String(),
     updatedAt: Type.String(),

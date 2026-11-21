@@ -12,7 +12,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { judgeTrust, type FeedbackState } from './feedback.ts'
 import { redactSecrets } from './secret-scan.ts'
-import { suggestComment } from './triage-comment.ts'
+import { autoQueueComment, suggestComment } from './triage-comment.ts'
 import { TRIAGE_PROMPT } from './triage-prompt.ts'
 
 // LLM 调用串行执行，每仓库每轮最坏耗时 5 × 60 秒，会推迟主循环的其他步骤。
@@ -206,6 +206,7 @@ export async function triageIssues({
         throw new Error('Issue 格式无效')
       let calls = 0
       let comments = 0
+      let queued = 0
       for (const item of data) {
         if (signal.aborted) break
         const updated = new Date(item.updated_at)
@@ -303,7 +304,7 @@ export async function triageIssues({
               .run()
           }
         }
-        if (repo.triageLevel !== 'suggest') continue
+        if (repo.triageLevel !== 'suggest' && repo.triageLevel !== 'auto') continue
         const records = db
           .select()
           .from(triageRecords)
@@ -354,6 +355,67 @@ export async function triageIssues({
               )
             }
           }
+          // 自动级：信任来自作者（记录只为受信作者生成），动作只是代人打 workling:ready，入队仍走常规轮询。
+          // 结论必须针对当前正文（哈希一致），冷静期由分诊前的 10 分钟等待保证；workling:hold 随时叫停。
+          if (
+            repo.triageLevel === 'auto' &&
+            !inFlow &&
+            latest.decision === 'accept' &&
+            latest.contentHash === hash &&
+            !latest.autoQueuedAt &&
+            !labels.has('workling:hold') &&
+            repo.triageSince &&
+            latest.triagedAt >= repo.triageSince &&
+            queued < 3
+          ) {
+            queued++
+            try {
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'edit',
+                  String(item.number),
+                  '-R',
+                  repo.path,
+                  '--add-label',
+                  'workling:ready',
+                ],
+                { env, signal },
+              )
+              db.update(triageRecords)
+                .set({ autoQueuedAt: now, suggestError: null })
+                .where(eq(triageRecords.id, latest.id))
+                .run()
+              log(`${repo.ref} #${item.number} 分诊判定信息齐全，已自动打 workling:ready`)
+              try {
+                await command(
+                  [
+                    'gh',
+                    'issue',
+                    'comment',
+                    String(item.number),
+                    '-R',
+                    repo.path,
+                    '--body-file',
+                    '-',
+                  ],
+                  { env, signal, input: autoQueueComment() },
+                )
+              } catch (error) {
+                log(
+                  `${repo.ref} #${item.number} 自动入队说明评论失败：${redactSecrets(errorMessage(error), [repo.token, pi.llmApiKey])}`,
+                )
+              }
+            } catch (error) {
+              const message = redactSecrets(errorMessage(error), [repo.token, pi.llmApiKey])
+              db.update(triageRecords)
+                .set({ suggestError: message })
+                .where(eq(triageRecords.id, latest.id))
+                .run()
+              log(`${repo.ref} #${item.number} 自动入队失败：${message}`)
+            }
+          }
           continue
         }
         if (latest.suggestedAt || !repo.triageSince || latest.triagedAt < repo.triageSince) continue
@@ -396,10 +458,11 @@ export async function triageIssues({
                 {
                   env,
                   signal,
-                  input: suggestComment(JSON.parse(latest.missing) as string[], [
-                    repo.token,
-                    pi.llmApiKey,
-                  ]),
+                  input: suggestComment(
+                    JSON.parse(latest.missing) as string[],
+                    [repo.token, pi.llmApiKey],
+                    repo.triageLevel === 'auto' ? '自动级' : '建议级',
+                  ),
                 },
               )
             ).trim()

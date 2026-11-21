@@ -1,4 +1,5 @@
 import { dockerExecutor } from '../src/executor/docker.ts'
+import { hostPathOf, parseDockerInfo } from '../src/executor/docker-host.ts'
 import { processExecutor } from '../src/executor/process.ts'
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
@@ -7,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createExecutor, workerEnv, type RunHandle, type StartSpec } from '../src/executor/index.ts'
 import * as runtime from '../src/runtime/process.ts'
-import { CLI } from '../src/runtime/paths.ts'
+import { WORKER_CLI } from '../src/runtime/paths.ts'
 import type { Command, RunOptions } from '../src/runtime/types.ts'
 import { parseExecutorSettings } from '../src/config/executor.ts'
 
@@ -35,6 +36,17 @@ test.each([
   expect(workerEnv(base)).toEqual(keep ? base : {})
   expect(base[name]).toBe('original')
 })
+
+function dockerInfo(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    CgroupVersion: '2',
+    MemoryLimit: true,
+    CpuCfsQuota: true,
+    PidsLimit: true,
+    SecurityOptions: ['name=seccomp,profile=builtin'],
+    ...overrides,
+  })
+}
 
 async function scenario(network?: string) {
   const taskDir = await mkdtemp(join(tmpdir(), 'workling-executor-'))
@@ -68,6 +80,8 @@ test.each([undefined, 'workling-network'])(
       config,
       log: () => {},
       command: async (args, options) => {
+        if (args[1] === 'info') return dockerInfo()
+        if (args[1] === 'network') return '[]'
         calls.push({ args, options })
         return 'container-id'
       },
@@ -108,14 +122,15 @@ test.each([undefined, 'workling-network'])(
           '4g',
           '--pids-limit',
           '1024',
-          ...(network ? ['--network', network] : []),
+          '--network',
+          network ?? 'workling-worker',
           '-v',
           `${spec.taskDir}:${inner}`,
           ...keys.flatMap((key) => ['-e', key]),
           'workling:local',
           'bun',
           '--no-env-file',
-          'src/cli.ts',
+          'worker/cli.ts',
           'task',
           spec.ref,
           inner,
@@ -150,6 +165,8 @@ test('docker start 使用自定义资源与镜像并透传命令失败', async (
     },
     log: () => {},
     command: async (args) => {
+      if (args[1] === 'info') return dockerInfo()
+      if (args[1] === 'network') return '[]'
       for (const [flag, value] of [
         ['--cpus', '1.5'],
         ['--memory', '512m'],
@@ -263,7 +280,14 @@ test('processExecutor 保持 launch 参数与日志、isTaskAlive 校验、killG
   const { spec, handle } = await scenario()
   const executor = processExecutor({
     launch(args, options) {
-      expect(args).toEqual([process.execPath, '--no-env-file', CLI, 'task', spec.ref, spec.taskDir])
+      expect(args).toEqual([
+        process.execPath,
+        '--no-env-file',
+        WORKER_CLI,
+        'task',
+        spec.ref,
+        spec.taskDir,
+      ])
       expect(options).toEqual({ env: spec.env, log: join(spec.taskDir, 'task.log') })
       return 123
     },
@@ -292,6 +316,7 @@ test('createExecutor 按配置启动进程或 Docker，日志错误交给传入�
   const launch = spyOn(runtime, 'launch').mockReturnValue(321)
   const calls: string[][] = []
   const command: Command = async (args) => {
+    if (args[1] === 'info' || args[1] === 'network') return dockerInfo()
     calls.push(args)
     return ''
   }
@@ -395,3 +420,90 @@ test.skipIf(!dockerAvailable)(
   },
   30000,
 )
+
+test('rootless Docker 以容器内 root 运行 worker，cgroup 限制不可用时拒绝拉起', async () => {
+  const { config, spec } = await scenario()
+  let info = dockerInfo({ SecurityOptions: ['name=seccomp,profile=builtin', 'name=rootless'] })
+  const runs: string[][] = []
+  const executor = dockerExecutor({
+    config,
+    log: () => {},
+    command: async (args) => {
+      if (args[1] === 'info') return info
+      if (args[1] === 'network') return '[]'
+      runs.push(args)
+      return 'id'
+    },
+  })
+  await executor.start(spec)
+  expect(runs[0]![runs[0]!.indexOf('--user') + 1]).toBe('0:0')
+  info = dockerInfo({ PidsLimit: false })
+  await expect(executor.start({ ...spec, runId: 13 })).rejects.toThrow('Docker 不支持进程数限制')
+  expect(runs).toHaveLength(1)
+})
+
+test.each([
+  [dockerInfo(), { rootless: false, error: null }],
+  [
+    dockerInfo({ SecurityOptions: ['name=rootless'], MemoryLimit: false, CpuCfsQuota: false }),
+    {
+      rootless: true,
+      error: 'Docker 不支持内存、CPU 配额限制（rootless 需要为用户委派 cgroup 控制器）',
+    },
+  ],
+  [dockerInfo({ CgroupVersion: '1' }), { rootless: false, error: null }],
+  [
+    dockerInfo({ CgroupVersion: '1', SecurityOptions: ['name=rootless'] }),
+    { rootless: true, error: 'Docker 使用 cgroup v1，rootless 下 worker 需要 cgroup v2' },
+  ],
+  ['oops', { rootless: false, error: '无法解析 docker info 的输出' }],
+] as const)('parseDockerInfo %#', (raw, expected) => {
+  expect(parseDockerInfo(raw)).toEqual(expected)
+})
+
+test('未配置网络时自动创建关闭 ICC 的 workling-worker 网络，已存在时复用', async () => {
+  const { config, spec } = await scenario()
+  const calls: string[][] = []
+  let exists = false
+  const executor = dockerExecutor({
+    config,
+    log: () => {},
+    command: async (args) => {
+      if (args[1] === 'info') return dockerInfo()
+      calls.push(args)
+      if (args[1] === 'network' && args[2] === 'inspect' && !exists) throw new Error('missing')
+      if (args[1] === 'network' && args[2] === 'create') exists = true
+      return 'id'
+    },
+  })
+  await executor.start(spec)
+  await rm(join(spec.taskDir, 'home'), { recursive: true })
+  await executor.start({ ...spec, runId: 13 })
+  const network = calls.filter((args) => args[1] === 'network')
+  expect(network.map((args) => args[2])).toEqual(['inspect', 'create', 'inspect'])
+  expect(network[1]).toContain('com.docker.network.bridge.enable_icc=false')
+  expect(network[1]!.at(-1)).toBe('workling-worker')
+})
+
+test('主体在容器里时按本容器的挂载把任务目录换算成宿主机路径', async () => {
+  const mounts = JSON.stringify([
+    { Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock' },
+    { Source: '/var/lib/docker/volumes/w_data/_data', Destination: '/data' },
+  ])
+  const calls: string[][] = []
+  const command: Command = async (args) => {
+    calls.push(args)
+    return mounts
+  }
+  expect(await hostPathOf(command, '/data/tasks/a-b-1', true, 'abc123')).toBe(
+    '/var/lib/docker/volumes/w_data/_data/tasks/a-b-1',
+  )
+  expect(calls[0]).toEqual(['docker', 'inspect', '--format', '{{json .Mounts}}', 'abc123'])
+  await expect(hostPathOf(command, '/tmp/x', true, 'abc123')).rejects.toThrow(
+    '不在主体容器的挂载卷里',
+  )
+  await expect(hostPathOf(command, '/database', true, 'abc123')).rejects.toThrow(
+    '不在主体容器的挂载卷里',
+  )
+  expect(await hostPathOf(command, '/tmp/x', false)).toBe('/tmp/x')
+})

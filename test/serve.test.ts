@@ -13,6 +13,7 @@ import {
   upgradeSteps,
 } from '../src/db/schema.ts'
 import { readPiSettings } from '../src/config/pi.ts'
+import { readExecutorSettings } from '../src/config/executor.ts'
 import { launch, isAlive, killGroup } from '../src/runtime/process.ts'
 import { launchQueued } from '../src/serve/launch.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
@@ -147,6 +148,7 @@ test('watch 子进程启动本地接口并在 SIGTERM 后正常退出', async ()
       startedAt: expect.any(String),
       lastPollAt: expect.any(String),
       lastPollError: null,
+      workerError: null,
     })
     expect(Number.isFinite(Date.parse(status.watch.lastPollAt))).toBe(true)
     expect(new Date(status.watch.startedAt).toISOString()).toBe(status.watch.startedAt)
@@ -302,6 +304,65 @@ test('watch 启动从注入环境导入，后续启动忽略旧环境变量，�
     )
   } finally {
     serve.mockRestore()
+    await s.dispose()
+  }
+})
+
+test('docker 执行器的 worker 镜像不兼容时暂停拉起并记录原因', async () => {
+  const s = await scenario()
+  const controller = new AbortController()
+  const logs: string[] = []
+  const listen = spyOn(Bun, 'serve').mockImplementation(
+    () => ({ port: 0, stop() {} }) as unknown as ReturnType<typeof Bun.serve>,
+  )
+  try {
+    await s.issue(42, 'queued')
+    await startServe({
+      ...s.options,
+      signal: controller.signal,
+      env: { WORKLING_SANDBOX: 'docker', WORKLING_TASK_IMAGE: 'old:1' },
+      log: (message) => {
+        logs.push(message)
+        if (message.startsWith('暂停拉起新任务')) controller.abort()
+      },
+    })
+    expect(logs).toContain('暂停拉起新任务：无法解析 docker info 的输出')
+    expect(s.calls.some(({ args }) => args[0] === 'docker' && args[1] === 'run')).toBe(false)
+    expect(s.db.select().from(runs).all()).toEqual([])
+  } finally {
+    listen.mockRestore()
+    await s.dispose()
+  }
+})
+
+test('WORKLING_REQUIRE_DOCKER=true 时启动切换为 Docker 执行器，WORKLING_WORKER_IMAGE 覆盖任务镜像', async () => {
+  const s = await scenario()
+  const controller = new AbortController()
+  const logs: string[] = []
+  const listen = spyOn(Bun, 'serve').mockImplementation(
+    () => ({ port: 0, stop() {} }) as unknown as ReturnType<typeof Bun.serve>,
+  )
+  try {
+    await s.issue(42, 'queued')
+    await startServe({
+      ...s.options,
+      settings: { ...s.options.settings, requireDocker: true },
+      signal: controller.signal,
+      env: { WORKLING_WORKER_IMAGE: 'ghcr.io/a/b-worker:v9' },
+      log: (message) => {
+        logs.push(message)
+        if (message.startsWith('暂停拉起新任务')) controller.abort()
+      },
+    })
+    expect(logs).toContain('已按 WORKLING_REQUIRE_DOCKER=true 切换为 Docker 执行器')
+    expect(logs).toContain('任务镜像已按 WORKLING_WORKER_IMAGE 设为 ghcr.io/a/b-worker:v9')
+    expect(readExecutorSettings(s.db)).toMatchObject({
+      sandbox: 'docker',
+      taskImage: 'ghcr.io/a/b-worker:v9',
+    })
+    expect(s.db.select().from(runs).all()).toEqual([])
+  } finally {
+    listen.mockRestore()
     await s.dispose()
   }
 })

@@ -1,4 +1,4 @@
-<!-- workling 接入文档 v1，来源 https://github.com/tangtj/workling/tree/main/templates -->
+<!-- workling 接入文档 v2，来源 https://github.com/tangtj/workling/tree/main/templates -->
 
 # 用 workling 推进开发
 
@@ -7,8 +7,9 @@
 ## 本地 AI 的职责
 
 - **做**：整理需求、写设计文档、建 Issue，把 Issue 链接交给用户。
-- **不做**：修改业务代码或跑实现；替 workling 建实现 PR；向默认分支提交或推送；打或改 `workling:*` 标签。
-- 建 Issue 时**不打标签**。用户在 GitHub 上看过 Issue 后自己打 `workling:ready`，打上之后才会开始执行。
+- **不做**：修改业务代码或跑实现；替 workling 建实现 PR；向默认分支提交或推送；打或改 `workling:*` 标签（建 Issue 时打 `workling:hold` 除外，见下条）。
+- 建 Issue 时**不打 `workling:ready`**。用户在 GitHub 上看过 Issue 后自己打 `workling:ready`，打上之后才会开始执行。
+- 仓库开启了自动分诊（自动级）时，受信作者写清楚的 Issue 会被 workling 自动打上 `workling:ready`。需要先评审再执行的 Issue，建 Issue 时打上 `workling:hold`（这是唯一允许本地 AI 打的标签），评审通过后由人移除 `workling:hold` 并打 `workling:ready`。
 - 用户明确要求在本地直接实现时，按用户要求来，不受本文约束。
 
 ## 选择方式
@@ -72,6 +73,8 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 
 - workling 的提交署名为 Workling（GitHub 机器账号 [workling-agent](https://github.com/workling-agent)），作者或 `Co-authored-by` 指向它。
 - 进度看 Issue 标签：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`。
+- `workling:needs-info` 由 workling 的分诊管理：信息不全时打上并评论缺什么，补充正文约 10 分钟后重新判断，信息齐全时自动摘掉；不要手动增删。
+- PR 上的 Request changes 会自动触发返工，每个 PR 自动返工有轮数上限（默认 3 轮），超过后需要评论 `/workling <说明>` 继续；workling 会在原评论线程或汇总评论里逐条说明每条意见的处理结果。
 - 领取时 workling 会在 Issue 下评论；运行中亲自确认的待办项会勾选，修改勾选状态前先评论说明。
 - 失败或要返工：修改 Issue 正文或文档分支上的文档（推送到文档分支），再重新打上 `workling:ready`。
 - 接着做：失败、部分完成或 PR 仍开着时，评论 `/workling <补充说明>` 即可在同一条工作分支上继续；workling 会把此前运行的回报、分支提交和 PR 反馈一并交给执行方。只提问不要求改代码时，会直接在 Issue 下答复。

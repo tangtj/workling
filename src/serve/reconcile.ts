@@ -9,15 +9,16 @@ import { type WorklingDatabase } from '../db/index.ts'
 import { feedback, issues as issueStates, repos, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
 import { ghEnv } from '../platform/github.ts'
-import { assertTaskDir, readResult } from '../task/dir.ts'
+import { assertTaskDir, readResult } from '../contract/result.ts'
 import { type PiSettings } from '../config/pi.ts'
 import type { Command } from '../runtime/types.ts'
-import { extractSummary, reportExcerpt } from '../task/summary.ts'
+import { extractSummary, reportExcerpt } from '../contract/report.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
 import { landRun, publishIssueResult, readRunIssueComment } from './land.ts'
 import { mirrorPath } from './mirror.ts'
+import { publishReplies } from './replies.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
 
@@ -227,6 +228,17 @@ export async function reconcile({
             llmApiKey: pi.llmApiKey,
             log,
           })
+          await publishReplies({
+            db,
+            repo,
+            issue,
+            runId: run!.id,
+            taskDir: delivery.taskDir,
+            prUrl: delivery.landed.prUrl,
+            command,
+            llmApiKey: pi.llmApiKey,
+            log,
+          })
         } else if (answerDir) {
           const explanation = await readRunIssueComment(answerDir, (step) =>
             log(`${repo.ref} #${issue.number} ${step}失败`),
@@ -240,6 +252,17 @@ export async function reconcile({
               ),
             ),
           )
+          await publishReplies({
+            db,
+            repo,
+            issue,
+            runId: run!.id,
+            taskDir: answerDir,
+            prUrl: issue.prState === 'open' ? issue.prUrl : null,
+            command,
+            llmApiKey: pi.llmApiKey,
+            log,
+          })
         } else if (status !== 'done') {
           let report = ''
           let explanation = ''
