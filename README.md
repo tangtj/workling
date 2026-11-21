@@ -137,17 +137,33 @@ WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yam
 
 ### Alternative: systemd
 
-systemd runs watch on the host, and each task runs in its own container that mounts only that task's directory.
+systemd runs watch on the host, and each task runs in its own container that mounts only that task's directory. Containers are launched through **rootless Docker**: root inside a container maps only to the service user, and the service user does not join the docker group.
 
-1. Install Bun and Docker, and create a service user in the docker group (docker group membership is root-equivalent; grant it to this account only): `sudo useradd -r -m -d /var/lib/workling -G docker workling`.
+1. Install Bun and Docker's rootless components (`docker-ce-rootless-extras`, `uidmap`), create the service user and enable rootless Docker for it:
+
+   ```sh
+   sudo useradd -r -m -d /var/lib/workling workling
+   sudo loginctl enable-linger workling
+   sudo -iu workling dockerd-rootless-setuptool.sh install
+   ```
+
+   Resource limits under rootless need the cgroup controllers delegated to the user; otherwise `--memory`, `--cpus` and `--pids-limit` have no effect, and workling pauses launching and shows the reason in the admin UI:
+
+   ```sh
+   sudo mkdir -p /etc/systemd/system/user@.service.d
+   printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+   sudo systemctl daemon-reload
+   ```
+
 2. Put the code in `/opt/workling`, install dependencies and build the worker image (its name must match **Task image** in Settings, `workling:local` by default):
 
    ```sh
    cd /opt/workling && bun install --frozen-lockfile --ignore-scripts --production
-   docker build -f worker/Dockerfile -t workling:local .
+   sudo -iu workling env DOCKER_HOST=unix:///run/user/$(id -u workling)/docker.sock \
+     docker build -f /opt/workling/worker/Dockerfile -t workling:local /opt/workling
    ```
 
-3. Copy `deploy/workling.env.example` to `/etc/workling/workling.env` (mode 600, owned by workling).
+3. Copy `deploy/workling.env.example` to `/etc/workling/workling.env` (mode 600, owned by workling) and set the uid in `DOCKER_HOST` to the output of `id -u workling`.
 4. Install and start the service: `sudo cp deploy/workling.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now workling`.
 5. The first-start admin password: `journalctl -u workling | grep -A1 管理密码`.
 6. To upgrade, run `deploy/update.sh <tag>` in `/opt/workling`.

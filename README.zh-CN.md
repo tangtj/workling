@@ -137,17 +137,33 @@ WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yam
 
 ### 备选：systemd
 
-watch 由 systemd 运行在宿主机上，每个任务启动一个独立容器，只挂载该任务的目录。
+watch 由 systemd 运行在宿主机上，每个任务启动一个独立容器，只挂载该任务的目录。容器通过 **rootless Docker** 拉起：容器内的 root 只映射到服务用户，服务用户也不需要加入 docker 组。
 
-1. 安装 Bun 与 Docker，创建服务用户并加入 docker 组（docker 组等同 root 权限，只给这个账号）：`sudo useradd -r -m -d /var/lib/workling -G docker workling`。
+1. 安装 Bun 与 Docker 的 rootless 组件（`docker-ce-rootless-extras`、`uidmap`），创建服务用户并为它启用 rootless Docker：
+
+   ```sh
+   sudo useradd -r -m -d /var/lib/workling workling
+   sudo loginctl enable-linger workling
+   sudo -iu workling dockerd-rootless-setuptool.sh install
+   ```
+
+   rootless 下的资源限制需要把 cgroup 控制器委派给用户，否则 `--memory`、`--cpus`、`--pids-limit` 不生效，workling 会暂停拉起并在管理页提示：
+
+   ```sh
+   sudo mkdir -p /etc/systemd/system/user@.service.d
+   printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+   sudo systemctl daemon-reload
+   ```
+
 2. 把代码放到 `/opt/workling`，安装依赖并构建 worker 镜像（镜像名与设置页「任务镜像」一致，默认 `workling:local`）：
 
    ```sh
    cd /opt/workling && bun install --frozen-lockfile --ignore-scripts --production
-   docker build -f worker/Dockerfile -t workling:local .
+   sudo -iu workling env DOCKER_HOST=unix:///run/user/$(id -u workling)/docker.sock \
+     docker build -f /opt/workling/worker/Dockerfile -t workling:local /opt/workling
    ```
 
-3. 把 `deploy/workling.env.example` 复制为 `/etc/workling/workling.env`（权限 600，属主 workling）。
+3. 把 `deploy/workling.env.example` 复制为 `/etc/workling/workling.env`（权限 600，属主 workling），把其中 `DOCKER_HOST` 的 uid 改成 `id -u workling` 的结果。
 4. 安装并启动服务：`sudo cp deploy/workling.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now workling`。
 5. 首次启动的管理密码：`journalctl -u workling | grep -A1 管理密码`。
 6. 升级：在 `/opt/workling` 执行 `deploy/update.sh <tag>`。

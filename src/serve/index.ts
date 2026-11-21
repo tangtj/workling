@@ -19,6 +19,7 @@ import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
 import { checkWorkerImage } from '../executor/worker-image.ts'
+import { checkDockerHost } from '../executor/docker-host.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
 import { triageIssues, type TriageState } from './triage.ts'
 type Log = (message: string) => void
@@ -139,6 +140,7 @@ export async function serve({
     const feedbackState: FeedbackState = { accounts: new Map(), permissions: new Map() }
     const triageState: TriageState = { permissions: new Map() }
     let wasPaused = false
+    let warnedRootful = false
     while (!signal.aborted) {
       const pi = readPiSettings(db)
       const executorSettings = readExecutorSettings(db)
@@ -185,10 +187,18 @@ export async function serve({
           const paused = launchPaused()
           if (paused && !wasPaused) log('在线更新进行中，暂停拉起新任务')
           wasPaused = paused
-          const workerError =
-            executorSettings.sandbox === 'docker'
-              ? await checkWorkerImage(command, executorSettings.taskImage)
-              : null
+          let workerError: string | null = null
+          if (executorSettings.sandbox === 'docker') {
+            const host = await checkDockerHost(command)
+            if (!host.error && !host.rootless && !warnedRootful) {
+              warnedRootful = true
+              log(
+                '提示：Docker 不是 rootless 模式，worker 容器逃逸即获得宿主机 root；建议改用 rootless Docker 并设置 DOCKER_HOST',
+              )
+            }
+            workerError =
+              host.error ?? (await checkWorkerImage(command, executorSettings.taskImage))
+          }
           if (workerError && workerError !== status.workerError)
             log(`暂停拉起新任务：${workerError}`)
           status.workerError = workerError

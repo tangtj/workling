@@ -325,7 +325,7 @@ test('docker 执行器的 worker 镜像不兼容时暂停拉起并记录原因',
         if (message.startsWith('暂停拉起新任务')) controller.abort()
       },
     })
-    expect(logs).toContain('暂停拉起新任务：无法读取 worker 镜像 old:1 的标签')
+    expect(logs).toContain('暂停拉起新任务：无法解析 docker info 的输出')
     expect(s.calls.some(({ args }) => args[0] === 'docker' && args[1] === 'run')).toBe(false)
     expect(s.db.select().from(runs).all()).toEqual([])
   } finally {

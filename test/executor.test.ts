@@ -1,4 +1,5 @@
 import { dockerExecutor } from '../src/executor/docker.ts'
+import { parseDockerInfo } from '../src/executor/docker-host.ts'
 import { processExecutor } from '../src/executor/process.ts'
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
@@ -36,6 +37,17 @@ test.each([
   expect(base[name]).toBe('original')
 })
 
+function dockerInfo(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    CgroupVersion: '2',
+    MemoryLimit: true,
+    CpuCfsQuota: true,
+    PidsLimit: true,
+    SecurityOptions: ['name=seccomp,profile=builtin'],
+    ...overrides,
+  })
+}
+
 async function scenario(network?: string) {
   const taskDir = await mkdtemp(join(tmpdir(), 'workling-executor-'))
   dirs.push(taskDir)
@@ -68,6 +80,7 @@ test.each([undefined, 'workling-network'])(
       config,
       log: () => {},
       command: async (args, options) => {
+        if (args[1] === 'info') return dockerInfo()
         calls.push({ args, options })
         return 'container-id'
       },
@@ -150,6 +163,7 @@ test('docker start 使用自定义资源与镜像并透传命令失败', async (
     },
     log: () => {},
     command: async (args) => {
+      if (args[1] === 'info') return dockerInfo()
       for (const [flag, value] of [
         ['--cpus', '1.5'],
         ['--memory', '512m'],
@@ -299,6 +313,7 @@ test('createExecutor 按配置启动进程或 Docker，日志错误交给传入�
   const launch = spyOn(runtime, 'launch').mockReturnValue(321)
   const calls: string[][] = []
   const command: Command = async (args) => {
+    if (args[1] === 'info') return dockerInfo()
     calls.push(args)
     return ''
   }
@@ -402,3 +417,41 @@ test.skipIf(!dockerAvailable)(
   },
   30000,
 )
+
+test('rootless Docker 以容器内 root 运行 worker，cgroup 限制不可用时拒绝拉起', async () => {
+  const { config, spec } = await scenario()
+  let info = dockerInfo({ SecurityOptions: ['name=seccomp,profile=builtin', 'name=rootless'] })
+  const runs: string[][] = []
+  const executor = dockerExecutor({
+    config,
+    log: () => {},
+    command: async (args) => {
+      if (args[1] === 'info') return info
+      runs.push(args)
+      return 'id'
+    },
+  })
+  await executor.start(spec)
+  expect(runs[0]![runs[0]!.indexOf('--user') + 1]).toBe('0:0')
+  info = dockerInfo({ PidsLimit: false })
+  await expect(executor.start({ ...spec, runId: 13 })).rejects.toThrow('Docker 不支持进程数限制')
+  expect(runs).toHaveLength(1)
+})
+
+test.each([
+  [dockerInfo(), { rootless: false, error: null }],
+  [
+    dockerInfo({ SecurityOptions: ['name=rootless'], MemoryLimit: false, CpuCfsQuota: false }),
+    {
+      rootless: true,
+      error: 'Docker 不支持内存、CPU 配额限制（rootless 需要为用户委派 cgroup 控制器）',
+    },
+  ],
+  [
+    dockerInfo({ CgroupVersion: '1' }),
+    { rootless: false, error: 'Docker 使用 cgroup v1，worker 需要 cgroup v2' },
+  ],
+  ['oops', { rootless: false, error: '无法解析 docker info 的输出' }],
+] as const)('parseDockerInfo %#', (raw, expected) => {
+  expect(parseDockerInfo(raw)).toEqual(expected)
+})

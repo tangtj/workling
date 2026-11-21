@@ -1,7 +1,7 @@
 [Unit]
 Description=workling watch
-After=network-online.target docker.service
-Requires=docker.service
+# rootless Docker 是服务用户的 user 级服务，这里无法声明依赖；Docker 不可用时 workling 暂停拉起并在管理页提示。
+After=network-online.target
 
 [Service]
 User=workling
