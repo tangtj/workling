@@ -2,6 +2,7 @@ import { type ExecutorSettings } from '../config/executor.ts'
 import { eq } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { truncateComment } from '../contract/out.ts'
 import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs } from '../db/schema.ts'
@@ -10,7 +11,7 @@ import { ghEnv } from '../platform/github.ts'
 import { assertTaskDir, readResult } from '../task/dir.ts'
 import { type PiSettings } from '../config/pi.ts'
 import type { Command } from '../runtime/types.ts'
-import { extractSummary } from '../task/summary.ts'
+import { extractSummary, reportExcerpt } from '../task/summary.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
@@ -86,6 +87,7 @@ export async function reconcile({
       let prUrl: string | undefined
       let prState: typeof issue.prState | undefined
       let readyToLand = false
+      let answerDir: string | undefined
       let delivery:
         | {
             taskDir: string
@@ -152,6 +154,9 @@ export async function reconcile({
           if (landed.status === 'done') {
             ;({ status, prUrl, prState } = landed)
             delivery = { taskDir, landed }
+          } else if (landed.status === 'answered') {
+            status = 'done'
+            answerDir = taskDir
           } else error = landed.error
         }
       }
@@ -199,6 +204,17 @@ export async function reconcile({
             llmApiKey: pi.llmApiKey,
             log,
           })
+        } else if (answerDir) {
+          const explanation = await readRunIssueComment(answerDir, (step) =>
+            log(`${repo.ref} #${issue.number} ${step}失败`),
+          )
+          const body = `workling：已答复。\n\n${explanation.trim() || '（Pi 未写说明）'}`
+          await sync(
+            ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
+            truncateComment(
+              neutralizeMentions(redactSecrets(body, [repo.token, pi.llmApiKey ?? ''])),
+            ),
+          )
         } else if (status !== 'done') {
           let report = ''
           let explanation = ''
@@ -208,9 +224,10 @@ export async function reconcile({
             try {
               const taskDir = assertTaskDir(settings.workspace, run.taskDir)
               explanation = await readRunIssueComment(taskDir, warn)
-              report = redactSecrets(await readFile(join(taskDir, 'report.md'), 'utf8'), secrets)
+              report = reportExcerpt(
+                redactSecrets(await readFile(join(taskDir, 'report.md'), 'utf8'), secrets),
+              )
                 .split(/\r?\n/)
-                .slice(0, 20)
                 .map((line) => `> ${line}`)
                 .join('\n')
             } catch (error) {

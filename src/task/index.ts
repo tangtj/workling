@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { writeOutResult } from '../contract/out.ts'
+import { readPiOutcome, writeOutResult } from '../contract/out.ts'
 import { readLlmSecrets } from '../contract/secrets.ts'
 import { CONTRACT_VERSION, readSpec } from '../contract/spec.ts'
 import type { IssueRef } from '../issue/reference.ts'
@@ -10,7 +10,7 @@ import { PI_CLI, ROOT } from '../runtime/paths.ts'
 import { streamProcess } from '../runtime/process.ts'
 import { createPiEventFormatter, duration, time } from '../task/pi-events.ts'
 import type { Command, Environment, ExitStatus } from '../runtime/types.ts'
-import { redact, reportResultLine } from './summary.ts'
+import { redact, reportOutcome } from './summary.ts'
 
 export async function runTask(options: {
   ref: IssueRef
@@ -102,11 +102,15 @@ export async function runTask(options: {
     piEnv.WORKLING_LLM_API_KEY = apiKey
     modelArgs = ['--model', `workling/${piModel}`]
   }
+  const branchStatus = spec.repo.continued
+    ? `接续此前运行的工作分支，当前末端 ${spec.repo.baseRef}`
+    : `基于 ${spec.repo.baseRef}`
   const instruction = `Issue：https://github.com/${ref.project}/issues/${ref.iid}（${issueRef}）
 仓库目录：${repo}
-任务分支：${spec.repo.branch}（已检出，基于 ${spec.repo.baseRef}）${spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''}
+任务分支：${spec.repo.branch}（已检出，${branchStatus}）${spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''}
 任务目录：${dir}
 Issue 内容：${issuePath}
+上下文：${join(dir, 'input', 'runs.md')}、branch.md、pr.md、docs.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）
 默认 codex 模型：${spec.model.codex}
 默认 codex 推理强度：${spec.model.effort}
 codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
@@ -166,12 +170,10 @@ codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
     if (!/^\d+$/.test(count) || !Number.isSafeInteger(commits)) throw new Error('提交数量无效')
     const bundle = join(outDir, 'commits.bundle')
     const head = await outputGit(['rev-parse', '--verify', ref])
-    if (commits > 0) await outputGit(['bundle', 'create', bundle, range])
-    else await rm(bundle, { force: true })
     const report = await readFile(join(dir, 'report.md'), 'utf8').catch(() => '')
-    const result = reportResultLine(report)
-    const outcome =
-      result === '完成' ? 'completed' : result === '部分完成' ? 'partial' : 'incomplete'
+    const outcome = (await readPiOutcome(outDir)) ?? reportOutcome(report)
+    if (commits > 0 && outcome !== 'answered') await outputGit(['bundle', 'create', bundle, range])
+    else await rm(bundle, { force: true })
     await writeOutResult(outDir, {
       contract: CONTRACT_VERSION,
       outcome,

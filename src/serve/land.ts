@@ -9,6 +9,7 @@ import {
   readOutputFile,
   readOutResult,
   truncateComment,
+  type OutResult,
 } from '../contract/out.ts'
 import { applyChecklist, planChecklist } from '../issue/checklist.ts'
 import { ghEnv } from '../platform/github.ts'
@@ -18,21 +19,22 @@ import { findSecrets, redactSecrets } from './secret-scan.ts'
 
 const maxBundleBytes = 100_000_000
 const maxTextLength = 60_000
-const prStates = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' } as const
 const prsSchema = Type.Array(
   Type.Object({
     url: Type.String({ minLength: 1 }),
-    state: Type.Union([Type.Literal('OPEN'), Type.Literal('MERGED'), Type.Literal('CLOSED')]),
+    state: Type.Literal('OPEN'),
+    isDraft: Type.Boolean(),
   }),
 )
 
 type Landed = {
   status: 'done'
   prUrl: string
-  prState: (typeof prStates)[keyof typeof prStates]
+  prState: 'open'
   commits: number
+  created: boolean
 }
-type LandResult = Landed | { status: 'failed'; error: string }
+type LandResult = Landed | { status: 'answered' } | { status: 'failed'; error: string }
 
 function failed(error: string): LandResult {
   return { status: 'failed', error }
@@ -50,6 +52,26 @@ async function readMarkdown(dir: string, name: string): Promise<string> {
   const text = (await readOutputFile(dir, name, maxTextLength * 3)).toString('utf8')
   if (text.length > maxTextLength) throw new Error(`out/${name} 超出大小限制`)
   return text
+}
+
+function preparePr(title: string, body: string, number: number, outcome: 'completed' | 'partial') {
+  const closing = new RegExp(
+    `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \\t]*:?[ \\t]+#${number}(?![\\w/-])`,
+    'i',
+  )
+  const refs = new RegExp(`^\\s*Refs[ \\t]+#${number}(?![\\w/-])`, 'i')
+  const partial = outcome === 'partial' || (!closing.test(body) && refs.test(body))
+  if (partial) {
+    // 合入部分完成的 PR 不能自动关闭 Issue。
+    const closingGlobal = new RegExp(closing.source, 'gi')
+    body = body.replace(closingGlobal, `Refs #${number}`)
+    if (!refs.test(body))
+      body = `Refs #${number}\n> 部分完成：合入本 PR 不会关闭 #${number}，剩余工作见「未完成与存疑」。\n\n${body}`
+    if (!title.startsWith('[部分完成]')) title = `[部分完成] ${title}`
+  } else if (!closing.test(body)) {
+    body = `Closes #${number}\n\n${body}`
+  }
+  return { title, body, partial }
 }
 
 async function runOutDir(taskDir: string): Promise<string> {
@@ -102,7 +124,9 @@ export async function publishIssueResult({
       neutralizeMentions(redactSecrets(text, [repo.token, llmApiKey ?? ''])),
     )
   const explanation = await readRunIssueComment(taskDir, warn)
-  const header = `workling：已创建 PR ${landed.prUrl}（${landed.commits} 个提交）`
+  const header = landed.created
+    ? `workling：已创建 PR ${landed.prUrl}（${landed.commits} 个提交）`
+    : `workling：已更新 PR ${landed.prUrl}（本次 ${landed.commits} 个提交）`
   try {
     await comment(explanation ? truncateComment(`${header}\n\n${explanation}`) : header)
   } catch {
@@ -193,13 +217,16 @@ export async function landRun({
     let bundle: Buffer
     let body: string
     let comment: string | undefined
-    let outcome: string | undefined
+    let outcome: Extract<OutResult['outcome'], 'completed' | 'partial'>
     try {
       const out = await runOutDir(run.taskDir)
       const result = await readOutResult(out)
-      outcome = result.outcome
-      if (result.outcome === 'incomplete' || result.commits === 0)
-        return failed(`没有可交付的提交（outcome: ${result.outcome}）`)
+      if (result.outcome === 'answered') {
+        if (result.commits > 0) log(`${repo.path} #${issue.number} 答复模式下存在提交，已忽略`)
+        return { status: 'answered' }
+      }
+      if (result.commits === 0) return failed(`没有可交付的提交（outcome: ${result.outcome}）`)
+      outcome = result.outcome === 'incomplete' ? 'partial' : result.outcome
       bundle = await readOutputFile(out, 'commits.bundle', maxBundleBytes).catch(
         (error: unknown) => {
           if (missingOutput(error)) throw new Error('缺少 out/commits.bundle')
@@ -294,8 +321,13 @@ export async function landRun({
     const remote = (await remoteGit('ls-remote', '--heads', '--', remoteUrl, ref))
       .split('\n')
       .find((line) => line.endsWith(`\t${ref}`))
-    if (!remote) await remoteGit('push', '--', remoteUrl, `${tip}:${ref}`)
-    else if (remote !== `${tip}\t${ref}`) return failed('远端已存在同名分支')
+    let pushed = false
+    if (remote !== `${tip}\t${ref}`) {
+      if (remote && remote !== `${baseRef}\t${ref}`)
+        return failed('远端分支已更新，与本次基点不一致')
+      await remoteGit('push', '--', remoteUrl, `${tip}:${ref}`)
+      pushed = true
+    }
 
     const prs: unknown = JSON.parse(
       await gh([
@@ -306,67 +338,74 @@ export async function landRun({
         '--head',
         branch,
         '--state',
-        'all',
+        'open',
         '--json',
-        'url,state',
+        'url,state,isDraft',
       ]),
     )
     if (!Value.Check(prsSchema, prs)) throw new Error('PR 列表格式无效')
     const existing = prs[0]
-    if (existing)
-      return { status: 'done', prUrl: existing.url, prState: prStates[existing.state], commits }
+    if (existing && !pushed)
+      return { status: 'done', prUrl: existing.url, prState: 'open', commits, created: false }
 
-    const base = await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch'])
-    if (!base) throw new Error('无法读取仓库默认分支')
-    let title =
-      issue.title ??
-      (await gh([
-        'issue',
-        'view',
-        String(issue.number),
-        '-R',
-        repo.path,
-        '--json',
-        'title',
-        '--jq',
-        '.title',
-      ]))
-    body = neutralizeMentions(redactSecrets(body, secrets))
-    const closing = new RegExp(
-      `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \\t]*:?[ \\t]+#${issue.number}(?![\\w/-])`,
-      'i',
-    )
-    const refs = new RegExp(`^\\s*Refs[ \\t]+#${issue.number}(?![\\w/-])`, 'i')
-    const partial = outcome === 'partial' || (!closing.test(body) && refs.test(body))
-    if (partial) {
-      // 合入部分完成的 PR 不能自动关闭 Issue。
-      const closingGlobal = new RegExp(closing.source, 'gi')
-      body = body.replace(closingGlobal, `Refs #${issue.number}`)
-      if (!refs.test(body))
-        body = `Refs #${issue.number}\n> 部分完成：合入本 PR 不会关闭 #${issue.number}，剩余工作见「未完成与存疑」。\n\n${body}`
-      if (!title.startsWith('[部分完成]')) title = `[部分完成] ${title}`
-    } else if (!closing.test(body)) {
-      body = `Closes #${issue.number}\n\n${body}`
+    const prFields = async () =>
+      preparePr(
+        issue.title ??
+          (await gh([
+            'issue',
+            'view',
+            String(issue.number),
+            '-R',
+            repo.path,
+            '--json',
+            'title',
+            '--jq',
+            '.title',
+          ])),
+        neutralizeMentions(redactSecrets(body, secrets)),
+        issue.number,
+        outcome,
+      )
+    let prUrl: string
+    if (existing) {
+      prUrl = existing.url
+      try {
+        const { title, body } = await prFields()
+        await gh(['pr', 'edit', prUrl, '--title', title, '--body-file', '-'], body)
+      } catch {
+        warn('更新 PR')
+      }
+      if (outcome === 'completed' && existing.isDraft) {
+        try {
+          await gh(['pr', 'ready', prUrl])
+        } catch {
+          warn('将 PR 标记为可审查')
+        }
+      }
+    } else {
+      const base = await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch'])
+      if (!base) throw new Error('无法读取仓库默认分支')
+      const { title, body, partial } = await prFields()
+      prUrl = await gh(
+        [
+          'pr',
+          'create',
+          '-R',
+          repo.path,
+          '--head',
+          branch,
+          '--base',
+          base,
+          '--title',
+          title,
+          '--body-file',
+          '-',
+          ...(partial ? ['--draft'] : []),
+        ],
+        body,
+      )
+      if (!prUrl) throw new Error('创建 PR 未返回链接')
     }
-    const prUrl = await gh(
-      [
-        'pr',
-        'create',
-        '-R',
-        repo.path,
-        '--head',
-        branch,
-        '--base',
-        base,
-        '--title',
-        title,
-        '--body-file',
-        '-',
-      ],
-      body,
-    )
-    if (!prUrl) throw new Error('创建 PR 未返回链接')
-    // 已有 PR 的重试直接返回，避免重复发送评论。
     if (comment) {
       try {
         await gh(
@@ -377,7 +416,7 @@ export async function landRun({
         warn('发送 PR 评论')
       }
     }
-    return { status: 'done', prUrl, prState: 'open', commits }
+    return { status: 'done', prUrl, prState: 'open', commits, created: !existing }
   } finally {
     await rm(landing, { recursive: true, force: true })
   }

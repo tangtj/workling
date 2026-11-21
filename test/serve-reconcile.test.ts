@@ -4,6 +4,7 @@ import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { writeOutResult } from '../src/contract/out.ts'
 import { writeLlmSecrets } from '../src/contract/secrets.ts'
 import { issues, runs } from '../src/db/schema.ts'
 import { writeResult } from '../src/task/dir.ts'
@@ -39,9 +40,9 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
         '--head',
         'workling/42-issue',
         '--state',
-        'all',
+        'open',
         '--json',
-        'url,state',
+        'url,state,isDraft',
       ],
       [
         'gh',
@@ -58,8 +59,63 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
-      'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）',
+      'workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）',
     )
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复', async (commits) => {
+  const s = await scenario()
+  try {
+    const { issue, dir, run } = await s.running({ delivery: true })
+    const prUrl = 'https://github.com/a/b/pull/9'
+    s.db.update(issues).set({ prUrl, prState: 'open' }).where(eq(issues.id, issue.id)).run()
+    const out = join(dir, 'out')
+    await rm(join(out, 'commits.bundle'))
+    await writeOutResult(out, {
+      contract: 1,
+      outcome: 'answered',
+      branch: run.branch!,
+      head: null,
+      commits,
+    })
+    if (commits) await writeFile(join(out, 'issue-comment.md'), '请 @someone 核对 repo-secret')
+    await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
+    const commands: string[][] = []
+    await reconcile({
+      ...s.options,
+      command: (args, options) => {
+        commands.push(args)
+        return s.command(args, options)
+      },
+    })
+    expect(s.db.select().from(issues).get()).toMatchObject({
+      status: 'done',
+      prUrl,
+      prState: 'open',
+    })
+    expect(s.db.select().from(runs).get()?.error).toBeNull()
+    expect(commands).toEqual([
+      [
+        'gh',
+        'issue',
+        'edit',
+        '42',
+        '-R',
+        'a/b',
+        '--remove-label',
+        'workling:running',
+        '--add-label',
+        'workling:done',
+      ],
+      ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
+    ])
+    expect(s.calls.at(-1)?.options?.input).toBe(
+      `workling：已答复。\n\n${commits ? '请 `@someone` 核对 ***' : '（Pi 未写说明）'}`,
+    )
+    expect(s.logs.some((line) => line.includes('答复模式下存在提交，已忽略'))).toBe(commits > 0)
   } finally {
     await s.dispose()
   }
@@ -151,7 +207,7 @@ test.each([
     if (failure === '全部成功') {
       expect(messages).toHaveLength(2)
       expect(messages[0]).toBe(
-        'workling：已创建 PR https://github.com/a/b/pull/1（1 个提交）\n\n检查通过 `@someone`',
+        'workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n检查通过 `@someone`',
       )
       expect(messages[1]).toContain('勾选：- [ ] Run tests')
       expect(messages[1]).toContain('取消勾选：* [x] Old')
@@ -425,7 +481,7 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
         })
       const report =
         kind !== '无报告'
-          ? Array.from({ length: 20 }, (_, i) => `> line ${i + 1}`).join('\n') + '\n\n'
+          ? Array.from({ length: 22 }, (_, i) => `> line ${i + 1}`).join('\n') + '\n\n'
           : ''
       expect(s.calls[1]!.options!.input).toBe(
         `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。` +
@@ -440,6 +496,31 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
     }
   },
 )
+
+test('长报告的失败评论引用未完成与存疑小节', async () => {
+  const s = await scenario()
+  try {
+    const { dir } = await s.running()
+    await writeFile(
+      join(dir, 'report.md'),
+      [
+        ...Array.from({ length: 45 }, (_, i) => `第 ${i + 1} 行`),
+        '## 未完成与存疑',
+        '复查部署日志 repo-secret',
+        '## 其他',
+        '不引用此节',
+      ].join('\n'),
+    )
+    await writeResult(dir, { exitCode: 1, signal: null, finishedAt: clock.toISOString() })
+    await reconcile({ ...s.options, executor: fakeExecutor() })
+    const comment = s.calls.find(({ args }) => args[2] === 'comment')?.options?.input
+    expect(comment).toContain('> 第 15 行\n> …\n> ## 未完成与存疑\n> 复查部署日志 ***')
+    expect(comment).not.toContain('第 16 行')
+    expect(comment).not.toContain('不引用此节')
+  } finally {
+    await s.dispose()
+  }
+})
 
 test('清理按名称倒序保留 5 个，仅删除已结束 run 且保护运行目录与未登记目录', async () => {
   const s = await scenario()

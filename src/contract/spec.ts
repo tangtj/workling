@@ -13,6 +13,7 @@ export const specSchema = Type.Object({
     baseRef: Type.String(),
     branch: Type.String(),
     docBranch: Type.Optional(Type.String()),
+    continued: Type.Optional(Type.Boolean()),
   }),
   model: Type.Object({
     codex: Type.String(),
