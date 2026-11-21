@@ -61,6 +61,7 @@ async function fixture() {
       worker: 'spa-worker',
       interval: 60,
       timeout: 90,
+      reworkLimit: 3,
       startedAt: now,
       lastPollAt: now,
       lastPollError: null,

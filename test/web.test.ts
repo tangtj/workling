@@ -8,12 +8,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db/index.ts'
 import { ensurePassword, hashToken } from '../src/web/auth.ts'
-import { issues, repos, runs, sessions } from '../src/db/schema.ts'
+import { feedback, issues, repos, runs, sessions, triageRecords } from '../src/db/schema.ts'
 import { createApp } from '../src/web/app.ts'
 import type { ServeStatus } from '../src/serve/index.ts'
 import { pageData } from '../src/web/data.ts'
 import * as Value from 'typebox/value'
 import { repoSchema } from '../src/web/repos.ts'
+import { overviewSchema } from '../src/web/overview.ts'
+import { pagesRoutes } from '../src/web/routes/pages.ts'
 import { failureReason } from '../src/web/issue-view.ts'
 
 test('管理接口校验请求、掩码凭证并管理仓库', async () => {
@@ -479,6 +481,7 @@ test.each([false, true])('状态接口在提供 status=%s 时返回当前轮询�
   const dir = await mkdtemp(join(tmpdir(), 'workling-status-api-'))
   const { db, close } = await openDatabase(dir)
   const status: ServeStatus = {
+    reworkLimit: 3,
     worker: 'worker1',
     interval: 60,
     timeout: 90,
@@ -1224,6 +1227,7 @@ test('任务页组合过滤、回退非法参数并转义外部标题，概览�
   updateExecutorSettings(db, { concurrency: 2 })
   const now = new Date('2026-11-15T12:00:00Z')
   const status: ServeStatus = {
+    reworkLimit: 3,
     worker: 'p1-worker',
     interval: 60,
     timeout: 90,
@@ -1367,6 +1371,7 @@ test('执行器并发上限 PATCH 持久化，非法值返回 400，刷新页面
       worker: 'worker',
       interval: 60,
       timeout: 90,
+      reworkLimit: 3,
       startedAt: now,
       lastPollAt: null,
       lastPollError: null,
@@ -1478,3 +1483,152 @@ test('修改密码共享登录限流并保留当前会话', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 }, 15000)
+
+test('概览按等待时间汇总四类待处理事项并在状态变化后移除', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-overview-'))
+  const { db, close } = await openDatabase(dir)
+  const time = (minutes: number) => new Date(Date.UTC(2026, 0, 1, 0, minutes))
+  try {
+    const repo = db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'token',
+        enabled: true,
+        createdAt: time(0),
+        updatedAt: time(0),
+      })
+      .returning()
+      .get()
+    const makeIssue = (
+      number: number,
+      status: 'failed' | 'done',
+      minute: number,
+      kind: 'implement' | 'rework',
+    ) => {
+      const issue = db
+        .insert(issues)
+        .values({
+          repoId: repo.id,
+          number,
+          title: `Issue ${number}`,
+          status,
+          prUrl: status === 'done' ? `https://github.com/a/b/pull/${number}` : null,
+          prState: status === 'done' ? 'open' : null,
+          createdAt: time(0),
+          updatedAt: time(minute),
+        })
+        .returning()
+        .get()
+      const run = db
+        .insert(runs)
+        .values({
+          issueId: issue.id,
+          kind,
+          worker: 'worker',
+          startedAt: time(minute - 1),
+          endedAt: time(minute),
+          exitCode: status === 'failed' ? 1 : 0,
+          error: status === 'failed' ? '超时' : null,
+        })
+        .returning()
+        .get()
+      db.update(issues).set({ lastRunId: run.id }).where(eq(issues.id, issue.id)).run()
+      return { issue, run }
+    }
+    makeIssue(1, 'failed', 10, 'implement')
+    const capped = makeIssue(2, 'done', 20, 'rework')
+    const review = makeIssue(3, 'done', 30, 'implement')
+    const common = {
+      repoId: repo.id,
+      issueId: capped.issue.id,
+      prNumber: 2,
+      source: 'review' as const,
+      authorId: 'a',
+      authorLogin: 'a',
+      trust: 'write' as const,
+      isCommand: false,
+      body: '',
+      url: 'https://github.com/a/b/pull/2',
+      updatedAt: time(21),
+      seenAt: time(21),
+    }
+    db.insert(feedback)
+      .values([
+        {
+          ...common,
+          externalId: '1',
+          status: 'included',
+          runId: capped.run.id,
+          createdAt: time(18),
+        },
+        { ...common, externalId: '2', status: 'capped', createdAt: time(21) },
+      ])
+      .run()
+    db.insert(triageRecords)
+      .values({
+        repoId: repo.id,
+        number: 4,
+        title: 'Missing',
+        authorId: 'a',
+        authorLogin: 'a',
+        trust: 'write',
+        contentHash: 'hash',
+        issueUpdatedAt: time(0),
+        checks: JSON.stringify({ missingSections: [], invalidDirectives: [] }),
+        missing: JSON.stringify(['背景', '验收']),
+        alreadyReady: false,
+        attempts: 1,
+        triagedAt: time(40),
+        suggestedAt: time(40),
+      })
+      .run()
+    const status: ServeStatus = {
+      worker: 'worker',
+      interval: 60,
+      timeout: 90,
+      reworkLimit: 7,
+      startedAt: time(0),
+      lastPollAt: null,
+      lastPollError: null,
+      workerError: '镜像不兼容',
+    }
+    const app = pagesRoutes({
+      db,
+      options: { workspace: dir, now: () => time(60).getTime(), status: () => status },
+    })
+    const response = await app.request('/api/overview')
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(Value.Check(overviewSchema, body)).toBe(true)
+    expect(body.attention.map((item: { kind: string }) => item.kind)).toEqual([
+      'failed',
+      'capped',
+      'review',
+      'needs_info',
+    ])
+    expect(body.attention.map((item: { reason: string }) => item.reason)).toEqual([
+      '第 1 轮实现 · 超时',
+      '已自动返工 1 / 7 轮，PR 上的 Request changes 不再自动处理',
+      'PR 已打开，等待 review',
+      '已评论缺少：背景、验收，等作者补充',
+    ])
+    expect(body.alerts).toEqual([
+      { kind: 'worker', message: '镜像不兼容；已暂停拉起新任务，排队中的 Issue 会等待。' },
+    ])
+    expect(body.reworked).toBe(1)
+    db.update(issues).set({ prState: 'merged' }).where(eq(issues.id, review.issue.id)).run()
+    const refreshed = await (await app.request('/api/overview')).json()
+    expect(refreshed.attention.map((item: { kind: string }) => item.kind)).toEqual([
+      'failed',
+      'capped',
+      'needs_info',
+    ])
+  } finally {
+    close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

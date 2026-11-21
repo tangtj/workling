@@ -32,6 +32,7 @@ export type ServeStatus = {
   worker: string
   interval: number
   timeout: number
+  reworkLimit: number
   startedAt: Date
   lastPollAt: Date | null
   lastPollError: string | null
@@ -72,6 +73,7 @@ export async function serve({
     worker: settings.worker,
     interval: settings.interval,
     timeout: settings.timeout,
+    reworkLimit: settings.reworkLimit,
     startedAt: new Date(),
     lastPollAt: null,
     lastPollError: null,

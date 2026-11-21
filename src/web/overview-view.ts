@@ -2,6 +2,7 @@ import type { IssueRow } from './issue-view.ts'
 
 export type OverviewRun = {
   id: number
+  kind?: 'implement' | 'rework'
   startedAt: Date
   endedAt: Date | null
   exitCode: number | null

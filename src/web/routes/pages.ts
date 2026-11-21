@@ -1,4 +1,7 @@
-import { triageOverview } from '../triage.ts'
+import { repoTriage, triageOverview } from '../triage.ts'
+import { feedback } from '../../db/schema.ts'
+import { countAutoRounds, prNumberOf } from '../../serve/rework.ts'
+import { failureReason } from '../issue-view.ts'
 import { attentionStages } from '../stage.ts'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -166,12 +169,88 @@ export function pagesRoutes(deps: AppDeps): Hono {
       run.endedAt.getTime() <= page.now
     const serialize = (run: (typeof page.issues)[number]['runs'][number]) => ({
       id: run.id,
+      kind: run.kind,
       startedAt: run.startedAt.toISOString(),
       endedAt: run.endedAt?.toISOString() ?? null,
       exitCode: run.exitCode,
       error: run.error,
     })
+    const rows = db.select().from(feedback).all()
+    const attention: OverviewData['attention'] = []
+    for (const issue of page.issues) {
+      if (issue.stage !== 'failed' && issue.stage !== 'capped' && issue.stage !== 'review') continue
+      const issueRows = rows.filter((row) => row.issueId === issue.id)
+      const cappedAt = issueRows
+        .filter((row) => row.status === 'capped')
+        .map((row) => row.createdAt.getTime())
+      const round = issue.lastRun
+        ? issue.runs.filter(
+            (run) =>
+              run.startedAt < issue.lastRun!.startedAt ||
+              (run.startedAt.getTime() === issue.lastRun!.startedAt.getTime() &&
+                run.id <= issue.lastRun!.id),
+          ).length
+        : 0
+      const count = countAutoRounds(
+        prNumberOf(issue.prUrl),
+        issueRows,
+        new Set(issue.runs.filter((run) => run.kind === 'rework').map((run) => run.id)),
+      )
+      attention.push({
+        kind: issue.stage,
+        repoId: issue.repoId,
+        repoRef: issue.repo.ref,
+        number: issue.number,
+        title: issue.title,
+        issueId: issue.id,
+        url: `https://${issue.repo.host}/${issue.repo.path}/issues/${issue.number}`,
+        prUrl: issue.prUrl,
+        logRunId: issue.stage === 'failed' ? (issue.lastRun?.id ?? null) : null,
+        since: (issue.stage === 'capped' && cappedAt.length
+          ? new Date(Math.max(...cappedAt))
+          : (issue.lastRun?.endedAt ?? issue.updatedAt)
+        ).toISOString(),
+        reason:
+          issue.stage === 'failed'
+            ? `第 ${round} 轮${issue.lastRun?.kind === 'rework' ? '返工' : '实现'} · ${failureReason(issue).label}`
+            : issue.stage === 'capped'
+              ? `已自动返工 ${count} / ${page.status?.reworkLimit ?? '—'} 轮，PR 上的 Request changes 不再自动处理`
+              : 'PR 已打开，等待 review',
+      })
+    }
+    for (const repo of page.repos.filter((repo) => repo.enabled)) {
+      for (const record of repoTriage(db, repo).records) {
+        if (record.followUp !== 'pending' || !record.suggestedAt) continue
+        attention.push({
+          kind: 'needs_info',
+          repoId: repo.id,
+          repoRef: repo.ref,
+          number: record.number,
+          title: record.title,
+          issueId: null,
+          url: `https://${repo.host}/${repo.path}/issues/${record.number}`,
+          prUrl: null,
+          since: record.suggestedAt,
+          reason: `已评论缺少：${record.missing.join('、')}，等作者补充`,
+          logRunId: null,
+        })
+      }
+    }
+    attention.sort((a, b) => a.since.localeCompare(b.since))
+    const alerts: OverviewData['alerts'] = []
+    if (page.status?.lastPollError)
+      alerts.push({ kind: 'poll', message: `轮询失败：${page.status.lastPollError}` })
+    if (page.status?.workerError)
+      alerts.push({
+        kind: 'worker',
+        message: `${page.status.workerError}；已暂停拉起新任务，排队中的 Issue 会等待。`,
+      })
     const body: OverviewData = {
+      alerts,
+      attention: attention.slice(0, 50),
+      reworked: page.issues
+        .flatMap((issue) => issue.runs)
+        .filter((run) => run.kind === 'rework' && recent(run)).length,
       now: new Date(page.now).toISOString(),
       repos: { total: page.repos.length, enabled: page.repos.filter((r) => r.enabled).length },
       concurrency: page.concurrency,
@@ -197,6 +276,14 @@ export function pagesRoutes(deps: AppDeps): Hono {
           prState: i.prState,
           updatedAt: i.updatedAt.toISOString(),
           runCount: i.runs.length,
+          round: i.lastRun
+            ? i.runs.filter(
+                (run) =>
+                  run.startedAt < i.lastRun!.startedAt ||
+                  (run.startedAt.getTime() === i.lastRun!.startedAt.getTime() &&
+                    run.id <= i.lastRun!.id),
+              ).length
+            : 0,
           lastRun: i.lastRun ? serialize(i.lastRun) : null,
           runs: i.runs.filter((r) => r.id === i.lastRun?.id || recent(r)).map(serialize),
         })),

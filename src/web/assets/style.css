@@ -2451,3 +2451,55 @@ legend {
     min-width: 0;
   }
 }
+
+.overview-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--failed);
+  background: var(--failed-soft);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.overview-alert .button {
+  margin-left: auto;
+}
+.attention-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}
+.attention-main {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.attention-actions {
+  flex-shrink: 0;
+}
+.badge--info {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.overview-slots .slots {
+  padding: 16px;
+}
+.overview-failed {
+  color: var(--failed);
+}
+@media (max-width: 600px) {
+  .attention-row {
+    flex-wrap: wrap;
+  }
+  .attention-main {
+    flex-basis: calc(100% - 120px);
+  }
+  .attention-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

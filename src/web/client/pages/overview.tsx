@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { formatDuration, formatTime, secondsAgo, relativeTime } from '../../format.ts'
+import { formatDuration, formatTime, relativeTime } from '../../format.ts'
 import { failureReason } from '../../issue-view.ts'
-import { overviewModel, slotTiming, runResult, type OverviewIssue } from '../../overview-view.ts'
+import { overviewModel, runResult, type OverviewIssue } from '../../overview-view.ts'
 import { Badge, PR } from '../issue-table.tsx'
 import { overviewOptions } from '../overview.ts'
 import { usePageLayout } from '../layout.tsx'
@@ -46,8 +46,8 @@ export function OverviewPage() {
         </button>
       </p>
     )
-  const { issues, repos, now, watch: status, concurrency } = page.data
-  const { running, queued, failed, recent, meanMs, idle } = overviewModel(issues, now, concurrency)
+  const { issues, repos, now, concurrency, alerts, attention, reworked } = page.data
+  const { running, queued, recent, meanMs, idle } = overviewModel(issues, now, concurrency)
   const date = new Date(now)
   return (
     <>
@@ -76,121 +76,116 @@ export function OverviewPage() {
           </Link>
         </div>
       </header>
-      <div className={`health${status?.lastPollError || status?.workerError ? ' warn' : ''}`}>
-        {status ? (
-          <>
-            <span>
-              <span className="dot dot--done"></span> <b>watch 运行中</b>
+      {alerts.map((alert) => (
+        <div className="overview-alert" key={alert.kind} role="alert">
+          <span className="badge badge--failed">系统</span>
+          <span>{alert.message}</span>
+          {alert.kind === 'worker' && (
+            <button
+              type="button"
+              className="button"
+              onClick={() => document.querySelector<HTMLButtonElement>('.version-pill')?.click()}
+            >
+              查看版本
+            </button>
+          )}
+        </div>
+      ))}
+      <section className="card">
+        <div className="card-head">
+          <h2>需要你处理 {attention.length}</h2>
+          <span className="muted">按等待时长排序，处理后自动消失</span>
+        </div>
+        {attention.map((item) => (
+          <article className="attention-row" key={`${item.kind}-${item.repoId}-${item.number}`}>
+            <span className={`badge badge--${item.kind === 'needs_info' ? 'info' : item.kind}`}>
+              {
+                {
+                  failed: '执行失败',
+                  capped: '返工到上限',
+                  review: 'PR 待审',
+                  needs_info: '信息不全',
+                }[item.kind]
+              }
             </span>
-            <span className="mono">{status.worker}</span>
-            <span>上次轮询 {status.lastPollAt ? secondsAgo(status.lastPollAt, now) : '—'}</span>
-            <span>
-              并发 {running.length} / {concurrency} · 超时 {status.timeout} 分钟
-            </span>
-            {status.lastPollError && <span>{status.lastPollError}</span>}
-            {status.workerError && <span>暂停拉起：{status.workerError}</span>}
-          </>
-        ) : (
-          <span>
-            <span className="dot"></span> watch 状态未知
-          </span>
-        )}
-      </div>
-      <h2>执行名额</h2>
-      <div className="slots">
-        {running.map((issue) => {
-          const run = issue.lastRun
-          const {
-            elapsedSeconds: elapsed,
-            limitSeconds: limit,
-            hot,
-            remainingMinutes,
-          } = slotTiming(run?.startedAt ?? new Date(now), now, status?.timeout ?? null)
-          return (
-            <article key={issue.id} className="slot">
-              <div className="slot-top">
+            <div className="attention-main">
+              <div>
                 <span className="mono">
-                  {issue.repoRef} #{issue.number}
-                </span>
-                <Badge status="running" />
+                  {item.repoRef}#{item.number}
+                </span>{' '}
+                {item.title ?? '（未记录标题）'}
               </div>
-              <Link className="slot-title" to={`/issues/${issue.id}`}>
-                <Title issue={issue} />
-              </Link>
-              {run && (
-                <>
-                  {limit !== null && (
-                    <>
-                      <div className="phase-label">
-                        <span>已用 {formatDuration(elapsed * 1000)}</span>
-                        <span>
-                          {hot ? `剩余 ${remainingMinutes} 分钟` : `超时 ${status!.timeout} 分钟`}
-                        </span>
-                      </div>
-                      <progress
-                        className={`timebar${hot ? ' hot' : ''}`}
-                        max={limit}
-                        value={elapsed}
-                        aria-label="已用执行时间"
-                      />
-                    </>
-                  )}
-                  <div className="slot-foot">
-                    <span>
-                      第 {issue.runCount} 次 · {run.startedAt.toTimeString().slice(0, 5)} 开始
-                    </span>
-                    <Link to={`/runs/${run.id}/log`}>实时日志</Link>
-                  </div>
-                </>
+              <div className="li-meta">
+                {item.reason} · {relativeTime(new Date(item.since), now)}
+              </div>
+            </div>
+            <div className="actions attention-actions">
+              {item.kind === 'failed' && item.logRunId !== null && (
+                <Link className="button" to={`/runs/${item.logRunId}/log`}>
+                  看日志
+                </Link>
               )}
-            </article>
-          )
-        })}
-        {Array.from({ length: idle }, (_, index) => (
-          <article key={index} className="slot idle">
-            <span>空闲名额</span>
-            {queued[0] && (
-              <span>
-                下一个：
-                <Title issue={queued[0]} />
-              </span>
-            )}
+              {(item.kind === 'capped' || item.kind === 'review') && item.prUrl && (
+                <a className="button" href={item.prUrl} target="_blank" rel="noreferrer">
+                  {item.kind === 'capped' ? '打开 PR' : '去 review'}
+                </a>
+              )}
+              {(item.kind === 'failed' || item.kind === 'capped') && item.issueId !== null && (
+                <Link className="button" to={`/issues/${item.issueId}`}>
+                  打开
+                </Link>
+              )}
+              {item.kind === 'needs_info' && (
+                <Link className="button" to={`/triage?repo=${item.repoId}`}>
+                  看分诊
+                </Link>
+              )}
+            </div>
           </article>
         ))}
-        {!running.length && !idle && <p className="empty">当前没有执行中的任务</p>}
-      </div>
-      <div className="grid g-2">
-        <section className="card">
-          <div className="card-head">
-            <h2>需要处理 {failed.length}</h2>
-          </div>
-          <div className="list">
-            {failed.slice(0, 5).map((issue) => (
-              <article key={issue.id} className="li">
-                <div className="li-main">
-                  <div className="row between">
-                    <IssueLink issue={issue} />
-                    <Badge status="failed" text={failureReason(issue).label} />
-                  </div>
-                  <div className="li-title">
-                    <Title issue={issue} />
-                  </div>
-                  <div className="li-meta">
-                    {formatTime(issue.updatedAt, now)} · 第 {issue.runCount} 次
-                  </div>
-                  <div className="advice">{failureReason(issue).advice}</div>
-                  {issue.lastRun && <Link to={`/runs/${issue.lastRun.id}/log`}>查看日志</Link>}
+        {!attention.length && <p className="empty">没有要处理的事</p>}
+      </section>
+      <section className="card overview-slots">
+        <div className="card-head">
+          <h2>
+            执行中 {running.length} / {concurrency}
+          </h2>
+        </div>
+        <div className="slots">
+          {running.map((issue) => {
+            const run = issue.lastRun
+            return (
+              <article className="slot" key={issue.id}>
+                <div className="slot-top">
+                  <span className={`badge badge--${run?.kind === 'rework' ? 'rework' : 'running'}`}>
+                    {run?.kind === 'rework' ? '返工' : '实现'} · 第 {issue.round} 轮
+                  </span>
+                  {run && (
+                    <span>已运行 {formatDuration(Math.max(0, now - run.startedAt.getTime()))}</span>
+                  )}
                 </div>
+                <Link className="slot-title" to={`/issues/${issue.id}`}>
+                  <span className="mono">
+                    {issue.repoRef}#{issue.number}
+                  </span>{' '}
+                  <Title issue={issue} />
+                </Link>
+                {run && (
+                  <div className="slot-foot">
+                    <Link to={`/runs/${run.id}/log`}>实时日志</Link>
+                  </div>
+                )}
               </article>
-            ))}
-            {!failed.length && <p className="empty">没有失败的任务</p>}
-          </div>
-          {failed.length > 5 && (
-            <div className="card-body">
-              <Link to="/issues?stage=failed">查看全部失败</Link>
-            </div>
-          )}
-        </section>
+            )
+          })}
+          {Array.from({ length: idle }, (_, index) => (
+            <article className="slot idle" key={index}>
+              空闲名额
+            </article>
+          ))}
+        </div>
+      </section>
+      <div className="grid g-2">
         <section className="card">
           <div className="card-head">
             <h2>排队 {queued.length}</h2>
@@ -213,63 +208,66 @@ export function OverviewPage() {
             {!queued.length && <p className="empty">队列为空</p>}
           </div>
         </section>
-      </div>
-      <section className="card">
-        <div className="card-head">
-          <h2>最近 24 小时</h2>
-        </div>
-        <div className="kpis">
-          {[
-            ['完成数', recent.filter(({ run }) => runResult(run) === 'done').length],
-            ['失败数', recent.filter(({ run }) => runResult(run) === 'failed').length],
-            ['平均用时', meanMs === null ? '—' : formatDuration(meanMs)],
-          ].map(([label, value]) => (
-            <div key={label} className="kpi">
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                {['结束时间', 'Issue', '结果', '用时', 'PR'].map((label) => (
-                  <th key={label}>{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {recent.slice(0, 10).map(({ issue, run }) => (
-                <tr key={run.id}>
-                  <td>{formatTime(run.endedAt!, now)}</td>
-                  <td>
-                    <div className="issue-cell">
-                      <IssueLink issue={issue} />
-                      <Title issue={issue} />
-                    </div>
-                  </td>
-                  <td>
-                    <Badge
-                      status={runResult(run)}
-                      text={
-                        runResult(run) === 'failed' && run.id === issue.lastRun?.id
-                          ? failureReason(issue).label
-                          : undefined
-                      }
-                    />
-                  </td>
-                  <td>{formatDuration(run.endedAt!.getTime() - run.startedAt.getTime())}</td>
-                  <td>
-                    <PR url={issue.prUrl} state={issue.prState} />
-                  </td>
+        <section className="card">
+          <div className="card-head">
+            <h2>最近 24 小时</h2>
+          </div>
+          <div className="kpis">
+            {[
+              ['完成数', recent.filter(({ run }) => runResult(run) === 'done').length],
+              ['返工', reworked],
+              ['失败数', recent.filter(({ run }) => runResult(run) === 'failed').length],
+              ['平均用时', meanMs === null ? '—' : formatDuration(meanMs)],
+            ].map(([label, value]) => (
+              <div key={label} className="kpi">
+                <span>{label}</span>
+                <strong className={label === '失败数' ? 'overview-failed' : undefined}>
+                  {value}
+                </strong>
+              </div>
+            ))}
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {['结束时间', 'Issue', '结果', '用时', 'PR'].map((label) => (
+                    <th key={label}>{label}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {!recent.length && <p className="empty">最近 24 小时没有执行记录</p>}
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {recent.slice(0, 10).map(({ issue, run }) => (
+                  <tr key={run.id}>
+                    <td>{formatTime(run.endedAt!, now)}</td>
+                    <td>
+                      <div className="issue-cell">
+                        <IssueLink issue={issue} />
+                        <Title issue={issue} />
+                      </div>
+                    </td>
+                    <td>
+                      <Badge
+                        status={runResult(run)}
+                        text={
+                          runResult(run) === 'failed' && run.id === issue.lastRun?.id
+                            ? failureReason(issue).label
+                            : undefined
+                        }
+                      />
+                    </td>
+                    <td>{formatDuration(run.endedAt!.getTime() - run.startedAt.getTime())}</td>
+                    <td>
+                      <PR url={issue.prUrl} state={issue.prState} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!recent.length && <p className="empty">最近 24 小时没有执行记录</p>}
+          </div>
+        </section>
+      </div>
     </>
   )
 }

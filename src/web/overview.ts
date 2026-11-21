@@ -4,6 +4,7 @@ const obj = <T extends Type.TProperties>(properties: T) =>
 const nullableString = Type.Union([Type.String(), Type.Null()])
 const run = obj({
   id: Type.Integer(),
+  kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
   startedAt: Type.String(),
   endedAt: nullableString,
   exitCode: Type.Union([Type.Integer(), Type.Null()]),
@@ -23,6 +24,33 @@ export const overviewSchema = obj({
       workerError: nullableString,
     }),
   ]),
+  alerts: Type.Array(
+    obj({
+      kind: Type.Union([Type.Literal('poll'), Type.Literal('worker')]),
+      message: Type.String(),
+    }),
+  ),
+  attention: Type.Array(
+    obj({
+      kind: Type.Union([
+        Type.Literal('failed'),
+        Type.Literal('capped'),
+        Type.Literal('review'),
+        Type.Literal('needs_info'),
+      ]),
+      repoId: Type.Integer(),
+      repoRef: Type.String(),
+      number: Type.Integer(),
+      title: nullableString,
+      issueId: Type.Union([Type.Integer(), Type.Null()]),
+      url: Type.String(),
+      prUrl: nullableString,
+      since: Type.String(),
+      reason: Type.String(),
+      logRunId: Type.Union([Type.Integer(), Type.Null()]),
+    }),
+  ),
+  reworked: Type.Integer(),
   issues: Type.Array(
     obj({
       id: Type.Integer(),
@@ -46,6 +74,7 @@ export const overviewSchema = obj({
       ]),
       updatedAt: Type.String(),
       runCount: Type.Integer(),
+      round: Type.Integer(),
       lastRun: Type.Union([run, Type.Null()]),
       runs: Type.Array(run),
     }),
