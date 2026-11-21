@@ -27,17 +27,18 @@ bun link    # 可选：注册全局命令 workling
 
 1. **环境变量**：启动前需要的进程级配置，写在项目根目录的 `.env`（Bun 启动时自动加载）。全部可选：
 
-   | 变量                     | 默认值      | 说明                                               |
-   | ------------------------ | ----------- | -------------------------------------------------- |
-   | `WORKLING_WORKSPACE`     | `.runtime`  | 数据目录：数据库与任务目录，相对路径按启动目录解析 |
-   | `WORKLING_HOST`          | `127.0.0.1` | 管理页监听地址                                     |
-   | `WORKLING_PORT`          | `7420`      | 管理页端口                                         |
-   | `WORKLING_WORKER`        | 主机名      | 本机标识，写入运行记录与评论                       |
-   | `WORKLING_INTERVAL`      | `60`        | 轮询间隔（秒）                                     |
-   | `WORKLING_TIMEOUT`       | `90`        | 单个任务超时（分钟）                               |
-   | `WORKLING_KEEP_RUNS`     | `5`         | 每个 Issue 保留的任务目录数                        |
-   | `WORKLING_ALLOWED_HOSTS` | 无          | 额外允许的访问域名，逗号分隔                       |
-   | `WORKLING_SECURE_COOKIE` | `false`     | 通过 HTTPS 访问管理页时设为 `true`                 |
+   | 变量                     | 默认值      | 说明                                                                |
+   | ------------------------ | ----------- | ------------------------------------------------------------------- |
+   | `WORKLING_WORKSPACE`     | `.runtime`  | 数据目录：数据库与任务目录，相对路径按启动目录解析                  |
+   | `WORKLING_HOST`          | `127.0.0.1` | 管理页监听地址                                                      |
+   | `WORKLING_PORT`          | `7420`      | 管理页端口                                                          |
+   | `WORKLING_WORKER`        | 主机名      | 本机标识，写入运行记录与评论                                        |
+   | `WORKLING_INTERVAL`      | `60`        | 轮询间隔（秒）                                                      |
+   | `WORKLING_TIMEOUT`       | `90`        | 单个任务超时（分钟）                                                |
+   | `WORKLING_KEEP_RUNS`     | `5`         | 每个 Issue 保留的任务目录数                                         |
+   | `WORKLING_REWORK_LIMIT`  | `3`         | 每个 PR 由 Request changes 自动触发的返工轮数上限，0 表示不自动返工 |
+   | `WORKLING_ALLOWED_HOSTS` | 无          | 额外允许的访问域名，逗号分隔                                        |
+   | `WORKLING_SECURE_COOKIE` | `false`     | 通过 HTTPS 访问管理页时设为 `true`                                  |
 
 2. **管理页「设置」**（存数据库）：codex 模型与推理强度、Pi 模型、LLM 接入地址与 Key、提交身份、执行器（本机进程 / Docker 容器及资源限制）。首次启动时会从同名环境变量导入一次，之后以管理页为准。
 

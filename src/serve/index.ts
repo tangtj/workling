@@ -171,7 +171,7 @@ export async function serve({
           if (!signal.aborted) log(`观察反馈失败：${errorMessage(error)}`)
         }
         try {
-          await queueRework({ db, command, log, signal })
+          await queueRework({ db, command, log, signal, reworkLimit: settings.reworkLimit })
         } catch (error) {
           if (!signal.aborted) log(`指令重试失败：${errorMessage(error)}`)
         }

@@ -36,6 +36,7 @@ Configuration lives in two places:
    | `WORKLING_INTERVAL`      | `60`        | Polling interval (seconds)                                                             |
    | `WORKLING_TIMEOUT`       | `90`        | Per-task timeout (minutes)                                                             |
    | `WORKLING_KEEP_RUNS`     | `5`         | Task directories kept per Issue                                                        |
+   | `WORKLING_REWORK_LIMIT`  | `3`         | Max automatic reworks per PR triggered by Request changes; 0 disables them             |
    | `WORKLING_ALLOWED_HOSTS` | none        | Extra allowed host names, comma-separated                                              |
    | `WORKLING_SECURE_COOKIE` | `false`     | Set to `true` when the admin UI is served over HTTPS                                   |
 

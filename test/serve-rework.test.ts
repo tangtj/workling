@@ -388,7 +388,7 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
       .where(eq(issues.id, issue.id))
       .run()
     const date = new Date(clock.getTime() + 1000)
-    s.db
+    const review = s.db
       .insert(feedback)
       .values({
         repoId: issue.repoId,
@@ -408,7 +408,8 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
         updatedAt: date,
         seenAt: date,
       })
-      .run()
+      .returning()
+      .get()
     await queueRework(s.options)
     expect(s.db.select().from(issues).get()?.status).toBe('queued')
     for (let i = 0; i < 10; i++)
@@ -469,6 +470,13 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
             commits: 1,
           })
           await writeFile(join(out, 'pr-body.md'), 'Updated')
+          await writeFile(
+            join(out, 'replies.json'),
+            JSON.stringify([
+              { feedbackId: review.id, body: '已改：content.txt 改为 reworked' },
+              { feedbackId: 9999, body: '不属于本次运行' },
+            ]),
+          )
           await writeResult(taskDir, {
             exitCode: 0,
             signal: null,
@@ -497,6 +505,25 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
     expect(await remote.write(['rev-parse', `refs/heads/${branch}`])).toBe(tip)
     expect(await remote.write(['merge-base', '--is-ancestor', priorTip, tip])).toBe('')
     expect(s.calls.filter(({ args }) => args[1] === 'pr' && args[2] === 'create')).toHaveLength(0)
+    const prReply = s.calls.find(
+      ({ args, options }) =>
+        args[1] === 'pr' && args[2] === 'comment' && options?.input?.includes('反馈处理说明'),
+    )?.options?.input
+    expect(prReply).toContain(`F${review.id} · Review（CHANGES_REQUESTED）`)
+    expect(prReply).toContain('已改：content.txt 改为 reworked')
+    expect(prReply).not.toContain('不属于本次运行')
+    const issueReply = s.calls.find(
+      ({ args, options }) =>
+        args[1] === 'issue' && args[2] === 'comment' && options?.input?.includes('反馈处理说明'),
+    )?.options?.input
+    expect(issueReply).toContain('本轮未单独说明')
+    expect(
+      s.db
+        .select()
+        .from(feedback)
+        .all()
+        .every((row) => row.status === 'replied'),
+    ).toBe(true)
   } finally {
     await s.dispose()
   }

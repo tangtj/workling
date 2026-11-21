@@ -18,6 +18,7 @@ import type { Settings } from '../config/env.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import { landRun, publishIssueResult, readRunIssueComment } from './land.ts'
 import { mirrorPath } from './mirror.ts'
+import { publishReplies } from './replies.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
 
@@ -227,6 +228,17 @@ export async function reconcile({
             llmApiKey: pi.llmApiKey,
             log,
           })
+          await publishReplies({
+            db,
+            repo,
+            issue,
+            runId: run!.id,
+            taskDir: delivery.taskDir,
+            prUrl: delivery.landed.prUrl,
+            command,
+            llmApiKey: pi.llmApiKey,
+            log,
+          })
         } else if (answerDir) {
           const explanation = await readRunIssueComment(answerDir, (step) =>
             log(`${repo.ref} #${issue.number} ${step}失败`),
@@ -240,6 +252,17 @@ export async function reconcile({
               ),
             ),
           )
+          await publishReplies({
+            db,
+            repo,
+            issue,
+            runId: run!.id,
+            taskDir: answerDir,
+            prUrl: issue.prState === 'open' ? issue.prUrl : null,
+            command,
+            llmApiKey: pi.llmApiKey,
+            log,
+          })
         } else if (status !== 'done') {
           let report = ''
           let explanation = ''

@@ -151,8 +151,10 @@ function FeedbackList({ id, now }: { id: number; now: number }) {
               '已入队'
             ) : item.status === 'included' && item.runId ? (
               <a href={`/runs/${item.runId}/log`}>已处理</a>
-            ) : item.status === 'replied' ? (
-              '已回复'
+            ) : item.status === 'replied' && item.runId ? (
+              <a href={`/runs/${item.runId}/log`}>已回复</a>
+            ) : item.status === 'capped' ? (
+              '超过自动返工上限'
             ) : (
               '不算指令'
             )}{' '}

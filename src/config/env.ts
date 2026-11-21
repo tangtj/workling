@@ -33,6 +33,8 @@ export function readSettings(env: Environment = process.env) {
     interval: integer('WORKLING_INTERVAL', 60, 5, Number.MAX_SAFE_INTEGER),
     timeout: integer('WORKLING_TIMEOUT', 90, 1, 1440),
     keepRuns: integer('WORKLING_KEEP_RUNS', 5, 1, 100),
+    // 只限制 CHANGES_REQUESTED 自动触发的返工；0 表示不自动返工。
+    reworkLimit: integer('WORKLING_REWORK_LIMIT', 3, 0, 100),
     host,
     allowedHosts: [...new Set(allowedHosts)],
     secureCookie: secureCookie === 'true',

@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
 import { feedback, issues, repos, runs } from '../db/schema.ts'
 import { ghEnv } from '../platform/github.ts'
+import { markComment } from './comment.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 
@@ -9,7 +10,7 @@ type Row = typeof feedback.$inferSelect
 type Candidate = { issue: typeof issues.$inferSelect; run: typeof runs.$inferSelect }
 
 export function selectBatch({ issue, run }: Candidate, rows: Row[]): Row[] {
-  const number = Number(/\/pull\/(\d+)(?:[/?#]|$)/.exec(issue.prUrl ?? '')?.[1] ?? 0)
+  const number = prNumberOf(issue.prUrl)
   return rows.filter(
     (row) =>
       row.status === 'observed' &&
@@ -18,16 +19,45 @@ export function selectBatch({ issue, run }: Candidate, rows: Row[]): Row[] {
   )
 }
 
+export function prNumberOf(prUrl: string | null): number {
+  return Number(/\/pull\/(\d+)(?:[/?#]|$)/.exec(prUrl ?? '')?.[1] ?? 0)
+}
+
+/** 只有 CHANGES_REQUESTED review 的批次算自动返工；带指令前缀的评论属于显式触发。 */
+export function isAutoBatch(rows: Row[]): boolean {
+  return rows.length > 0 && rows.every((row) => row.source === 'review')
+}
+
+/** 当前 PR 上已发生的自动返工轮数：反馈全在该 PR、且没有显式指令的返工运行。 */
+export function countAutoRounds(prNumber: number, rows: Row[], reworkRunIds: Set<number>): number {
+  const byRun = new Map<number, Row[]>()
+  for (const row of rows) {
+    if (row.runId === null || !reworkRunIds.has(row.runId)) continue
+    if (row.status !== 'included' && row.status !== 'replied') continue
+    byRun.set(row.runId, [...(byRun.get(row.runId) ?? []), row])
+  }
+  let rounds = 0
+  for (const group of byRun.values())
+    if (
+      group.every((row) => row.prNumber === prNumber) &&
+      !group.some((row) => row.source !== 'review' && row.isCommand)
+    )
+      rounds++
+  return rounds
+}
+
 export async function queueRework({
   db,
   command,
   log,
   signal,
+  reworkLimit = 3,
 }: {
   db: WorklingDatabase
   command: Command
   log: (message: string) => void
   signal: AbortSignal
+  reworkLimit?: number
 }) {
   const candidates = db
     .select({ issue: issues, run: runs, repo: repos })
@@ -46,11 +76,54 @@ export async function queueRework({
   for (const candidate of candidates) {
     if (signal.aborted) break
     const { issue, repo } = candidate
-    const batch = selectBatch(
-      candidate,
-      db.select().from(feedback).where(eq(feedback.issueId, issue.id)).all(),
-    )
+    const rows = db.select().from(feedback).where(eq(feedback.issueId, issue.id)).all()
+    const batch = selectBatch(candidate, rows)
     if (!batch.length) continue
+    const prNumber = prNumberOf(issue.prUrl)
+    if (issue.prState === 'open' && prNumber && isAutoBatch(batch)) {
+      const reworkRunIds = new Set(
+        db
+          .select({ id: runs.id })
+          .from(runs)
+          .where(and(eq(runs.issueId, issue.id), eq(runs.kind, 'rework')))
+          .all()
+          .map((run) => run.id),
+      )
+      const rounds = countAutoRounds(prNumber, rows, reworkRunIds)
+      if (rounds >= reworkLimit) {
+        const capped = db
+          .update(feedback)
+          .set({ status: 'capped' })
+          .where(
+            and(
+              inArray(
+                feedback.id,
+                batch.map((item) => item.id),
+              ),
+              eq(feedback.status, 'observed'),
+            ),
+          )
+          .returning()
+          .all()
+        if (!capped.length) continue
+        log(`${repo.ref} #${issue.number} 自动返工已达上限（${rounds}/${reworkLimit}），不再入队`)
+        const body =
+          reworkLimit === 0
+            ? '已关闭自动返工（WORKLING_REWORK_LIMIT=0），这次 Request changes 不会自动处理。'
+            : `本 PR 已自动返工 ${rounds} 轮，达到上限（WORKLING_REWORK_LIMIT=${reworkLimit}），这次 Request changes 不再自动处理。`
+        try {
+          await command(['gh', 'pr', 'comment', issue.prUrl!, '--body-file', '-'], {
+            env: ghEnv(repo.token, repo.host),
+            input: markComment(`workling：${body}需要继续时请评论 \`/workling <说明>\`。`),
+            signal,
+          })
+        } catch (error) {
+          if (!signal.aborted)
+            log(`${repo.ref} #${issue.number} 发送返工上限评论失败：${errorMessage(error)}`)
+        }
+        continue
+      }
+    }
     const updated = db.transaction((tx) => {
       const row = tx
         .update(issues)

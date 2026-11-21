@@ -7,6 +7,7 @@ import { readOutputFile, truncateComment } from '../contract/out.ts'
 import type { Spec } from '../contract/spec.ts'
 import type { WorklingDatabase } from '../db/index.ts'
 import { feedback, runs } from '../db/schema.ts'
+import { feedbackSourceNames } from './replies.ts'
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
@@ -130,12 +131,6 @@ export async function writeRunContext({
       .where(and(eq(feedback.runId, runId), eq(feedback.status, 'included')))
       .orderBy(feedback.createdAt, feedback.id)
       .all()
-    const names = {
-      issue_comment: 'Issue 评论',
-      pr_comment: 'PR 评论',
-      review_comment: '行内评论',
-      review: 'Review',
-    }
     const sections = rows.map((row) => {
       const body = row.isCommand ? (row.instruction ?? row.body) : row.body
       const text =
@@ -143,7 +138,7 @@ export async function writeRunContext({
           ? `${body.slice(0, 8000).replace(/[\uD800-\uDBFF]$/, '')}\n\n（已截断）`
           : body
       return [
-        `## F${row.id} · ${names[row.source]}${row.reviewState ? `（${row.reviewState}）` : ''} · @${row.authorLogin} · ${row.createdAt.toISOString()}`,
+        `## F${row.id} · ${feedbackSourceNames[row.source]}${row.reviewState ? `（${row.reviewState}）` : ''} · @${row.authorLogin} · ${row.createdAt.toISOString()}`,
         '',
         ...(row.path ? [`位置：${row.path}:${row.line ?? '未知'}`] : []),
         `链接：${row.url}`,

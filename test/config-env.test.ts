@@ -6,6 +6,7 @@ import { readSettings } from '../src/config/env.ts'
 const taskDefaults = {
   timeout: 90,
   keepRuns: 5,
+  reworkLimit: 3,
 }
 
 test('未设置时使用默认配置', () => {
@@ -78,5 +79,14 @@ test('保留次数接受边界并拒绝非法值', () => {
   for (const value of ['0', '101', '1.5', ''])
     expect(() => readSettings({ WORKLING_KEEP_RUNS: value })).toThrow(
       `WORKLING_KEEP_RUNS 的值无效：${value}`,
+    )
+})
+
+test('返工轮数上限接受 0 到 100 并拒绝非法值', () => {
+  for (const value of [0, 100])
+    expect(readSettings({ WORKLING_REWORK_LIMIT: String(value) }).reworkLimit).toBe(value)
+  for (const value of ['101', '-1', '1.5', ''])
+    expect(() => readSettings({ WORKLING_REWORK_LIMIT: value })).toThrow(
+      `WORKLING_REWORK_LIMIT 的值无效：${value}`,
     )
 })

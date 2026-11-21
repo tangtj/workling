@@ -129,7 +129,7 @@ export const feedback = sqliteTable(
     reviewId: text('review_id'),
     url: text('url').notNull(),
     status: text('status', {
-      enum: ['ignored', 'observed', 'pending', 'included', 'replied'],
+      enum: ['ignored', 'observed', 'pending', 'included', 'replied', 'capped'],
     }).notNull(),
     runId: integer('run_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
