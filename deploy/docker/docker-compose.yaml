@@ -1,3 +1,4 @@
+# 单容器部署：worker 与主体同在一个容器（本机进程执行器），只适合个人试用；需要隔离请用 systemd + rootless Docker（见 README）。
 # 服务器使用已发布镜像：下载到服务器的部署目录后 docker compose up -d；本地从源码构建请用 docker-compose.build.yaml。
 services:
   workling:

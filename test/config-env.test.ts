@@ -19,6 +19,7 @@ test('未设置时使用默认配置', () => {
     host: '127.0.0.1',
     allowedHosts: ['127.0.0.1', 'localhost', '::1'],
     secureCookie: false,
+    requireDocker: false,
   })
 })
 test('读取自定义工作区、端口、间隔和管理接口设置', () => {
@@ -41,6 +42,7 @@ test('读取自定义工作区、端口、间隔和管理接口设置', () => {
     host: '0.0.0.0',
     allowedHosts: ['127.0.0.1', 'localhost', '::1', 'workling.example.com', 'admin.example.com'],
     secureCookie: true,
+    requireDocker: false,
   })
 })
 test.each([
@@ -89,4 +91,12 @@ test('返工轮数上限接受 0 到 100 并拒绝非法值', () => {
     expect(() => readSettings({ WORKLING_REWORK_LIMIT: value })).toThrow(
       `WORKLING_REWORK_LIMIT 的值无效：${value}`,
     )
+})
+
+test('WORKLING_REQUIRE_DOCKER 只接受 true 或 false', () => {
+  expect(readSettings({ WORKLING_REQUIRE_DOCKER: 'true' }).requireDocker).toBe(true)
+  expect(readSettings({ WORKLING_REQUIRE_DOCKER: 'false' }).requireDocker).toBe(false)
+  expect(() => readSettings({ WORKLING_REQUIRE_DOCKER: '1' })).toThrow(
+    'WORKLING_REQUIRE_DOCKER 的值无效：1',
+  )
 })

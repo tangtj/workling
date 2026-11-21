@@ -333,3 +333,30 @@ test('docker 执行器的 worker 镜像不兼容时暂停拉起并记录原因',
     await s.dispose()
   }
 })
+
+test('WORKLING_REQUIRE_DOCKER=true 时拒绝用本机进程执行器拉起', async () => {
+  const s = await scenario()
+  const controller = new AbortController()
+  const logs: string[] = []
+  const listen = spyOn(Bun, 'serve').mockImplementation(
+    () => ({ port: 0, stop() {} }) as unknown as ReturnType<typeof Bun.serve>,
+  )
+  try {
+    await s.issue(42, 'queued')
+    await startServe({
+      ...s.options,
+      settings: { ...s.options.settings, requireDocker: true },
+      signal: controller.signal,
+      env: {},
+      log: (message) => {
+        logs.push(message)
+        if (message.startsWith('暂停拉起新任务')) controller.abort()
+      },
+    })
+    expect(logs.some((line) => line.includes('WORKLING_REQUIRE_DOCKER=true'))).toBe(true)
+    expect(s.db.select().from(runs).all()).toEqual([])
+  } finally {
+    listen.mockRestore()
+    await s.dispose()
+  }
+})

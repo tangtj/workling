@@ -188,7 +188,10 @@ export async function serve({
           if (paused && !wasPaused) log('在线更新进行中，暂停拉起新任务')
           wasPaused = paused
           let workerError: string | null = null
-          if (executorSettings.sandbox === 'docker') {
+          if (settings.requireDocker && executorSettings.sandbox !== 'docker')
+            workerError =
+              '已设置 WORKLING_REQUIRE_DOCKER=true，本机进程执行器不可用；请在设置页把执行器改为 Docker'
+          else if (executorSettings.sandbox === 'docker') {
             const host = await checkDockerHost(command)
             if (!host.error && !host.rootless && !warnedRootful) {
               warnedRootful = true

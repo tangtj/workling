@@ -27,18 +27,19 @@ bun link    # 可选：注册全局命令 workling
 
 1. **环境变量**：启动前需要的进程级配置，写在项目根目录的 `.env`（Bun 启动时自动加载）。全部可选：
 
-   | 变量                     | 默认值      | 说明                                                                |
-   | ------------------------ | ----------- | ------------------------------------------------------------------- |
-   | `WORKLING_WORKSPACE`     | `.runtime`  | 数据目录：数据库与任务目录，相对路径按启动目录解析                  |
-   | `WORKLING_HOST`          | `127.0.0.1` | 管理页监听地址                                                      |
-   | `WORKLING_PORT`          | `7420`      | 管理页端口                                                          |
-   | `WORKLING_WORKER`        | 主机名      | 本机标识，写入运行记录与评论                                        |
-   | `WORKLING_INTERVAL`      | `60`        | 轮询间隔（秒）                                                      |
-   | `WORKLING_TIMEOUT`       | `90`        | 单个任务超时（分钟）                                                |
-   | `WORKLING_KEEP_RUNS`     | `5`         | 每个 Issue 保留的任务目录数                                         |
-   | `WORKLING_REWORK_LIMIT`  | `3`         | 每个 PR 由 Request changes 自动触发的返工轮数上限，0 表示不自动返工 |
-   | `WORKLING_ALLOWED_HOSTS` | 无          | 额外允许的访问域名，逗号分隔                                        |
-   | `WORKLING_SECURE_COOKIE` | `false`     | 通过 HTTPS 访问管理页时设为 `true`                                  |
+   | 变量                      | 默认值      | 说明                                                                     |
+   | ------------------------- | ----------- | ------------------------------------------------------------------------ |
+   | `WORKLING_WORKSPACE`      | `.runtime`  | 数据目录：数据库与任务目录，相对路径按启动目录解析                       |
+   | `WORKLING_HOST`           | `127.0.0.1` | 管理页监听地址                                                           |
+   | `WORKLING_PORT`           | `7420`      | 管理页端口                                                               |
+   | `WORKLING_WORKER`         | 主机名      | 本机标识，写入运行记录与评论                                             |
+   | `WORKLING_INTERVAL`       | `60`        | 轮询间隔（秒）                                                           |
+   | `WORKLING_TIMEOUT`        | `90`        | 单个任务超时（分钟）                                                     |
+   | `WORKLING_KEEP_RUNS`      | `5`         | 每个 Issue 保留的任务目录数                                              |
+   | `WORKLING_REWORK_LIMIT`   | `3`         | 每个 PR 由 Request changes 自动触发的返工轮数上限，0 表示不自动返工      |
+   | `WORKLING_ALLOWED_HOSTS`  | 无          | 额外允许的访问域名，逗号分隔                                             |
+   | `WORKLING_SECURE_COOKIE`  | `false`     | 通过 HTTPS 访问管理页时设为 `true`                                       |
+   | `WORKLING_REQUIRE_DOCKER` | `false`     | 设为 `true` 时只允许 Docker 执行器（生产部署），本机进程执行器下暂停拉起 |
 
 2. **管理页「设置」**（存数据库）：codex 模型与推理强度、Pi 模型、LLM 接入地址与 Key、提交身份、执行器（本机进程 / Docker 容器及资源限制）。首次启动时会从同名环境变量导入一次，之后以管理页为准。
 
@@ -98,7 +99,7 @@ Docker 相关文件都在 `deploy/docker/`，systemd 相关文件在 `deploy/`�
 
 镜像预装了常用命令行工具：`rg`、`fd`、`jq`、`less`、`file`、`tree`、`patch`、`unzip`、`xz`、`ps`、`lsof`、`make`、`python3` 和 `sqlite3`。
 
-watch、task、Pi、codex 运行在同一个容器里，设置页的执行器要选「本机进程」（容器内没有 docker 命令）。
+watch、task、Pi、codex 运行在同一个容器里，设置页的执行器要选「本机进程」（容器内没有 docker 命令）。这种方式下 worker 与主体共用容器、能访问主体的数据目录，只适合个人试用；需要隔离时用下方 systemd + rootless Docker 部署。
 
 - **从源码构建并运行**：在仓库根目录准备好 `.env`（可以为空），然后执行
 
@@ -164,6 +165,7 @@ watch 由 systemd 运行在宿主机上，每个任务启动一个独立容器�
    ```
 
 3. 把 `deploy/workling.env.example` 复制为 `/etc/workling/workling.env`（权限 600，属主 workling），把其中 `DOCKER_HOST` 的 uid 改成 `id -u workling` 的结果。
+   环境文件里的 `WORKLING_SANDBOX=docker` 在首次启动时导入为 Docker 执行器，`WORKLING_REQUIRE_DOCKER=true` 防止之后被改回本机进程。worker 默认运行在 workling 自动创建的 `workling-worker` 网络（创建时关闭容器间互访，依赖 Linux 上 Docker 的 iptables 规则），主体只监听 `127.0.0.1:7420`，worker 访问不到管理端口。
 4. 安装并启动服务：`sudo cp deploy/workling.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now workling`。
 5. 首次启动的管理密码：`journalctl -u workling | grep -A1 管理密码`。
 6. 升级：在 `/opt/workling` 执行 `deploy/update.sh <tag>`。

@@ -81,6 +81,7 @@ test.each([undefined, 'workling-network'])(
       log: () => {},
       command: async (args, options) => {
         if (args[1] === 'info') return dockerInfo()
+        if (args[1] === 'network') return '[]'
         calls.push({ args, options })
         return 'container-id'
       },
@@ -121,7 +122,8 @@ test.each([undefined, 'workling-network'])(
           '4g',
           '--pids-limit',
           '1024',
-          ...(network ? ['--network', network] : []),
+          '--network',
+          network ?? 'workling-worker',
           '-v',
           `${spec.taskDir}:${inner}`,
           ...keys.flatMap((key) => ['-e', key]),
@@ -164,6 +166,7 @@ test('docker start 使用自定义资源与镜像并透传命令失败', async (
     log: () => {},
     command: async (args) => {
       if (args[1] === 'info') return dockerInfo()
+      if (args[1] === 'network') return '[]'
       for (const [flag, value] of [
         ['--cpus', '1.5'],
         ['--memory', '512m'],
@@ -313,7 +316,7 @@ test('createExecutor 按配置启动进程或 Docker，日志错误交给传入�
   const launch = spyOn(runtime, 'launch').mockReturnValue(321)
   const calls: string[][] = []
   const command: Command = async (args) => {
-    if (args[1] === 'info') return dockerInfo()
+    if (args[1] === 'info' || args[1] === 'network') return dockerInfo()
     calls.push(args)
     return ''
   }
@@ -427,6 +430,7 @@ test('rootless Docker 以容器内 root 运行 worker，cgroup 限制不可用�
     log: () => {},
     command: async (args) => {
       if (args[1] === 'info') return info
+      if (args[1] === 'network') return '[]'
       runs.push(args)
       return 'id'
     },
@@ -454,4 +458,28 @@ test.each([
   ['oops', { rootless: false, error: '无法解析 docker info 的输出' }],
 ] as const)('parseDockerInfo %#', (raw, expected) => {
   expect(parseDockerInfo(raw)).toEqual(expected)
+})
+
+test('未配置网络时自动创建关闭 ICC 的 workling-worker 网络，已存在时复用', async () => {
+  const { config, spec } = await scenario()
+  const calls: string[][] = []
+  let exists = false
+  const executor = dockerExecutor({
+    config,
+    log: () => {},
+    command: async (args) => {
+      if (args[1] === 'info') return dockerInfo()
+      calls.push(args)
+      if (args[1] === 'network' && args[2] === 'inspect' && !exists) throw new Error('missing')
+      if (args[1] === 'network' && args[2] === 'create') exists = true
+      return 'id'
+    },
+  })
+  await executor.start(spec)
+  await rm(join(spec.taskDir, 'home'), { recursive: true })
+  await executor.start({ ...spec, runId: 13 })
+  const network = calls.filter((args) => args[1] === 'network')
+  expect(network.map((args) => args[2])).toEqual(['inspect', 'create', 'inspect'])
+  expect(network[1]).toContain('com.docker.network.bridge.enable_icc=false')
+  expect(network[1]!.at(-1)).toBe('workling-worker')
 })

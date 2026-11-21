@@ -27,18 +27,19 @@ Configuration lives in two places:
 
 1. **Environment variables**: process-level settings needed before startup. Put them in `.env` at the project root (Bun loads it automatically). All are optional:
 
-   | Variable                 | Default     | Description                                                                            |
-   | ------------------------ | ----------- | -------------------------------------------------------------------------------------- |
-   | `WORKLING_WORKSPACE`     | `.runtime`  | Data directory for the database and task directories, relative to the launch directory |
-   | `WORKLING_HOST`          | `127.0.0.1` | Admin UI listen address                                                                |
-   | `WORKLING_PORT`          | `7420`      | Admin UI port                                                                          |
-   | `WORKLING_WORKER`        | hostname    | Machine identifier, recorded in runs and comments                                      |
-   | `WORKLING_INTERVAL`      | `60`        | Polling interval (seconds)                                                             |
-   | `WORKLING_TIMEOUT`       | `90`        | Per-task timeout (minutes)                                                             |
-   | `WORKLING_KEEP_RUNS`     | `5`         | Task directories kept per Issue                                                        |
-   | `WORKLING_REWORK_LIMIT`  | `3`         | Max automatic reworks per PR triggered by Request changes; 0 disables them             |
-   | `WORKLING_ALLOWED_HOSTS` | none        | Extra allowed host names, comma-separated                                              |
-   | `WORKLING_SECURE_COOKIE` | `false`     | Set to `true` when the admin UI is served over HTTPS                                   |
+   | Variable                  | Default     | Description                                                                                                      |
+   | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
+   | `WORKLING_WORKSPACE`      | `.runtime`  | Data directory for the database and task directories, relative to the launch directory                           |
+   | `WORKLING_HOST`           | `127.0.0.1` | Admin UI listen address                                                                                          |
+   | `WORKLING_PORT`           | `7420`      | Admin UI port                                                                                                    |
+   | `WORKLING_WORKER`         | hostname    | Machine identifier, recorded in runs and comments                                                                |
+   | `WORKLING_INTERVAL`       | `60`        | Polling interval (seconds)                                                                                       |
+   | `WORKLING_TIMEOUT`        | `90`        | Per-task timeout (minutes)                                                                                       |
+   | `WORKLING_KEEP_RUNS`      | `5`         | Task directories kept per Issue                                                                                  |
+   | `WORKLING_REWORK_LIMIT`   | `3`         | Max automatic reworks per PR triggered by Request changes; 0 disables them                                       |
+   | `WORKLING_ALLOWED_HOSTS`  | none        | Extra allowed host names, comma-separated                                                                        |
+   | `WORKLING_SECURE_COOKIE`  | `false`     | Set to `true` when the admin UI is served over HTTPS                                                             |
+   | `WORKLING_REQUIRE_DOCKER` | `false`     | When `true`, only the Docker executor may launch tasks (production); the local process executor pauses launching |
 
 2. **Admin UI → Settings** (stored in the database): codex model and reasoning effort, Pi model, LLM base URL and key, commit identity, and executor (local process / Docker container with resource limits). On first start these are imported once from the matching environment variables; after that the admin UI is the source of truth.
 
@@ -98,7 +99,7 @@ Docker files live in `deploy/docker/`; systemd files live in `deploy/`. Either w
 
 The image includes common command-line tools: `rg`, `fd`, `jq`, `less`, `file`, `tree`, `patch`, `unzip`, `xz`, `ps`, `lsof`, `make`, `python3`, and `sqlite3`.
 
-watch, tasks, Pi and codex run in one container, so select **local process** as the executor in Settings (the container has no docker command).
+watch, tasks, Pi and codex run in one container, so select **local process** as the executor in Settings (the container has no docker command). In this mode the worker shares the container with the host and can read its data directory, so it suits personal trials only; use the systemd + rootless Docker deployment below when you need isolation.
 
 - **Build from source and run**: create a `.env` in the repository root (it may be empty), then run
 
@@ -164,6 +165,7 @@ systemd runs watch on the host, and each task runs in its own container that mou
    ```
 
 3. Copy `deploy/workling.env.example` to `/etc/workling/workling.env` (mode 600, owned by workling) and set the uid in `DOCKER_HOST` to the output of `id -u workling`.
+   `WORKLING_SANDBOX=docker` in the env file is imported as the Docker executor on first start, and `WORKLING_REQUIRE_DOCKER=true` keeps it from being switched back to the local process executor. Workers run on the `workling-worker` network that workling creates (created with inter-container traffic disabled, which relies on Docker's iptables rules on Linux), and the host listens only on `127.0.0.1:7420`, so workers cannot reach the admin port.
 4. Install and start the service: `sudo cp deploy/workling.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now workling`.
 5. The first-start admin password: `journalctl -u workling | grep -A1 管理密码`.
 6. To upgrade, run `deploy/update.sh <tag>` in `/opt/workling`.
