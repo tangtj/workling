@@ -14,7 +14,7 @@ export const repos = sqliteTable('repos', {
   path: text('path').notNull(),
   token: text('token').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  triageLevel: text('triage_level', { enum: ['off', 'shadow', 'suggest'] })
+  triageLevel: text('triage_level', { enum: ['off', 'shadow', 'suggest', 'auto'] })
     .notNull()
     .default('off'),
   triageSince: integer('triage_since', { mode: 'timestamp' }),
@@ -200,6 +200,8 @@ export const triageRecords = sqliteTable(
     suggestCommentUrl: text('suggest_comment_url'),
     suggestError: text('suggest_error'),
     labelRemovedAt: integer('label_removed_at', { mode: 'timestamp' }),
+    // 自动级：workling 代为打上 workling:ready 的时间。
+    autoQueuedAt: integer('auto_queued_at', { mode: 'timestamp' }),
   },
   (table) => [
     uniqueIndex('triage_repo_number_hash_unique').on(table.repoId, table.number, table.contentHash),

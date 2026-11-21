@@ -45,7 +45,9 @@ test('分诊接口展示最新尝试并按最近结论统计四格，支持切�
         body: JSON.stringify({ level }),
       })
     expect((await put(repo.id, 'shadow')).status).toBe(200)
-    expect((await put(repo.id, 'auto')).status).toBe(400)
+    expect((await put(repo.id, 'auto')).status).toBe(200)
+    expect((await put(repo.id, 'always')).status).toBe(400)
+    expect((await put(repo.id, 'shadow')).status).toBe(200)
     expect((await put(gitlab.id, 'shadow')).status).toBe(400)
     for (const number of [1, 3, 5])
       conn.db
@@ -137,7 +139,7 @@ test('级别切换写入时间下限并统计各类建议跟进', async () => {
       .returning()
       .get()
     const app = reposRoutes({ db: conn.db, options: { workspace: dir } })
-    for (const level of ['shadow', 'suggest', 'off'] as const) {
+    for (const level of ['shadow', 'suggest', 'auto', 'off'] as const) {
       conn.db.update(repos).set({ triageSince: now }).run()
       const before = Date.now()
       const response = await app.request(`/api/repos/${repo.id}/triage-level`, {

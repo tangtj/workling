@@ -135,7 +135,7 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
     first.db.run(sql`DROP TABLE feedback_cursors`)
     first.db.run(sql`DROP TABLE trusted_users`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 4)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -179,11 +179,11 @@ test('建议级迁移保留仓库数据并为新旧库创建可空列', async ()
         updatedAt: now,
       })
       .run()
-    for (const name of columns)
+    for (const name of [...columns, 'auto_queued_at'])
       first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
     first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -225,11 +225,12 @@ for (const existing of ['rework', 'triage'] as const) {
         'suggest_comment_url',
         'suggest_error',
         'label_removed_at',
+        'auto_queued_at',
       ])
         first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
       first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
       first.db.run(
-        sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+        sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)`,
       )
       if (existing === 'rework') {
         first.db.run(sql`DROP TABLE triage_records`)

@@ -125,16 +125,18 @@ function Triage({
           disabled={!github || !data || mutation.isPending}
           value={data?.level ?? 'off'}
           onChange={(event) => {
-            if (
-              event.target.value !== 'suggest' ||
-              window.confirm('建议级会对受信作者信息不全的 Issue 打标签并评论。确认开启？')
-            )
-              mutation.mutate(event.target.value)
+            const confirms: Record<string, string> = {
+              suggest: '建议级会对受信作者信息不全的 Issue 打标签并评论。确认开启？',
+              auto: '自动级除建议外，还会在受信作者的 Issue 判定为信息齐全后自动打 workling:ready 开始执行（带 workling:hold 的除外）。确认开启？',
+            }
+            const message = confirms[event.target.value]
+            if (!message || window.confirm(message)) mutation.mutate(event.target.value)
           }}
         >
           <option value="off">关闭</option>
           <option value="shadow">影子</option>
           <option value="suggest">建议</option>
+          <option value="auto">自动</option>
         </select>
       </label>
       {(query.error || mutation.error) && (
@@ -195,6 +197,7 @@ function Triage({
                   </p>
                 )}
                 {row.labelRemovedAt && <p>已摘标签</p>}
+                {row.autoQueuedAt && <p>已自动打 workling:ready：{row.autoQueuedAt}</p>}
                 {(row.note || row.error || row.suggestError) && (
                   <details>
                     <summary>说明</summary>

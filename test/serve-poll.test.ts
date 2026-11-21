@@ -328,9 +328,17 @@ test('标签创建缓存、同步失败重试且不阻塞后续 Issue', async ()
     calls.length = 0
     await poll()
     await poll()
-    expect(calls.filter((call) => call.args[1] === 'label')).toHaveLength(12)
+    expect(calls.filter((call) => call.args[1] === 'label')).toHaveLength(
+      WORKLING_LABELS.length * 2,
+    )
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('标签列表包含分诊使用的 needs-info 与 hold', () => {
+  const names = WORKLING_LABELS.map((label) => label.name)
+  expect(names).toContain('workling:needs-info')
+  expect(names).toContain('workling:hold')
 })

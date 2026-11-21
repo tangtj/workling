@@ -13,6 +13,7 @@ type Log = (message: string) => void
 
 export const WORKLING_LABELS = [
   { name: 'workling:needs-info', color: 'FBCA04', description: '信息不全，补充正文后会重新分诊' },
+  { name: 'workling:hold', color: 'BFD4F2', description: '暂不自动执行，由人决定何时打 ready' },
   { name: 'workling:ready', color: '0E8A16', description: '等待 workling 领取' },
   { name: 'workling:queued', color: 'C5DEF5', description: 'workling 已入队' },
   { name: 'workling:running', color: '1D76DB', description: 'workling 执行中' },
