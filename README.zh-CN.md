@@ -130,7 +130,7 @@ Actions 安装依赖并运行检查，使用官方 Docker Actions 构建 `linux/
 
 `deploy/docker/Dockerfile` 或 `deploy/docker/entrypoint.sh` 任一变化，在线更新会拒绝，必须在部署目录执行 `./update.sh <tag>` 拉取新镜像。脚本会备份数据库、更新 Compose 配置并检查健康状态，失败时恢复旧版本与数据库。在线代码保存在数据卷，入口脚本按 SemVer 选择镜像与在线版本；镜像版本更高时以镜像为准。
 
-**只发布 worker**：推送 `worker-v*` tag（如 `git tag worker-v0.1.0 && git push origin worker-v0.1.0`），Actions 用 `worker/Dockerfile` 构建并推送 `ghcr.io/<仓库>-worker`，标签为 `v0.1.0`、`contract-<契约版本>` 与 `latest`（预发布只有完整版本）。镜像标签 `io.workling.contract` 声明契约版本；docker 执行器拉起前检查，与主体不一致时暂停拉起新任务，并在管理页概览与侧栏提示原因。把设置页的「任务镜像」换成新的 worker 镜像即可生效，主体不用升级。
+**主体与 worker 分开发布**：两个镜像各有一个工作流（`release.yml`、`release-worker.yml`），互不阻塞、可分别重跑。推送 `v*` tag 时两者并行构建，worker 镜像 `ghcr.io/<仓库>-worker` 得到同版本标签（`v0.2.0`、`v0.2`、`contract-<契约版本>`、`latest`），compose 默认按主体版本取用。**只更新 worker** 时推送 `worker-v*` tag（如 `git tag worker-v0.1.0 && git push origin worker-v0.1.0`），只构建 worker，标签为 `worker-v0.1.0` 与 `contract-<契约版本>`；然后在 `.env` 设置 `WORKLING_WORKER_IMAGE=ghcr.io/<仓库>-worker:worker-v0.1.0` 并 `docker compose up -d`（systemd 部署改设置页的「任务镜像」），主体不用升级。镜像标签 `io.workling.contract` 声明契约版本；docker 执行器拉起前检查，与主体不一致时暂停拉起新任务，并在管理页概览与侧栏提示原因。
 
 本地可构建指定版本用于实测（默认 `dev`）：
 

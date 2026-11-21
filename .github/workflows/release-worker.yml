@@ -1,14 +1,16 @@
-# 只发布 worker 镜像，主体不动：推送 worker-v* tag 即可。主体的 v* 发布也会发布同版本的 worker 镜像。
+# worker 镜像单独的发布工作流，与主体镜像（release.yml）互不阻塞、可分别重跑。
+# - v* tag：与主体同版本发布，标签 vX.Y.Z、vX.Y、contract-N、latest（预发布只有完整版本）；compose 默认按主体版本取用。
+# - worker-v* tag：只发 worker、主体不动，标签 worker-vX.Y.Z 与 contract-N；用时在 .env 设置 WORKLING_WORKER_IMAGE。
 # 镜像标签 io.workling.contract 声明契约版本，主体拉起前检查，不兼容时不拉起并在管理页提示。
 # 工作流可写 GHCR，因此不在 pull_request 上触发。
 name: 发布 worker
 on:
   push:
-    tags: ['worker-v*']
+    tags: ['v*', 'worker-v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 要发布的 tag，如 worker-v0.1.0
+        description: 要发布的 tag，如 v0.2.0 或 worker-v0.1.0
         required: true
 concurrency:
   group: release-worker
@@ -28,9 +30,13 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [[ "$EVENT_NAME" == push ]]; then TAG="$REF_NAME"; else TAG="$INPUT_TAG"; fi
-          [[ "$TAG" =~ ^worker-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo '非法 tag' >&2; exit 1; }
+          [[ "$TAG" =~ ^(worker-)?v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo '非法 tag' >&2; exit 1; }
+          if [[ "$TAG" == worker-* ]]; then STANDALONE=true; else STANDALONE=false; fi
+          if [[ "${TAG#worker-}" == *-* ]]; then PRERELEASE=true; else PRERELEASE=false; fi
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=${TAG#worker-}" >> "$GITHUB_ENV"
+          echo "STANDALONE=$STANDALONE" >> "$GITHUB_ENV"
+          echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ env.TAG }}
@@ -55,11 +61,13 @@ jobs:
         id: metadata
         with:
           images: ghcr.io/${{ github.repository }}-worker
-          # 保留 worker- 前缀，避免与主体同版本号的 worker 镜像标签冲突；latest 只由主体发布更新。
+          # worker-v* 保留前缀，避免与主体同版本号的 worker 标签冲突；latest 只跟随主体发布。
           tags: |
-            type=raw,value=${{ env.TAG }}
-            type=raw,value=contract-${{ env.CONTRACT }},enable=${{ !contains(env.VERSION, '-') }}
-          flavor: latest=false
+            type=raw,value=${{ env.TAG }},enable=${{ env.STANDALONE == 'true' }}
+            type=semver,pattern={{raw}},value=${{ env.VERSION }},enable=${{ env.STANDALONE != 'true' }}
+            type=semver,pattern=v{{major}}.{{minor}},value=${{ env.VERSION }},enable=${{ env.STANDALONE != 'true' && env.PRERELEASE != 'true' }}
+            type=raw,value=contract-${{ env.CONTRACT }},enable=${{ env.PRERELEASE != 'true' }}
+          flavor: latest=${{ env.STANDALONE != 'true' && env.PRERELEASE != 'true' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -67,7 +75,7 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            WORKER_VERSION=${{ env.VERSION }}
+            WORKER_VERSION=${{ env.TAG }}
             WORKER_CONTRACT=${{ env.CONTRACT }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}

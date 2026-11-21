@@ -68,33 +68,7 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # 主体镜像不含 Pi、codex 与 agent 工具，任务在 worker 镜像里运行；同版本一并发布，compose 部署按版本号取用。
-      - name: 读取契约版本
-        run: |
-          contract=$(bun -e 'import { CONTRACT_VERSION } from "./src/contract/spec.ts"; console.log(CONTRACT_VERSION)')
-          echo "CONTRACT=$contract" >> "$GITHUB_ENV"
-      - uses: docker/metadata-action@v5
-        id: worker_metadata
-        with:
-          images: ghcr.io/${{ github.repository }}-worker
-          tags: |
-            type=semver,pattern={{raw}},value=${{ env.TAG }}
-            type=semver,pattern=v{{major}}.{{minor}},value=${{ env.TAG }},enable=${{ !contains(env.TAG, '-') }}
-            type=raw,value=contract-${{ env.CONTRACT }},enable=${{ !contains(env.TAG, '-') }}
-          flavor: latest=${{ !contains(env.TAG, '-') }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: worker/Dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            WORKER_VERSION=${{ env.TAG }}
-            WORKER_CONTRACT=${{ env.CONTRACT }}
-          tags: ${{ steps.worker_metadata.outputs.tags }}
-          labels: ${{ steps.worker_metadata.outputs.labels }}
-          cache-from: type=gha,scope=worker
-          cache-to: type=gha,mode=max,scope=worker
+      # worker 镜像由 release-worker.yml 在同一个 v* tag 上单独构建，两边互不阻塞、可分别重跑。
       # 镜像信息追加在说明末尾：版本面板只展示说明开头几行，更新内容应在前。
       # 网页上先建好的 Release 只补镜像段落，不覆盖已有说明。
       - name: 创建或补充 GitHub Release
