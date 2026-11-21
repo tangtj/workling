@@ -135,7 +135,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '-',
     ])
     expect(s.calls[3]!.options?.input).toBe(
-      `workling：已领取，开始执行。\n\n- 机器：worker\n- 开始时间：${clock.toISOString()}\n- 任务目录：${launched[0]!.taskDir}`,
+      `workling：已领取，开始执行。\n\n- 机器：worker\n- 开始时间：${clock.toISOString()}\n- 任务目录：${launched[0]!.taskDir}\n\n<!-- workling -->`,
     )
     expect(s.logs.some((line) => line.includes('跳过'))).toBe(true)
     await launchQueued({

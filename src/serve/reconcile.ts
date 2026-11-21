@@ -1,3 +1,4 @@
+import { markComment } from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
 import { eq } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
@@ -211,8 +212,10 @@ export async function reconcile({
           const body = `workling：已答复。\n\n${explanation.trim() || '（Pi 未写说明）'}`
           await sync(
             ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-            truncateComment(
-              neutralizeMentions(redactSecrets(body, [repo.token, pi.llmApiKey ?? ''])),
+            markComment(
+              truncateComment(
+                neutralizeMentions(redactSecrets(body, [repo.token, pi.llmApiKey ?? ''])),
+              ),
             ),
           )
         } else if (status !== 'done') {
@@ -241,7 +244,7 @@ export async function reconcile({
           const body = `workling：执行未完成（${error}）。\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。${explanation ? `\n\n### Pi 的说明\n\n${explanation}` : ''}`
           await sync(
             ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-            neutralizeMentions(redactSecrets(body, secrets)),
+            markComment(neutralizeMentions(redactSecrets(body, secrets))),
           )
         }
       }

@@ -108,3 +108,42 @@ test('删除仓库级联删除 Issue 和执行记录，重开后仍启用外键'
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('已有数据库升级反馈表时保留仓库数据', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-feedback-'))
+  try {
+    const first = await openDatabase(dir)
+    const now = new Date()
+    first.db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'secret',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    first.db.run(sql`DROP TABLE feedback`)
+    first.db.run(sql`DROP TABLE feedback_cursors`)
+    first.db.run(sql`DROP TABLE trusted_users`)
+    first.db.run(
+      sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT MAX(created_at) FROM __drizzle_migrations)`,
+    )
+    first.close()
+    const upgraded = await openDatabase(dir)
+    expect(upgraded.db.select().from(repos).get()?.token).toBe('secret')
+    for (const name of ['feedback', 'feedback_cursors', 'trusted_users']) {
+      expect(
+        upgraded.db.all<{ name: string }>(
+          sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${name}`,
+        ),
+      ).toHaveLength(1)
+    }
+    upgraded.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

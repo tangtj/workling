@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { openDatabase } from '../src/db/index.ts'
 import { issues, repos, runs } from '../src/db/schema.ts'
-import { retryOnCommand, type RetryState } from '../src/serve/retry.ts'
+import { matchCommandPrefix, retryOnCommand, type RetryState } from '../src/serve/retry.ts'
 import type { Command } from '../src/runtime/types.ts'
 
 test('指令评论重试 failed 和 PR 开放的 done，跳过已合并 PR，并按 token 缓存账号', async () => {
@@ -208,4 +208,12 @@ test('无重试候选不访问 GitHub，账号或评论数据错误不阻塞其�
     close()
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('指令前缀支持空白和大小写并拒绝错误位置或名称', () => {
+  expect(matchCommandPrefix('  /WORKLING\tfix ', 'worker')).toBe('fix')
+  expect(matchCommandPrefix(' @Worker fix', 'worker')).toBe('fix')
+  expect(matchCommandPrefix('/worklingx fix', 'worker')).toBeNull()
+  expect(matchCommandPrefix('hello /workling fix', 'worker')).toBeNull()
+  expect(matchCommandPrefix('/workling', 'worker')).toBe('')
 })

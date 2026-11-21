@@ -162,8 +162,11 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
       .filter(({ args }) => args[2] === 'comment')
       .map(({ args, options }) => [args[1], options?.input]),
   ).toEqual([
-    ['pr', 'workling：Checked by `@reviewer`.'],
-    ['issue', `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.`],
+    ['pr', 'workling：Checked by `@reviewer`.\n\n<!-- workling -->'],
+    [
+      'issue',
+      `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.\n\n<!-- workling -->`,
+    ],
   ])
 })
 
@@ -216,7 +219,9 @@ test.each([false, true])(
       ['gh', 'pr', 'comment', prUrl, '--body-file', '-'],
     ])
     expect(actions[0]?.options?.input).toBe('Closes #42\n\nThanks `@someone` and `@org/team`.')
-    expect(actions[2]?.options?.input).toBe('workling：Checked by `@reviewer`.')
+    expect(actions[2]?.options?.input).toBe(
+      'workling：Checked by `@reviewer`.\n\n<!-- workling -->',
+    )
     expect(s.calls.some(({ args }) => args[2] === 'create')).toBe(false)
     expect(s.logs).toEqual(
       failPrUpdates

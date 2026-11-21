@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { hashToken } from '../web/auth.ts'
 import { eq } from 'drizzle-orm'
+import type { Command } from '../runtime/types.ts'
 import type { WorklingDatabase } from '../db/index.ts'
 import { sessions } from '../db/schema.ts'
 import type { ServeStatus } from '../serve/index.ts'
@@ -19,6 +20,7 @@ import { assetsRoutes } from './routes/assets.ts'
 import { headers, webHeaders } from './response.ts'
 
 export type AppOptions = {
+  command?: Command
   workspace: string
   secrets?: () => string[]
   now?: () => number
@@ -39,6 +41,10 @@ export type AppDeps = { db: WorklingDatabase; options: AppOptions }
 export function createApp(db: WorklingDatabase, options: AppOptions) {
   const now = options.now ?? Date.now
   const app = new Hono()
+  app.use('/api/*', async (c, next) => {
+    c.header('Cache-Control', 'no-store')
+    await next()
+  })
   app.use('*', async (c, next) => {
     // 校验 Host 防止 DNS rebinding 将本机接口暴露给恶意网站。部署时通过 WORKLING_ALLOWED_HOSTS 放行服务器域名。
     const header = c.req.header('host') ?? ''
