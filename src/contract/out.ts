@@ -5,13 +5,18 @@ import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import { CONTRACT_VERSION } from './spec.ts'
 
-export const outResultSchema = Type.Object({
-  contract: Type.Literal(CONTRACT_VERSION),
+export const piOutcomeSchema = Type.Object({
   outcome: Type.Union([
     Type.Literal('completed'),
     Type.Literal('partial'),
     Type.Literal('incomplete'),
+    Type.Literal('answered'),
   ]),
+})
+
+export const outResultSchema = Type.Object({
+  contract: Type.Literal(CONTRACT_VERSION),
+  ...piOutcomeSchema.properties,
   branch: Type.String(),
   head: Type.Union([Type.String(), Type.Null()]),
   commits: Type.Integer({ minimum: 0 }),
@@ -60,6 +65,16 @@ export async function readOutputFile(
     throw new Error(`读取时 out/${name} 大小发生变化`)
   } finally {
     await handle.close()
+  }
+}
+
+export async function readPiOutcome(dir: string): Promise<OutResult['outcome'] | undefined> {
+  try {
+    const raw = await readOutputFile(dir, 'outcome.json', 4096)
+    const value: unknown = JSON.parse(raw.toString('utf8'))
+    if (Value.Check(piOutcomeSchema, value)) return value.outcome
+  } catch {
+    // Pi 的输出不可用时仍可从报告判定结果。
   }
 }
 

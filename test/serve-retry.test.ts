@@ -8,7 +8,7 @@ import { issues, repos, runs } from '../src/db/schema.ts'
 import { matchCommandPrefix, retryOnCommand, type RetryState } from '../src/serve/retry.ts'
 import type { Command } from '../src/runtime/types.ts'
 
-test('指令评论只重试符合条件的失败任务，并按 token 缓存账号', async () => {
+test('指令评论重试 failed 和 PR 开放的 done，跳过已合并 PR，并按 token 缓存账号', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'retry-'))
   const { db, close } = await openDatabase(dir)
   try {
@@ -26,13 +26,14 @@ test('指令评论只重试符合条件的失败任务，并按 token 缓存账�
       })
       .returning()
       .get()
-    for (let n = 1; n <= 9; n++) {
+    for (let n = 1; n <= 10; n++) {
       const issue = db
         .insert(issues)
         .values({
           repoId: repo.id,
           number: n,
-          status: n === 8 ? 'done' : 'failed',
+          status: n === 8 || n === 10 ? 'done' : 'failed',
+          prState: n === 8 ? 'open' : n === 10 ? 'merged' : null,
           createdAt: old,
           updatedAt: old,
         })
@@ -55,6 +56,7 @@ test('指令评论只重试符合条件的失败任务，并按 token 缓存账�
       '@owner2',
       '/workling done',
       '/workling once',
+      '/workling merged',
     ]
     const comments = bodies.map((body, i) => ({
       id: i + 1,
@@ -97,12 +99,19 @@ test('指令评论只重试符合条件的失败任务，并按 token 缓存账�
       'failed',
       'failed',
       'failed',
-      'done',
       'queued',
+      'queued',
+      'done',
     ])
-    expect(calls.filter((a) => a[2] === 'edit').map((a) => a[3])).toEqual(['1', '2', '9'])
+    expect(calls.filter((a) => a[2] === 'edit').map((a) => a[3])).toEqual(['1', '2', '8', '9'])
     expect(calls.find((a) => a[2] === 'edit')).toContain('workling:failed')
-    expect(state.triggers.size).toBe(3)
+    expect(calls.find((a) => a[2] === 'edit' && a[3] === '8')?.slice(-4)).toEqual([
+      '--remove-label',
+      'workling:done',
+      '--add-label',
+      'workling:queued',
+    ])
+    expect(state.triggers.size).toBe(4)
     const ninth = db.select().from(issues).where(eq(issues.number, 9)).get()!
     db.update(runs)
       .set({ startedAt: new Date('2025-01-03T00:00:00Z') })
@@ -121,7 +130,7 @@ test('指令评论只重试符合条件的失败任务，并按 token 缓存账�
   }
 })
 
-test('无失败任务不访问 GitHub，账号或评论数据错误不阻塞其他仓库', async () => {
+test('无重试候选不访问 GitHub，账号或评论数据错误不阻塞其他仓库', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'retry-errors-'))
   const { db, close } = await openDatabase(dir)
   try {

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import type { WorklingDatabase } from '../db/index.ts'
@@ -55,13 +55,19 @@ export async function retryOnCommand({
     .all()
   for (const repo of repositories) {
     if (signal.aborted) break
-    const failed = db
+    const candidates = db
       .select({ issue: issues, run: runs })
       .from(issues)
       .innerJoin(runs, eq(issues.lastRunId, runs.id))
-      .where(and(eq(issues.repoId, repo.id), eq(issues.status, 'failed')))
+      .where(
+        and(
+          eq(issues.repoId, repo.id),
+          inArray(issues.status, ['failed', 'done']),
+          or(isNull(issues.prState), eq(issues.prState, 'open')),
+        ),
+      )
       .all()
-    if (!failed.length) continue
+    if (!candidates.length) continue
     try {
       const env = ghEnv(repo.token, repo.host)
       let account = state.accounts.get(repo.id)
@@ -74,7 +80,7 @@ export async function retryOnCommand({
         state.accounts.set(repo.id, account)
       }
       const since = new Date(
-        Math.min(...failed.map(({ run }) => run.startedAt.getTime())),
+        Math.min(...candidates.map(({ run }) => run.startedAt.getTime())),
       ).toISOString()
       const output = await command(
         [
@@ -91,20 +97,20 @@ export async function retryOnCommand({
       const matches = new Map<number, string>()
       for (const comment of pages.flat()) {
         const number = /\/(\d+)$/.exec(comment.issue_url)?.[1]
-        const entry = failed.find(({ issue }) => issue.number === Number(number))
+        const entry = candidates.find(({ issue }) => issue.number === Number(number))
         if (!entry || !(Date.parse(comment.created_at) > entry.run.startedAt.getTime())) continue
         if (comment.user.login.toLowerCase() !== account.login.toLowerCase()) continue
         if (matchCommandPrefix(comment.body, account.login) === null) continue
         matches.set(entry.issue.id, comment.html_url)
       }
-      for (const { issue } of failed) {
+      for (const { issue } of candidates) {
         if (signal.aborted) break
         const url = matches.get(issue.id)
         if (!url) continue
         const updated = db
           .update(issues)
           .set({ status: 'queued', updatedAt: new Date() })
-          .where(and(eq(issues.id, issue.id), eq(issues.status, 'failed')))
+          .where(and(eq(issues.id, issue.id), eq(issues.status, issue.status)))
           .returning()
           .get()
         if (!updated) continue
@@ -120,7 +126,7 @@ export async function retryOnCommand({
               '-R',
               repo.path,
               '--remove-label',
-              'workling:failed',
+              `workling:${issue.status}`,
               '--add-label',
               'workling:queued',
             ],

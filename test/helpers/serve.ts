@@ -76,7 +76,9 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
         comments: [],
       })
     if (args[1] === 'pr' && args[2] === 'list')
-      return JSON.stringify([{ url: 'https://github.com/a/b/pull/1', state: 'OPEN' }])
+      return args.at(-1) === 'number,url,title,body,isDraft'
+        ? '[]'
+        : JSON.stringify([{ url: 'https://github.com/a/b/pull/1', state: 'OPEN', isDraft: false }])
     return ''
   }
   async function issue(

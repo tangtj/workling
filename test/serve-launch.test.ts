@@ -84,6 +84,14 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
             git: { name: pi.gitName, email: pi.gitEmail },
           })
           expect(await readFile(join(dir, 'input', 'issue.md'), 'utf8')).toContain('测试正文')
+          expect((await readdir(join(dir, 'input'))).sort()).toEqual([
+            'branch.md',
+            'docs.md',
+            'issue.json',
+            'issue.md',
+            'pr.md',
+            'runs.md',
+          ])
           return { pid: 876 }
         },
       }),
@@ -103,7 +111,8 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       GH_TOKEN: 'repo-secret',
       GH_HOST: 'github.com',
     })
-    expect(s.calls[1]!.args).toEqual([
+    expect(s.calls[1]?.args.slice(0, 6)).toEqual(['gh', 'pr', 'list', '-R', 'a/b', '--head'])
+    expect(s.calls[2]!.args).toEqual([
       'gh',
       'issue',
       'edit',
@@ -115,7 +124,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '--add-label',
       'workling:running',
     ])
-    expect(s.calls[2]!.args).toEqual([
+    expect(s.calls[3]!.args).toEqual([
       'gh',
       'issue',
       'comment',
@@ -125,7 +134,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '--body-file',
       '-',
     ])
-    expect(s.calls[2]!.options?.input).toBe(
+    expect(s.calls[3]!.options?.input).toBe(
       `workling：已领取，开始执行。\n\n- 机器：worker\n- 开始时间：${clock.toISOString()}\n- 任务目录：${launched[0]!.taskDir}\n\n<!-- workling -->`,
     )
     expect(s.logs.some((line) => line.includes('跳过'))).toBe(true)
@@ -263,7 +272,7 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'queued', lastRunId: null })
     const taskDir = s.db.select().from(runs).get()!.taskDir!
     expect(await readdir(taskDir)).not.toContain('secrets')
-    expect(s.calls.map((call) => call.args[2])).toEqual(['view'])
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'list'])
     await launchQueued({
       ...s.options,
       now: () => new Date(clock.getTime() + 1000),
@@ -280,7 +289,7 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
     })
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'running', lastRunId: 2 })
     expect(s.logs.some((line) => line.includes('标签失败'))).toBe(true)
-    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'view', 'comment'])
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'list', 'view', 'list', 'comment'])
   } finally {
     await s.dispose()
   }
@@ -298,7 +307,7 @@ test('领取评论发送失败只记录日志，任务保持 running', async () 
         return s.options.command(args, options)
       },
     })
-    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'edit'])
+    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'list', 'edit'])
     expect(s.db.select().from(issues).get()?.status).toBe('running')
     expect(s.logs).toContain('github:a/b #42 发送领取评论失败：评论失败')
   } finally {
@@ -505,18 +514,67 @@ test.each([
             branch: 'workling/42-issue',
             ...(docBranch ? { docBranch } : {}),
           })
+          expect(await readFile(join(taskDir, 'input', 'docs.md'), 'utf8')).toBe(
+            docBranch ? '文档分支：docs/design\n- content.txt' : '无文档分支。',
+          )
           return { pid: 123 }
         },
       }),
     })
-    expect(baseRequests).toEqual(
-      docBranch ? [] : [['gh', 'api', 'repos/a/b', '--jq', '.default_branch']],
-    )
+    expect(baseRequests).toEqual([['gh', 'api', 'repos/a/b', '--jq', '.default_branch']])
     expect(s.db.select().from(runs).get()).toMatchObject({
       pid: 123,
       branch: 'workling/42-issue',
       baseRef,
     })
+  } finally {
+    await s.dispose()
+  }
+})
+
+test.each([
+  ['open', '分支：docs/design', '接续已有工作分支并保留文档分支'],
+  ['merged', '没有文档分支', '从默认分支重开并在同名分支后加运行号'],
+] as const)('真实 Git：上次 PR 为 %s（%s）时%s', async (prState, body, _behavior) => {
+  const s = await scenario({ body })
+  try {
+    const remote = await localRemote(s.workspace)
+    const main = await remote.commit('refs/heads/main', 'initial')
+    const design = await remote.commit('refs/heads/docs/design', 'design', main)
+    const branch = 'workling/42-issue'
+    const previousBranch = prState === 'open' ? 'workling/42-old-title' : branch
+    const previousTip = await remote.commit(`refs/heads/${previousBranch}`, 'previous work', design)
+    const issue = await s.issue(42, 'queued')
+    s.db.update(issues).set({ prState }).where(eq(issues.id, issue.id)).run()
+    for (const prior of ['workling/42-older', previousBranch, '', null])
+      s.db
+        .insert(runs)
+        .values({ issueId: issue.id, worker: 'old', startedAt: clock, branch: prior })
+        .run()
+
+    await launchQueued({
+      ...s.options,
+      command: (args, options) =>
+        args[0] === 'git' ? remote.git(args, options) : s.command(args, options),
+      executor: fakeExecutor(),
+    })
+    const row = s.db.select().from(issues).where(eq(issues.id, issue.id)).get()!
+    expect(row.status).toBe('running')
+    const run = s.db.select().from(runs).where(eq(runs.id, row.lastRunId!)).get()!
+    const expected =
+      prState === 'open'
+        ? {
+            branch: previousBranch,
+            baseRef: previousTip,
+            docBranch: 'docs/design',
+            continued: true,
+          }
+        : { branch: `${branch}-${run.id}`, baseRef: main }
+    expect(run).toMatchObject({ branch: expected.branch, baseRef: expected.baseRef })
+    expect((await readSpec(run.taskDir!)).repo).toEqual(expected)
+    const cwd = join(run.taskDir!, 'repo')
+    expect(await remote.git(['git', 'branch', '--show-current'], { cwd })).toBe(expected.branch)
+    expect(await remote.git(['git', 'rev-parse', 'HEAD'], { cwd })).toBe(expected.baseRef)
   } finally {
     await s.dispose()
   }

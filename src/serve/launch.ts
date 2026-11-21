@@ -1,6 +1,6 @@
 import { markComment } from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
-import { and, count, eq } from 'drizzle-orm'
+import { and, count, desc, eq, ne } from 'drizzle-orm'
 import { join } from 'node:path'
 import { removeSecrets, writeLlmSecrets } from '../contract/secrets.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../contract/spec.ts'
@@ -17,6 +17,7 @@ import type { Command } from '../runtime/types.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
+import { writeRunContext } from './context.ts'
 import { syncMirror } from './mirror.ts'
 type Log = (message: string) => void
 
@@ -25,6 +26,8 @@ async function prepareCheckout({
   taskDir,
   repo,
   issue,
+  runId,
+  previous,
   pi,
   command,
   signal,
@@ -33,33 +36,51 @@ async function prepareCheckout({
   taskDir: string
   repo: typeof repos.$inferSelect
   issue: { number: number; title: string; body: string }
+  runId: number
+  previous: { branch: string | null; prState: 'open' | 'merged' | 'closed' | null }
   pi: PiSettings
   command: Command
   signal: AbortSignal
-}): Promise<Spec['repo'] | { error: string }> {
+}): Promise<(Spec['repo'] & { start: string }) | { error: string }> {
   const mirror = await syncMirror({ workspace, repo, command, signal })
   const doc = docBranch(issue.body)
   if (doc && 'error' in doc) return doc
   const mirrorOptions = { cwd: mirror, signal }
-  const base =
+  const branchRef = (branch: string) => `refs/heads/${branch}`
+  const hasRef = async (ref: string) => {
+    // 查询不到引用与 Git 命令失败是两类结果；只在前者报告输入错误。
+    const refs = await command(['git', 'for-each-ref', '--format=%(refname)', ref], mirrorOptions)
+    return refs.split('\n').includes(ref)
+  }
+  if (doc && !(await hasRef(branchRef(doc.name)))) return { error: `文档分支「${doc.name}」不存在` }
+
+  const continuedBranch =
+    previous.branch?.startsWith(`workling/${issue.number}-`) &&
+    (previous.prState === null || previous.prState === 'open') &&
+    (await hasRef(branchRef(previous.branch)))
+      ? previous.branch
+      : undefined
+  const start =
     doc?.name ??
     (await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
       env: ghEnv(repo.token, repo.host),
       signal,
     }))
-  const ref = `refs/heads/${base}`
-  if (doc) {
-    // 查询不到引用与 Git 命令失败是两类结果；只在前者报告输入错误。
-    const refs = await command(['git', 'for-each-ref', '--format=%(refname)', ref], mirrorOptions)
-    if (!refs.split('\n').includes(ref)) return { error: `文档分支「${doc.name}」不存在` }
+  if (!doc) await command(['git', 'check-ref-format', branchRef(start)], mirrorOptions)
+  let ref: string
+  let branch: string
+  if (continuedBranch) {
+    branch = continuedBranch
+    ref = branchRef(branch)
   } else {
-    await command(['git', 'check-ref-format', ref], mirrorOptions)
+    ref = branchRef(start)
+    branch = taskBranch(issue.number, issue.title)
+    if (await hasRef(branchRef(branch))) branch = `${branch}-${runId}`
   }
   const baseRef = await command(
     ['git', 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`],
     mirrorOptions,
   )
-  const branch = taskBranch(issue.number, issue.title)
   const cwd = join(taskDir, 'repo')
   await command(['git', 'clone', '--no-hardlinks', '--no-checkout', '--dissociate', mirror, cwd], {
     signal,
@@ -74,7 +95,13 @@ async function prepareCheckout({
   await command(['git', 'config', '--local', 'user.name', pi.gitName], options)
   await command(['git', 'config', '--local', 'user.email', pi.gitEmail], options)
   await command(['git', 'switch', '-c', branch, baseRef], options)
-  return { baseRef, branch, ...(doc ? { docBranch: doc.name } : {}) }
+  return {
+    baseRef,
+    branch,
+    start,
+    ...(doc ? { docBranch: doc.name } : {}),
+    ...(continuedBranch ? { continued: true } : {}),
+  }
 }
 
 export async function launchQueued({
@@ -137,6 +164,12 @@ export async function launchQueued({
         .values({ issueId: issue.id, worker: settings.worker, taskDir, startedAt })
         .returning()
         .get()
+      const previous = db
+        .select({ branch: runs.branch })
+        .from(runs)
+        .where(and(eq(runs.issueId, issue.id), ne(runs.id, record.id), ne(runs.branch, '')))
+        .orderBy(desc(runs.id))
+        .get()
       const { title, body } = await readIssue({
         ref,
         dir: join(taskDir, 'input'),
@@ -148,6 +181,8 @@ export async function launchQueued({
         taskDir,
         repo,
         issue: { number: issue.number, title, body },
+        runId: record.id,
+        previous: { branch: previous?.branch ?? null, prState: issue.prState },
         pi,
         command,
         signal,
@@ -160,15 +195,27 @@ export async function launchQueued({
           error: checkout.error,
         })
       } else {
+        const { start, ...specRepo } = checkout
         db.update(runs)
           .set({ branch: checkout.branch, baseRef: checkout.baseRef })
           .where(eq(runs.id, record.id))
           .run()
+        await writeRunContext({
+          db,
+          taskDir,
+          repo,
+          issue,
+          runId: record.id,
+          checkout: { ...specRepo, start },
+          command: (args, options) => command(args, { ...options, signal }),
+          secrets: [repo.token, pi.llmApiKey ?? ''],
+          log,
+        })
         await writeSpec(taskDir, {
           contract: CONTRACT_VERSION,
           kind: 'implement',
           issue: { ref: issueRef, title },
-          repo: checkout,
+          repo: specRepo,
           model: {
             codex: pi.model,
             effort: pi.effort,

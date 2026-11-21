@@ -164,7 +164,7 @@ test('runTask 使用已准备的工作副本，假 Pi 收到两个分支和正�
     '--model',
     'test-provider/model',
     '--',
-    `Issue：https://github.com/a/b/issues/12（github:a/b#12）\n仓库目录：${options.dir}/repo\n任务分支：${spec.repo.branch}（已检出，基于 ${spec.repo.baseRef}）\n文档分支：docs/design\n任务目录：${options.dir}\nIssue 内容：${options.dir}/input/issue.md\n默认 codex 模型：spec-codex\n默认 codex 推理强度：high\ncodex 沙箱模式：workspace-write\n按系统提示中的 workling 工作约定完成这个 Issue。`,
+    `Issue：https://github.com/a/b/issues/12（github:a/b#12）\n仓库目录：${options.dir}/repo\n任务分支：${spec.repo.branch}（已检出，基于 ${spec.repo.baseRef}）\n文档分支：docs/design\n任务目录：${options.dir}\nIssue 内容：${options.dir}/input/issue.md\n上下文：${options.dir}/input/runs.md、branch.md、pr.md、docs.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）\n默认 codex 模型：spec-codex\n默认 codex 推理强度：high\ncodex 沙箱模式：workspace-write\n按系统提示中的 workling 工作约定完成这个 Issue。`,
   ])
   expect(JSON.stringify(captured.args)).not.toContain('private-token')
   expect(captured.cwd).toBe(
@@ -239,6 +239,49 @@ test.each([
     commits: 0,
   })
   expect(await Bun.file(join(out, 'commits.bundle')).exists()).toBe(false)
+})
+
+test.each([
+  ['有效 JSON', '{"outcome":"incomplete"}', 'incomplete'],
+  ['无效 JSON', '{', 'completed'],
+  ['结构不符', '{"outcome":"unknown"}', 'completed'],
+  ['超出上限', '{"outcome":"incomplete"}'.padEnd(4097), 'completed'],
+] as const)('Pi 的 outcome.json 为%s时优先使用有效值或回退到报告', async (_kind, raw, outcome) => {
+  const options = await setupTask()
+  const out = join(options.dir, 'out')
+  await runTask({
+    ...options,
+    wait: async () => {
+      await writeFile(join(options.dir, 'report.md'), '结果：完成\n')
+      await writeFile(join(out, 'outcome.json'), raw)
+      return { code: 0, signal: null }
+    },
+  })
+  expect((await readOutResult(out)).outcome).toBe(outcome)
+})
+
+test('runTask 将 Pi 的 answered 原样写入 result.json', async () => {
+  const options = await setupTask()
+  const out = join(options.dir, 'out')
+  await mkdir(out)
+  await writeFile(join(out, 'outcome.json'), '{"outcome":"answered"}')
+  await writeFile(join(options.dir, 'report.md'), '结果：完成')
+  expect(await runTask(options)).toEqual({ code: 0, signal: null })
+  expect(await readOutResult(out)).toMatchObject({ outcome: 'answered', commits: 0 })
+})
+
+test('runTask 告知 Pi 接续此前工作分支及当前末端', async () => {
+  const options = await setupTask()
+  await writeSpec(options.dir, { ...spec, repo: { ...spec.repo, continued: true } })
+  await runTask({
+    ...options,
+    wait: async (args) => {
+      expect(args.at(-1)).toContain(
+        `任务分支：${spec.repo.branch}（已检出，接续此前运行的工作分支，当前末端 ${spec.repo.baseRef}）`,
+      )
+      return { code: 0, signal: null }
+    },
+  })
 })
 
 test('worker 生成产出失败时报告错误，仍保留 Pi 的退出码', async () => {
