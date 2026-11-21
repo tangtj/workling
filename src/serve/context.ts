@@ -6,7 +6,7 @@ import * as Value from 'typebox/value'
 import { readOutputFile, truncateComment } from '../contract/out.ts'
 import type { Spec } from '../contract/spec.ts'
 import type { WorklingDatabase } from '../db/index.ts'
-import { runs } from '../db/schema.ts'
+import { feedback, runs } from '../db/schema.ts'
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
@@ -67,6 +67,7 @@ export async function writeRunContext({
   repo,
   issue,
   runId,
+  kind = 'implement',
   checkout,
   command,
   secrets,
@@ -77,6 +78,7 @@ export async function writeRunContext({
   repo: { path: string; host: string; token: string }
   issue: { id: number; number: number }
   runId: number
+  kind?: Spec['kind']
   checkout: Spec['repo'] & { start: string }
   command: Command
   secrets: string[]
@@ -96,7 +98,7 @@ export async function writeRunContext({
     let content: string
     try {
       content = redact(await collect())
-      if (file === 'pr.md') content = truncateComment(content)
+      if (file === 'pr.md' || file === 'feedback.md') content = truncateComment(content)
     } catch (error) {
       warn(file, error)
       content = redact(`获取失败：${errorMessage(error)}`)
@@ -120,6 +122,43 @@ export async function writeRunContext({
       return ''
     }
   }
+
+  await write('feedback.md', async () => {
+    const rows = db
+      .select()
+      .from(feedback)
+      .where(and(eq(feedback.runId, runId), eq(feedback.status, 'included')))
+      .orderBy(feedback.createdAt, feedback.id)
+      .all()
+    const names = {
+      issue_comment: 'Issue 评论',
+      pr_comment: 'PR 评论',
+      review_comment: '行内评论',
+      review: 'Review',
+    }
+    const sections = rows.map((row) => {
+      const body = row.isCommand ? (row.instruction ?? row.body) : row.body
+      const text =
+        body.length > 8000
+          ? `${body.slice(0, 8000).replace(/[\uD800-\uDBFF]$/, '')}\n\n（已截断）`
+          : body
+      return [
+        `## F${row.id} · ${names[row.source]}${row.reviewState ? `（${row.reviewState}）` : ''} · @${row.authorLogin} · ${row.createdAt.toISOString()}`,
+        '',
+        ...(row.path ? [`位置：${row.path}:${row.line ?? '未知'}`] : []),
+        `链接：${row.url}`,
+        '',
+        text,
+      ].join('\n')
+    })
+    return [
+      '# 本轮反馈',
+      '',
+      `类型：${kind}`,
+      '',
+      ...(sections.length ? sections : ['无本轮反馈。']),
+    ].join('\n\n')
+  })
 
   await write('runs.md', async () => {
     const previous = db

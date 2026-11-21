@@ -10,6 +10,7 @@ function responseRun(row: typeof runs.$inferSelect) {
   return {
     id: row.id,
     worker: row.worker,
+    kind: row.kind,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
     exitCode: row.exitCode,

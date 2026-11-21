@@ -38,6 +38,7 @@ export const issueDetailSchema = obj({
     obj({
       id: Type.Integer(),
       worker: Type.String(),
+      kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
       startedAt: Type.String(),
       endedAt: nullableString,
       exitCode: nullableInteger,

@@ -65,7 +65,7 @@ function RunCard({
       <div className="run-details">
         <div>
           <small>开始</small>
-          {formatTime(run.startedAt, now)}
+          {run.kind === 'rework' ? '返工' : '实现'} · {formatTime(run.startedAt, now)}
         </div>
         <div>
           <small>结束</small>
@@ -145,8 +145,18 @@ function FeedbackList({ id, now }: { id: number; now: number }) {
             {feedbackSources[item.source]}
             {item.source === 'review' && item.reviewState ? `（${item.reviewState}）` : ''} ·{' '}
             {item.authorLogin} · {feedbackTrust[item.trust]} ·{' '}
-            {item.status === 'observed' ? '指令（仅观察）' : '非指令'} ·{' '}
-            {formatTime(new Date(item.createdAt), now)}
+            {item.status === 'observed' ? (
+              '指令（待处理）'
+            ) : item.status === 'pending' ? (
+              '已入队'
+            ) : item.status === 'included' && item.runId ? (
+              <a href={`/runs/${item.runId}/log`}>已处理</a>
+            ) : item.status === 'replied' ? (
+              '已回复'
+            ) : (
+              '不算指令'
+            )}{' '}
+            · {formatTime(new Date(item.createdAt), now)}
           </p>
           <p>{item.instruction ?? item.body.slice(0, 200)}</p>
           {item.path && (
