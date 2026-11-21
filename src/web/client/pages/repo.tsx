@@ -8,6 +8,9 @@ import { IssueTable, PlatformIcon, StatusChips } from '../issue-table.tsx'
 import { usePageLayout } from '../layout.tsx'
 import { loadTrustedUsers } from '../feedback.ts'
 import { repoRequest } from '../repos.ts'
+import { settingsOptions } from '../settings.ts'
+import * as Value from 'typebox/value'
+import { triageSchema } from '../../triage.ts'
 import { NotFound } from '../not-found.tsx'
 
 function TrustedUsers({ id, github }: { id: number; github: boolean }) {
@@ -76,6 +79,105 @@ function TrustedUsers({ id, github }: { id: number; github: boolean }) {
   )
 }
 
+function Triage({
+  id,
+  host,
+  path,
+  github,
+}: {
+  id: number
+  host: string
+  path: string
+  github: boolean
+}) {
+  const client = useQueryClient()
+  const settings = useQuery(settingsOptions)
+  const key = ['triage', id]
+  const query = useQuery({
+    queryKey: key,
+    queryFn: async () => {
+      const body: unknown = await repoRequest(`/api/repos/${id}/triage`, 'GET')
+      if (!Value.Check(triageSchema, body)) throw new Error('分诊数据无效')
+      return body
+    },
+  })
+  const mutation = useMutation({
+    mutationFn: (level: string) => repoRequest(`/api/repos/${id}/triage-level`, 'PUT', { level }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: key }),
+  })
+  const data = query.data
+  return (
+    <section className="card">
+      <h2>分诊（影子模式）</h2>
+      <p>
+        只记录结论，不打标签、不评论；只分诊受信作者的 Issue；需要<Link to="/settings">设置页</Link>
+        的 LLM 配置。
+      </p>
+      {settings.data && (!settings.data.pi.llmBaseUrl || !settings.data.pi.llmApiKey) && (
+        <p>
+          LLM 未配置，请前往<Link to="/settings">设置页</Link>配置接入地址与 Key。
+        </p>
+      )}
+      <label>
+        分诊级别{' '}
+        <select
+          disabled={!github || !data || mutation.isPending}
+          value={data?.level ?? 'off'}
+          onChange={(event) => mutation.mutate(event.target.value)}
+        >
+          <option value="off">关闭</option>
+          <option value="shadow">影子</option>
+        </select>
+      </label>
+      {(query.error || mutation.error) && (
+        <p className="error-box">{(query.error ?? mutation.error)?.message}</p>
+      )}
+      {data && (
+        <>
+          <p>
+            接受且 ready：{data.summary.acceptReady} · 接受未 ready：{data.summary.acceptNotReady} ·
+            其他且 ready：{data.summary.otherReady} · 其他未 ready：{data.summary.otherNotReady} ·
+            一致率：
+            {data.summary.total
+              ? `${Math.round(((data.summary.acceptReady + data.summary.otherNotReady) * 100) / data.summary.total)}%`
+              : '—'}
+          </p>
+          {data.records.length === 0 && <p>暂无分诊记录</p>}
+          {data.records.map((row) => (
+            <div className="row" key={row.id}>
+              <div>
+                <a
+                  href={`https://${host}/${path}/issues/${row.number}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  #{row.number} {row.title}
+                </a>{' '}
+                · {row.authorLogin} · {row.decision ?? '无结论'}{' '}
+                {row.llmDecision && row.llmDecision !== row.decision && `(LLM: ${row.llmDecision})`}
+                <p>
+                  缺少：{row.missing.join('、') || '无'} ·{' '}
+                  {row.readyAt
+                    ? `ready：${row.readyAt}${row.readyAfterMinutes === null ? '' : `（${row.readyAfterMinutes} 分钟）`}`
+                    : '未 ready'}{' '}
+                  · 分诊：{row.triagedAt}
+                </p>
+                {(row.note || row.error) && (
+                  <details>
+                    <summary>说明</summary>
+                    <p>{row.note}</p>
+                    <p>{row.error}</p>
+                  </details>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </section>
+  )
+}
+
 export function RepoPage() {
   const page = useQuery(issueListOptions)
   const { id } = useParams()
@@ -123,6 +225,7 @@ export function RepoPage() {
           </p>
         </div>
       </header>
+      <Triage id={repo.id} host={repo.host} path={repo.path} github={repo.platform === 'github'} />
       <TrustedUsers id={repo.id} github={repo.platform === 'github'} />
       <section className="card">
         <div className="toolbar">
