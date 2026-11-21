@@ -127,6 +127,8 @@ For code updates, use **the sidebar version badge** after setting `WORKLING_UPDA
 
 Changes to either `deploy/docker/Dockerfile` or `deploy/docker/entrypoint.sh` require a new image: online updates reject them, and you must run `./update.sh <tag>` from the deployment directory. That script backs up the database, updates the Compose configuration and checks health, restoring the previous version and database on failure. Online code survives in the data volume; the entrypoint compares versions using SemVer and selects the image when it is newer.
 
+**Releasing only the worker**: push a `worker-v*` tag (for example `git tag worker-v0.1.0 && git push origin worker-v0.1.0`). Actions builds `worker/Dockerfile` and pushes `ghcr.io/<repo>-worker` tagged `v0.1.0`, `contract-<contract version>` and `latest` (prereleases get only the full version). The image label `io.workling.contract` declares the contract version; the Docker executor checks it before launching and, if it does not match the host, pauses new tasks and shows the reason on the overview and in the sidebar. Point **Task image** in Settings at the new worker image to use it without upgrading the host.
+
 Build a specific version locally for testing (the default is `dev`):
 
 ```sh
@@ -138,11 +140,11 @@ WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yam
 systemd runs watch on the host, and each task runs in its own container that mounts only that task's directory.
 
 1. Install Bun and Docker, and create a service user in the docker group (docker group membership is root-equivalent; grant it to this account only): `sudo useradd -r -m -d /var/lib/workling -G docker workling`.
-2. Put the code in `/opt/workling`, install dependencies and build the task image:
+2. Put the code in `/opt/workling`, install dependencies and build the worker image (its name must match **Task image** in Settings, `workling:local` by default):
 
    ```sh
    cd /opt/workling && bun install --frozen-lockfile --ignore-scripts --production
-   docker build -f deploy/docker/Dockerfile -t workling:local .
+   docker build -f worker/Dockerfile -t workling:local .
    ```
 
 3. Copy `deploy/workling.env.example` to `/etc/workling/workling.env` (mode 600, owned by workling).

@@ -41,6 +41,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
             interval: status.interval,
             lastPollAt: status.lastPollAt?.toISOString() ?? null,
             lastPollError: status.lastPollError,
+            workerError: status.workerError ?? null,
           }
         : null,
       now: new Date(sidebar.now).toISOString(),
@@ -160,6 +161,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
             timeout: page.status.timeout,
             lastPollAt: page.status.lastPollAt?.toISOString() ?? null,
             lastPollError: page.status.lastPollError,
+            workerError: page.status.workerError ?? null,
           }
         : null,
       issues: page.issues

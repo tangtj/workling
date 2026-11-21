@@ -147,6 +147,7 @@ test('watch 子进程启动本地接口并在 SIGTERM 后正常退出', async ()
       startedAt: expect.any(String),
       lastPollAt: expect.any(String),
       lastPollError: null,
+      workerError: null,
     })
     expect(Number.isFinite(Date.parse(status.watch.lastPollAt))).toBe(true)
     expect(new Date(status.watch.startedAt).toISOString()).toBe(status.watch.startedAt)
@@ -302,6 +303,33 @@ test('watch 启动从注入环境导入，后续启动忽略旧环境变量，�
     )
   } finally {
     serve.mockRestore()
+    await s.dispose()
+  }
+})
+
+test('docker 执行器的 worker 镜像不兼容时暂停拉起并记录原因', async () => {
+  const s = await scenario()
+  const controller = new AbortController()
+  const logs: string[] = []
+  const listen = spyOn(Bun, 'serve').mockImplementation(
+    () => ({ port: 0, stop() {} }) as unknown as ReturnType<typeof Bun.serve>,
+  )
+  try {
+    await s.issue(42, 'queued')
+    await startServe({
+      ...s.options,
+      signal: controller.signal,
+      env: { WORKLING_SANDBOX: 'docker', WORKLING_TASK_IMAGE: 'old:1' },
+      log: (message) => {
+        logs.push(message)
+        if (message.startsWith('暂停拉起新任务')) controller.abort()
+      },
+    })
+    expect(logs).toContain('暂停拉起新任务：无法读取 worker 镜像 old:1 的标签')
+    expect(s.calls.some(({ args }) => args[0] === 'docker' && args[1] === 'run')).toBe(false)
+    expect(s.db.select().from(runs).all()).toEqual([])
+  } finally {
+    listen.mockRestore()
     await s.dispose()
   }
 })

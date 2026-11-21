@@ -18,6 +18,7 @@ import { launchQueued } from './launch.ts'
 import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
+import { checkWorkerImage } from '../executor/worker-image.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
 import { triageIssues, type TriageState } from './triage.ts'
 type Log = (message: string) => void
@@ -29,6 +30,8 @@ export type ServeStatus = {
   startedAt: Date
   lastPollAt: Date | null
   lastPollError: string | null
+  /** docker 执行器的 worker 镜像不兼容时的原因；此时暂停拉起新任务。 */
+  workerError?: string | null
 }
 
 function waitForNext(seconds: number, signal: AbortSignal): Promise<void> {
@@ -67,6 +70,7 @@ export async function serve({
     startedAt: new Date(),
     lastPollAt: null,
     lastPollError: null,
+    workerError: null,
   }
   let server: ReturnType<typeof Bun.serve> | undefined
   try {
@@ -181,7 +185,14 @@ export async function serve({
           const paused = launchPaused()
           if (paused && !wasPaused) log('在线更新进行中，暂停拉起新任务')
           wasPaused = paused
-          if (!paused)
+          const workerError =
+            executorSettings.sandbox === 'docker'
+              ? await checkWorkerImage(command, executorSettings.taskImage)
+              : null
+          if (workerError && workerError !== status.workerError)
+            log(`暂停拉起新任务：${workerError}`)
+          status.workerError = workerError
+          if (!paused && !workerError)
             await launchQueued({
               db,
               command,

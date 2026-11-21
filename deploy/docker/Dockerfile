@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 RUN npm install -g @openai/codex@0.166.0
 
 ARG WORKLING_VERSION=dev
+# 镜像内也带 worker（本机进程执行器或用作任务镜像），同样声明契约版本，须与 CONTRACT_VERSION 一致。
+ARG WORKER_CONTRACT=2
+LABEL io.workling.contract=$WORKER_CONTRACT
 
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./

@@ -20,6 +20,7 @@ export const overviewSchema = obj({
       timeout: Type.Number(),
       lastPollAt: nullableString,
       lastPollError: nullableString,
+      workerError: nullableString,
     }),
   ]),
   issues: Type.Array(

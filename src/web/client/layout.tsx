@@ -162,7 +162,9 @@ export function Layout() {
                   ))}
               </div>
               <div className="sidebar-bottom">
-                <div className={`watch-card${sidebar.watch?.lastPollError ? ' warn' : ''}`}>
+                <div
+                  className={`watch-card${sidebar.watch?.lastPollError || sidebar.watch?.workerError ? ' warn' : ''}`}
+                >
                   {sidebar.watch ? (
                     <>
                       <div>
@@ -193,6 +195,9 @@ export function Layout() {
                       </div>
                       {sidebar.watch.lastPollError && (
                         <div className="error-text">{sidebar.watch.lastPollError}</div>
+                      )}
+                      {sidebar.watch.workerError && (
+                        <div className="error-text">{sidebar.watch.workerError}</div>
                       )}
                     </>
                   ) : (

@@ -48,6 +48,12 @@ backup=''
 rebuilt_image=0
 restarted=0
 task_image=''
+# 旧版本没有 worker/Dockerfile，回滚时退回主体镜像的 Dockerfile。
+build_task_image() {
+  local file="$APP_DIR/worker/Dockerfile"
+  [[ -f $file ]] || file="$APP_DIR/deploy/docker/Dockerfile"
+  docker build -f "$file" -t "$task_image" "$APP_DIR"
+}
 wait_healthy() {
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
   while (( SECONDS < deadline )); do
@@ -73,7 +79,7 @@ rollback() {
     fi
     if (( rebuilt_image )); then
       log "恢复任务镜像"
-      docker build -t "$task_image" "$APP_DIR" || log "警告：恢复任务镜像失败"
+      build_task_image || log "警告：恢复任务镜像失败"
     fi
     log "启动服务并检查健康状态"
     if sudo -n systemctl start "$SERVICE" && wait_healthy; then
@@ -86,7 +92,7 @@ rollback() {
     git checkout --detach --quiet "$prev" && bun install --frozen-lockfile --ignore-scripts --production || log "警告：恢复代码或依赖失败"
     if (( rebuilt_image )); then
       log "恢复任务镜像"
-      docker build -t "$task_image" "$APP_DIR" || log "警告：恢复任务镜像失败"
+      build_task_image || log "警告：恢复任务镜像失败"
     fi
     log "失败发生在重启前，服务未受影响，已恢复代码"
   fi
@@ -112,7 +118,7 @@ IFS=$'\t' read -r sandbox task_image <<< "$settings"
 if [[ $sandbox == docker ]]; then
   log "构建任务镜像"
   command -v docker >/dev/null || { log "缺少命令：docker"; false; }
-  docker build -t "$task_image" "$APP_DIR"
+  build_task_image
   rebuilt_image=1
 else
   log "执行器为本机进程，跳过镜像构建"

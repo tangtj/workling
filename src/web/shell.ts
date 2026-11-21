@@ -26,6 +26,7 @@ export const shellSchema = Type.Object(
           interval: Type.Number(),
           lastPollAt: nullableString,
           lastPollError: nullableString,
+          workerError: nullableString,
         },
         { additionalProperties: false },
       ),

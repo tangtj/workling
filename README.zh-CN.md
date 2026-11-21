@@ -127,6 +127,8 @@ Actions 安装依赖并运行检查，使用官方 Docker Actions 构建 `linux/
 
 `deploy/docker/Dockerfile` 或 `deploy/docker/entrypoint.sh` 任一变化，在线更新会拒绝，必须在部署目录执行 `./update.sh <tag>` 拉取新镜像。脚本会备份数据库、更新 Compose 配置并检查健康状态，失败时恢复旧版本与数据库。在线代码保存在数据卷，入口脚本按 SemVer 选择镜像与在线版本；镜像版本更高时以镜像为准。
 
+**只发布 worker**：推送 `worker-v*` tag（如 `git tag worker-v0.1.0 && git push origin worker-v0.1.0`），Actions 用 `worker/Dockerfile` 构建并推送 `ghcr.io/<仓库>-worker`，标签为 `v0.1.0`、`contract-<契约版本>` 与 `latest`（预发布只有完整版本）。镜像标签 `io.workling.contract` 声明契约版本；docker 执行器拉起前检查，与主体不一致时暂停拉起新任务，并在管理页概览与侧栏提示原因。把设置页的「任务镜像」换成新的 worker 镜像即可生效，主体不用升级。
+
 本地可构建指定版本用于实测（默认 `dev`）：
 
 ```sh
@@ -138,11 +140,11 @@ WORKLING_VERSION=v0.1.1 docker compose -f deploy/docker/docker-compose.build.yam
 watch 由 systemd 运行在宿主机上，每个任务启动一个独立容器，只挂载该任务的目录。
 
 1. 安装 Bun 与 Docker，创建服务用户并加入 docker 组（docker 组等同 root 权限，只给这个账号）：`sudo useradd -r -m -d /var/lib/workling -G docker workling`。
-2. 把代码放到 `/opt/workling`，安装依赖并构建任务镜像：
+2. 把代码放到 `/opt/workling`，安装依赖并构建 worker 镜像（镜像名与设置页「任务镜像」一致，默认 `workling:local`）：
 
    ```sh
    cd /opt/workling && bun install --frozen-lockfile --ignore-scripts --production
-   docker build -f deploy/docker/Dockerfile -t workling:local .
+   docker build -f worker/Dockerfile -t workling:local .
    ```
 
 3. 把 `deploy/workling.env.example` 复制为 `/etc/workling/workling.env`（权限 600，属主 workling）。
