@@ -33,16 +33,34 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
     const calls: { args: string[]; options?: RunOptions }[] = []
     const command: Command = async (args, options) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
-      if (args[2] === 'view' && args.at(-1) === 'labels')
-        return JSON.stringify({ labels: [{ name: 'workling:ready' }] })
       calls.push({ args, options })
       if (args[1] === 'label' || args[2] === 'edit') return ''
       if (args[4] === 'a/fail') throw new Error('出错')
       if (args[4] === 'a/bad') return '[{"number":"bad"}]'
       if (args[4] === 'a/empty') return '[]'
       return JSON.stringify([
-        { number: 2, title: 'two', url: 'url2' },
-        { number: 1, title: 'one', url: 'url1' },
+        {
+          number: 2,
+          title: 'two',
+          url: 'url2',
+          labels: [
+            { name: 'workling:ready' },
+            { name: 'workling:running' },
+            { name: 'workling:done' },
+            { name: 'workling:failed' },
+          ],
+        },
+        {
+          number: 1,
+          title: 'one',
+          url: 'url1',
+          labels: [
+            { name: 'workling:ready' },
+            { name: 'workling:running' },
+            { name: 'workling:done' },
+            { name: 'workling:failed' },
+          ],
+        },
       ])
     }
     const lines: string[] = []
@@ -52,6 +70,7 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
     ).toEqual({ expanded: 0 })
     const lists = calls.filter((call) => call.args[2] === 'list')
     expect(lists).toHaveLength(4)
+    expect(calls.filter((call) => call.args[2] === 'view')).toHaveLength(0)
     expect(lists[2]!.args).toEqual([
       'gh',
       'issue',
@@ -65,7 +84,7 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
       '--limit',
       '100',
       '--json',
-      'number,title,url',
+      'number,title,url,labels',
     ])
     expect(lists[2]!.options?.env).toMatchObject({
       GH_TOKEN: 'token-ok',
@@ -115,7 +134,20 @@ test('主 Issue 展开后返回展开的主 Issue 数', async () => {
       })
       .run()
     const command: Command = async (args) => {
-      if (args[2] === 'list') return JSON.stringify([{ number: 10, title: 'parent', url: 'url' }])
+      if (args[2] === 'list')
+        return JSON.stringify([
+          {
+            number: 10,
+            title: 'parent',
+            url: 'url',
+            labels: [
+              { name: 'workling:ready' },
+              { name: 'workling:running' },
+              { name: 'workling:done' },
+              { name: 'workling:failed' },
+            ],
+          },
+        ])
       if (args[1] === 'api')
         return JSON.stringify([
           {
@@ -164,12 +196,6 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
     const calls: string[][] = []
     const command: Command = async (args) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
-      if (args[2] === 'view' && args.at(-1) === 'labels')
-        return JSON.stringify({
-          labels: ['ready', 'running', 'done', 'failed'].map((name) => ({
-            name: `workling:${name}`,
-          })),
-        })
       calls.push(args)
       if (args[2] !== 'list') return ''
       return JSON.stringify(
@@ -177,6 +203,12 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
           number,
           title: `title${number}`,
           url: `url${number}`,
+          labels: [
+            { name: 'workling:ready' },
+            { name: 'workling:running' },
+            { name: 'workling:done' },
+            { name: 'workling:failed' },
+          ],
         })),
       )
     }
@@ -275,7 +307,19 @@ test.each(['queued', 'running'] as const)(
         args[1] === 'api'
           ? '[]'
           : args[2] === 'list'
-            ? JSON.stringify([{ number: 1, title: '新标题', url: 'url1' }])
+            ? JSON.stringify([
+                {
+                  number: 1,
+                  title: '新标题',
+                  url: 'url1',
+                  labels: [
+                    { name: 'workling:ready' },
+                    { name: 'workling:running' },
+                    { name: 'workling:done' },
+                    { name: 'workling:failed' },
+                  ],
+                },
+              ])
             : ''
       const poll = () =>
         pollOnce({ db, command, signal: new AbortController().signal, log: () => {} })
@@ -312,13 +356,18 @@ test('标签创建缓存、同步失败重试且不阻塞后续 Issue', async ()
     let failEdit = true
     const command: Command = async (args, options) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
-      if (args[2] === 'view' && args.at(-1) === 'labels')
-        return JSON.stringify({ labels: [{ name: 'workling:ready' }] })
       calls.push({ args, options })
       if (args[1] === 'label' && failCreate) throw new Error('创建失败')
       if (args[2] === 'edit' && args[3] === '1' && failEdit) throw new Error('编辑失败')
       if (args[2] === 'list')
-        return JSON.stringify([1, 2].map((number) => ({ number, title: 't', url: 'u' })))
+        return JSON.stringify(
+          [1, 2].map((number) => ({
+            number,
+            title: 't',
+            url: 'u',
+            labels: [{ name: 'workling:ready' }],
+          })),
+        )
       return ''
     }
     const labeledRepos = new Set<number>()

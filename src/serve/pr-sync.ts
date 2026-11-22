@@ -5,7 +5,7 @@ import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import type { WorklingDatabase } from '../db/index.ts'
 import { issues, repos, runs } from '../db/schema.ts'
-import { ghEnv } from '../platform/github.ts'
+import { defaultBranch as readDefaultBranch, ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { markComment, neutralizeMentions } from './comment.ts'
@@ -63,7 +63,7 @@ async function rebaseDownstream({
       !downstream.prUrl
     )
       throw new Error('下游分支、基点或 PR 缺失')
-    const base = await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch'])
+    const base = await readDefaultBranch({ repo, command, signal })
     if (!base || base.startsWith('-')) throw new Error('默认分支无效')
     const parent = join(workspace, 'rebase')
     await mkdir(parent, { recursive: true, mode: 0o700 })

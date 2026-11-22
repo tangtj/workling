@@ -13,7 +13,7 @@ import {
   type OutResult,
 } from '../contract/out.ts'
 import { applyChecklist, planChecklist } from '../issue/checklist.ts'
-import { ghEnv } from '../platform/github.ts'
+import { defaultBranch as readDefaultBranch, ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { findSecrets, redactSecrets } from './secret-scan.ts'
@@ -382,8 +382,7 @@ export async function landRun({
         }
       }
     } else {
-      const base =
-        run.stackBranch ?? (await gh(['api', `repos/${repo.path}`, '--jq', '.default_branch']))
+      const base = run.stackBranch ?? (await readDefaultBranch({ repo, command }))
       if (!base) throw new Error('无法读取仓库默认分支')
       const { title, body, partial } = await prFields()
       prUrl = await gh(

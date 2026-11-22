@@ -1,5 +1,6 @@
 // @env node
 import { afterEach, beforeEach, mock } from 'bun:test'
+import { clearDefaultBranchCache } from '../src/platform/github.ts'
 
 const original = { ...process.env }
 
@@ -11,6 +12,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  clearDefaultBranchCache()
   mock.restore()
   for (const key of Object.keys(process.env)) if (!(key in original)) delete process.env[key]
   Object.assign(process.env, original)

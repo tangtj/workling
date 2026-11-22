@@ -8,7 +8,7 @@ import type { Spec } from '../contract/spec.ts'
 import type { WorklingDatabase } from '../db/index.ts'
 import { feedback, runs } from '../db/schema.ts'
 import { feedbackSourceNames } from './replies.ts'
-import { ghEnv } from '../platform/github.ts'
+import { defaultBranch as readDefaultBranch, ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { assertTaskDir } from '../contract/result.ts'
@@ -305,7 +305,7 @@ export async function writeRunContext({
 
   await write('docs.md', async () => {
     if (!checkout.docBranch) return '无文档分支。'
-    const base = await gh('api', `repos/${repo.path}`, '--jq', '.default_branch')
+    const base = await readDefaultBranch({ repo, command })
     const paths = await git(
       'diff',
       '--name-only',
