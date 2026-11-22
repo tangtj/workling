@@ -66,6 +66,7 @@ export async function pollOnce({
   log: Log
   labeledRepos?: Set<number>
 }) {
+  let expanded = 0
   const rows = db.select().from(repos).where(eq(repos.enabled, true)).orderBy(repos.id).all()
   for (const row of rows) {
     if (signal.aborted) break
@@ -153,6 +154,7 @@ export async function pollOnce({
               ],
               { env: ghEnv(row.token, row.host), signal },
             )
+            expanded++
             log(
               `${row.ref} #${issue.number} 主 Issue：展开 ${subs.length} 个子 Issue（${subs.map((sub) => `#${sub.number}`).join(' ')}）`,
             )
@@ -221,4 +223,5 @@ export async function pollOnce({
       log(`${row.ref} 轮询失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
+  return { expanded }
 }

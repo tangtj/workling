@@ -47,7 +47,9 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
     }
     const lines: string[] = []
     const controller = new AbortController()
-    await pollOnce({ db, command, signal: controller.signal, log: (line) => lines.push(line) })
+    expect(
+      await pollOnce({ db, command, signal: controller.signal, log: (line) => lines.push(line) }),
+    ).toEqual({ expanded: 0 })
     const lists = calls.filter((call) => call.args[2] === 'list')
     expect(lists).toHaveLength(4)
     expect(lists[2]!.args).toEqual([
@@ -90,6 +92,45 @@ test('轮询启用的项目并隔离失败，按编号入队并写入 Issue 标�
     controller.abort()
     await pollOnce({ db, command, signal: controller.signal, log: (line) => lines.push(line) })
     expect(calls).toHaveLength(callCount)
+  } finally {
+    close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('主 Issue 展开后返回展开的主 Issue 数', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-expand-'))
+  const { db, close } = await openDatabase(dir)
+  try {
+    const now = new Date()
+    db.insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'token',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    const command: Command = async (args) => {
+      if (args[2] === 'list') return JSON.stringify([{ number: 10, title: 'parent', url: 'url' }])
+      if (args[1] === 'api')
+        return JSON.stringify([
+          {
+            number: 11,
+            title: 'child',
+            state: 'open',
+            state_reason: null,
+            repository_url: 'https://api.github.com/repos/a/b',
+          },
+        ])
+      return ''
+    }
+    expect(
+      await pollOnce({ db, command, signal: new AbortController().signal, log: () => {} }),
+    ).toEqual({ expanded: 1 })
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })
