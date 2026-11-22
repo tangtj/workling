@@ -145,6 +145,13 @@ export function TriagePage() {
               </tr>
             </thead>
             <tbody>
+              {data.repos.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="empty">
+                    还没有仓库
+                  </td>
+                </tr>
+              )}
               {data.repos.map((repo) => (
                 <tr key={repo.id}>
                   <td>
@@ -184,12 +191,12 @@ export function TriagePage() {
               {(
                 [
                   [
-                    '机器 accept',
+                    '机器放行',
                     [summary.acceptReady, '一致', true],
                     [summary.acceptNotReady, '机器放宽了', false],
                   ],
                   [
-                    '机器其他',
+                    '机器未放行',
                     [summary.otherReady, '机器卡严了', false],
                     [summary.otherNotReady, '一致', true],
                   ],
@@ -201,7 +208,8 @@ export function TriagePage() {
                     <div
                       role="cell"
                       key={text + String(agree)}
-                      className={`matrix-cell ${agree ? 'matrix-cell--agree' : 'matrix-cell--disagree'}`}
+                      // 0 不代表一致或不一致，不上色，避免空数据看起来像有结论
+                      className={`matrix-cell${value === 0 ? '' : agree ? ' matrix-cell--agree' : ' matrix-cell--disagree'}`}
                     >
                       <strong>{value}</strong>
                       <span>{text}</span>
@@ -211,15 +219,15 @@ export function TriagePage() {
               ))}
             </div>
             <p className="card-note">
-              一致率 = 对角线 {summary.acceptReady + summary.otherNotReady} / {summary.total} ={' '}
-              {rate(summary)}
+              一致率 {rate(summary)}（{summary.acceptReady + summary.otherNotReady} /{' '}
+              {summary.total}）
             </p>
           </div>
         </section>
         <section className="card">
           <header className="card-head">
             <h2>建议的效果</h2>
-            <span className="muted">建议级仓库</span>
+            <span className="muted">仅统计「建议」级仓库</span>
           </header>
           <div className="card-body">
             <div className="stat-row">
@@ -229,16 +237,20 @@ export function TriagePage() {
               </div>
               <div>
                 <span>作者补充了</span>
-                <strong className="text-done">{suggestions.edited}</strong>
+                <strong className={suggestions.edited ? 'text-done' : undefined}>
+                  {suggestions.edited}
+                </strong>
               </div>
               <div>
                 <span>未改直接 ready</span>
-                <strong className="text-failed">{suggestions.readyWithoutEdit}</strong>
+                <strong className={suggestions.readyWithoutEdit ? 'text-failed' : undefined}>
+                  {suggestions.readyWithoutEdit}
+                </strong>
               </div>
             </div>
             <p className="card-note">
-              被跳过的比例 {percent(suggestions.readyWithoutEdit, suggestions.total)}，
-              {suggestions.pending} 条仍在等作者
+              跳过率 {percent(suggestions.readyWithoutEdit, suggestions.total)} ·{' '}
+              {suggestions.pending} 条等作者补充
             </p>
           </div>
         </section>

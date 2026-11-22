@@ -240,7 +240,9 @@ export function OverviewPage() {
             ].map(([label, value]) => (
               <div key={label} className="kpi">
                 <span>{label}</span>
-                <strong className={label === '失败' ? 'text-failed' : undefined}>{value}</strong>
+                <strong className={label === '失败' && value ? 'text-failed' : undefined}>
+                  {value}
+                </strong>
               </div>
             ))}
           </div>

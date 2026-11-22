@@ -1,6 +1,7 @@
 import '../assets/style.css'
 import { useEffect, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
+import { cliCommand } from './deploy.ts'
 
 function Login() {
   const [password, setPassword] = useState('')
@@ -73,7 +74,7 @@ function Login() {
           </button>
           {showReset && (
             <div id="forgot-tip" className="forgot-tip" role="status">
-              运行 <code>workling reset-password</code> 重置
+              运行 <code>{cliCommand('reset-password')}</code> 重置
               <br />
               已登录的会话会失效
             </div>
