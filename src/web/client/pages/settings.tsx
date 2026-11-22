@@ -20,14 +20,10 @@ const sections = [
   ['labels', '标签与命令'],
 ]
 const descriptions: Record<Card, [string, string, string]> = {
-  codex: ['Codex', '实现 Issue 时使用的默认模型与推理强度', '保存后下一轮轮询生效'],
+  codex: ['Codex', '实现 Issue 时使用的默认模型与推理强度', ''],
   pi: ['Pi 与 LLM 接入', 'Pi 负责组装提示词、核对和交付 PR', '留空 Key 表示不修改'],
   git: ['提交身份', 'Pi 提交代码时的作者信息', 'PR 作者仍是仓库 token 对应的账号'],
-  executor: [
-    '执行器',
-    '切换只影响之后拉起的任务；Docker 需本机已构建镜像且已配置 LLM 接入地址',
-    '本机进程模式下容器参数不生效',
-  ],
+  executor: ['执行器', '切换只影响之后拉起的任务', '本机进程模式下容器参数不生效'],
 }
 
 export function SettingsPage() {
@@ -392,17 +388,18 @@ function SettingsCard({
             </label>
           ))}
         </div>
-        <div className="warn-box">
-          Docker 需本机已构建任务镜像，且已在「Pi 与 LLM
-          接入」填写接入地址；切换只影响之后拉起的任务
-        </div>
+        {draft.sandbox === 'docker' && (
+          <div className="warn-box">
+            Docker 需本机已构建任务镜像，且已在「Pi 与 LLM 接入」填写接入地址
+          </div>
+        )}
         {input('concurrency', '并发上限', {
           type: 'number',
           min: '1',
           max: '32',
           step: '1',
           required: true,
-          hint: '同时运行的任务数，保存后下一轮轮询生效',
+          hint: '同时运行的任务数',
         })}
         <fieldset className={`form-grid${draft.sandbox === 'none' ? ' muted-fieldset' : ''}`}>
           {input('taskImage', '镜像', { span: true, required: true })}

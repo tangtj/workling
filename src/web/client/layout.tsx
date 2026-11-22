@@ -113,83 +113,88 @@ export function Layout() {
   return (
     <>
       <div className="shell">
-        {sidebar ? (
-          <>
-            <aside className="sidebar">
-              <div className="brand">
-                <Link className="brand-mark" to="/" aria-label="Workling 首页">
-                  W
-                </Link>
-                <div>
-                  <Link to="/">
-                    <b>Workling</b>
-                  </Link>
-                  <VersionPanel version={sidebar.version} />
-                </div>
-              </div>
-              <nav className="nav">
-                {(['overview', 'issues', 'triage', 'repos', 'settings'] as const).map(
-                  (key, index) => (
-                    <Link
-                      key={key}
-                      className={active === key ? 'on' : ''}
-                      to={['/', '/issues', '/triage', '/repos', '/settings'][index]}
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        {key === 'overview' ? (
-                          <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z" />
-                        ) : key === 'issues' ? (
-                          <>
-                            <circle cx="12" cy="12" r="8" />
-                            <circle cx="12" cy="12" r="2" />
-                          </>
-                        ) : key === 'triage' ? (
-                          <path d="M4 5h16l-6 7v6l-4 2v-8z" />
-                        ) : key === 'repos' ? (
-                          <>
-                            <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" />
-                            <path d="M5 17a3 3 0 0 1 3-3h11" />
-                          </>
-                        ) : (
-                          <>
-                            <circle cx="12" cy="12" r="3" />
-                            <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
-                          </>
-                        )}
-                      </svg>
-                      {['概览', '任务', '分诊', '仓库', '设置'][index]}
-                      {key === 'triage' && sidebar.triagePending > 0 && (
-                        <span className="count triage-warn">{sidebar.triagePending} 待补充</span>
-                      )}
-                      {key === 'repos' && <span className="count">{sidebar.repos.length}</span>}
-                      {key === 'issues' && sidebar.attention > 0 && (
-                        <span className="count hot">{sidebar.attention} 待处理</span>
-                      )}
-                    </Link>
-                  ),
+        {/* 品牌与导航不依赖接口数据，加载期间照常显示，避免侧栏先空后满地跳动 */}
+        <aside className="sidebar">
+          <div className="brand">
+            <Link className="brand-mark" to="/" aria-label="Workling 首页">
+              W
+            </Link>
+            <div>
+              <Link to="/">
+                <b>Workling</b>
+              </Link>
+              {sidebar && <VersionPanel version={sidebar.version} />}
+            </div>
+          </div>
+          <nav className="nav">
+            {(['overview', 'issues', 'triage', 'repos', 'settings'] as const).map((key, index) => (
+              <Link
+                key={key}
+                className={active === key ? 'on' : ''}
+                to={['/', '/issues', '/triage', '/repos', '/settings'][index]}
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {key === 'overview' ? (
+                    <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z" />
+                  ) : key === 'issues' ? (
+                    <>
+                      <circle cx="12" cy="12" r="8" />
+                      <circle cx="12" cy="12" r="2" />
+                    </>
+                  ) : key === 'triage' ? (
+                    <path d="M4 5h16l-6 7v6l-4 2v-8z" />
+                  ) : key === 'repos' ? (
+                    <>
+                      <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" />
+                      <path d="M5 17a3 3 0 0 1 3-3h11" />
+                    </>
+                  ) : (
+                    <>
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+                    </>
+                  )}
+                </svg>
+                {['概览', '任务', '分诊', '仓库', '设置'][index]}
+                {key === 'triage' && sidebar && sidebar.triagePending > 0 && (
+                  <span className="count triage-warn">{sidebar.triagePending} 待补充</span>
                 )}
-              </nav>
-              <div className="sidebar-label">已启用仓库</div>
-              <div className="repo-nav">
-                {sidebar.repos
-                  .filter((r) => r.enabled)
-                  .map((r) => (
-                    <Link key={r.id} to={`/issues?repo=${r.id}`}>
-                      <span>{r.ref.replace(/^github:/, '')}</span>
-                      <span>{r.open}</span>
-                    </Link>
-                  ))}
-              </div>
+                {key === 'repos' && sidebar && (
+                  <span className="count">{sidebar.repos.length}</span>
+                )}
+                {key === 'issues' && sidebar && sidebar.attention > 0 && (
+                  <span className="count hot">{sidebar.attention} 待处理</span>
+                )}
+              </Link>
+            ))}
+          </nav>
+          {sidebar ? (
+            <>
+              {sidebar.repos.some((r) => r.enabled) && (
+                <>
+                  <div className="sidebar-label">已启用仓库</div>
+                  <div className="repo-nav">
+                    {sidebar.repos
+                      .filter((r) => r.enabled)
+                      .map((r) => (
+                        <Link key={r.id} to={`/issues?repo=${r.id}`}>
+                          <span>{r.ref.replace(/^github:/, '')}</span>
+                          <span>{r.open}</span>
+                        </Link>
+                      ))}
+                  </div>
+                </>
+              )}
               <div className="sidebar-bottom">
                 <div
                   className={`watch-card${sidebar.watch?.lastPollError || sidebar.watch?.workerError ? ' warn' : ''}`}
@@ -232,49 +237,51 @@ export function Layout() {
                     </div>
                   )}
                 </div>
-                <button
-                  id="theme-toggle"
-                  className="button theme-toggle"
-                  type="button"
-                  aria-label={`主题：${theme.labels[theme.mode]}`}
-                  title={`主题：${theme.labels[theme.mode]}`}
-                  onClick={theme.cycle}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+                <div className="sidebar-actions">
+                  <button
+                    id="theme-toggle"
+                    className="button theme-toggle"
+                    type="button"
+                    aria-label={`主题：${theme.labels[theme.mode]}`}
+                    title={`主题：${theme.labels[theme.mode]}`}
+                    onClick={theme.cycle}
                   >
-                    <path id="theme-icon" d={theme.icons[theme.mode]} />
-                  </svg>
-                </button>
-                <button id="logout" onClick={logout} className="button button--wide" type="button">
-                  退出登录
-                </button>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path id="theme-icon" d={theme.icons[theme.mode]} />
+                    </svg>
+                  </button>
+                  <button
+                    id="logout"
+                    onClick={logout}
+                    className="button button--wide"
+                    type="button"
+                  >
+                    退出登录
+                  </button>
+                </div>
               </div>
-            </aside>
-          </>
-        ) : (
-          <aside className="sidebar">
-            <b>Workling</b>
-            {shell.isError ? (
+            </>
+          ) : (
+            shell.isError && (
               <p role="alert">
                 加载侧栏失败{' '}
                 <button type="button" className="button" onClick={() => void shell.refetch()}>
                   重试
                 </button>
               </p>
-            ) : (
-              <p>加载中…</p>
-            )}
-          </aside>
-        )}
+            )
+          )}
+        </aside>
         <main className="main">
           <Outlet context={{ setActive } satisfies LayoutContext} />
         </main>

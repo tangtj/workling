@@ -90,24 +90,29 @@ export function StatusChips({
   const location = useLocation()
   return (
     <nav className="chips" aria-label="任务阶段">
-      {stages.map((s) => {
-        const params = new URLSearchParams(location.search)
-        params.delete('status')
-        params.set('stage', s)
-        return (
-          <Link
-            key={s}
-            className="chip"
-            to={`${location.pathname}?${params}`}
-            aria-current={selected === s ? 'page' : undefined}
-          >
-            {s === 'all' ? '全部' : s === 'attention' ? '需要处理' : stageLabels[s]}{' '}
-            <span className={s === 'attention' && (counts[s] ?? 0) > 0 ? 'chip-alert' : undefined}>
-              {counts[s] ?? 0}
-            </span>
-          </Link>
-        )
-      })}
+      {/* 阶段多达十个，空阶段只会挤占位置；「全部」和当前选中的阶段始终保留 */}
+      {stages
+        .filter((s) => s === 'all' || s === selected || (counts[s] ?? 0) > 0)
+        .map((s) => {
+          const params = new URLSearchParams(location.search)
+          params.delete('status')
+          params.set('stage', s)
+          return (
+            <Link
+              key={s}
+              className="chip"
+              to={`${location.pathname}?${params}`}
+              aria-current={selected === s ? 'page' : undefined}
+            >
+              {s === 'all' ? '全部' : s === 'attention' ? '需要处理' : stageLabels[s]}{' '}
+              <span
+                className={s === 'attention' && (counts[s] ?? 0) > 0 ? 'chip-alert' : undefined}
+              >
+                {counts[s] ?? 0}
+              </span>
+            </Link>
+          )
+        })}
     </nav>
   )
 }

@@ -83,7 +83,8 @@ export function ReposPage() {
         <div>
           <h1>仓库</h1>
           <p>
-            {repos.data.length} 个仓库 · watch 只轮询已启用仓库中带 workling:ready 的 open Issue
+            {repos.data.length} 个仓库 · watch 只轮询已启用仓库中带 <code>workling:ready</code> 的
+            open Issue
           </p>
         </div>
         <button
@@ -133,7 +134,9 @@ export function ReposPage() {
             </li>
             <li>
               <strong>03　给 Issue 打标签</strong>
-              <p>打上 workling:ready，下一轮轮询即入队执行。</p>
+              <p>
+                打上 <code>workling:ready</code>，下一轮轮询即入队执行。
+              </p>
             </li>
           </ol>
         </section>

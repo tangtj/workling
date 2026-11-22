@@ -2077,7 +2077,8 @@ legend {
   margin-left: auto;
 }
 .kv {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  /* 值列放路径等长内容，给它最多空间；说明列较短 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr) minmax(0, 0.9fr);
   overflow-wrap: anywhere;
 }
 /* 颜色与 src/serve/poll.ts 在 GitHub 上创建的标签一致 */
@@ -2189,8 +2190,18 @@ legend {
     flex-wrap: wrap;
     align-items: center;
   }
+  /* 顶栏里状态卡与按钮同高并排 */
   .watch-card {
-    padding: 6px 10px;
+    justify-content: center;
+    width: 140px;
+    min-height: 34px;
+    padding: 0 10px;
+  }
+  .sidebar-actions .button--wide {
+    flex: none;
+  }
+  .sidebar-bottom .button.theme-toggle {
+    width: 34px;
   }
   .watch-card > div:not(:first-child) {
     display: none;
@@ -2451,8 +2462,17 @@ legend {
   color: inherit;
 }
 
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+}
 .theme-toggle {
-  margin-bottom: 8px;
+  flex: none;
+  width: 34px;
+  padding: 0;
+}
+.sidebar-actions .button--wide {
+  flex: 1;
 }
 
 .badge--pr-open {
@@ -3008,6 +3028,7 @@ tr.row-details td {
   min-height: 72px;
   padding: 10px 12px;
   border-radius: 8px;
+  background: var(--surface-2);
 }
 .matrix-cell strong {
   font-size: 22px;
