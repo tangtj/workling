@@ -1642,33 +1642,37 @@ tbody tr:hover td {
   font-weight: 500;
   min-width: 108px;
   text-align: center;
+  white-space: nowrap;
+  flex: none;
 }
 
 .cmds {
   display: flex;
   flex-direction: column;
 }
+/* 名称和复制按钮占第一行，命令独占第二行：命令长短不一（Docker 部署更长），
+   与名称挤在一行时窄卡片里会被拆成逐字换行 */
 .cmd {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 10px 16px;
 }
 .cmd + .cmd {
   border-top: 1px solid var(--border);
 }
 .cmd span {
-  width: 88px;
   font-size: 13px;
   color: var(--text-2);
   flex: none;
 }
 .cmd code {
-  flex: 1;
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 设置 */
@@ -2076,6 +2080,15 @@ legend {
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
   overflow-wrap: anywhere;
 }
+/* 颜色与 src/serve/poll.ts 在 GitHub 上创建的标签一致 */
+.gh-label--needs-info {
+  background: #fbca04;
+  color: #3d2e00;
+}
+.gh-label--hold {
+  background: #bfd4f2;
+  color: #1b3a5c;
+}
 .gh-label--ready {
   background: #0e8a16;
 }
@@ -2102,13 +2115,6 @@ legend {
 .token-form {
   padding-top: 12px;
   border-top: 1px solid var(--border);
-}
-.cmd {
-  flex-wrap: wrap;
-}
-.cmd code {
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 .error-box {
   color: var(--failed);
