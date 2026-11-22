@@ -124,7 +124,7 @@ export function SettingsPage() {
               <div className="labels">
                 {data.labels.map((label) => (
                   <div className="lbl" key={label.name}>
-                    <span className={`gh-label gh-label--${label.name.slice(6)}`}>
+                    <span className={`gh-label gh-label--${label.name.replace(/^workling:/, '')}`}>
                       {label.name}
                     </span>
                     <span>{label.description}</span>
