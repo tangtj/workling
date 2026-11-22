@@ -2,7 +2,13 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { compareVersions, isPrerelease, readVersion } from '../src/runtime/version.ts'
+import {
+  compareVersions,
+  isPrerelease,
+  readVersion,
+  validVersion,
+  isEdge,
+} from '../src/runtime/version.ts'
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -44,4 +50,18 @@ test('readVersion 只读取 VERSION，缺失或空白时返回 dev', async () =>
   expect(readVersion(dir)).toBe('dev')
   await writeFile(join(dir, 'VERSION'), 'v1.2.3\n')
   expect(readVersion(dir)).toBe('v1.2.3')
+})
+
+test('版本格式接受 tag 与小写 edge，不接受 dev 或非法值', () => {
+  for (const [value, valid, edge] of [
+    ['v1.2.3', true, false],
+    ['edge-012345abcdef', true, true],
+    ['dev', false, false],
+    ['edge-012345ABCDEF', false, false],
+    ['edge-123', false, false],
+    ['../bad', false, false],
+  ] as const) {
+    expect(validVersion(value)).toBe(valid)
+    expect(isEdge(value)).toBe(edge)
+  }
 })

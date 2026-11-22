@@ -16,6 +16,15 @@ const jobSchema = Type.Object({
 })
 const infoSchema = Type.Object({
   current: Type.String(),
+  channel: Type.Optional(Type.Union([Type.Literal('stable'), Type.Literal('edge')])),
+  currentUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  target: Type.Optional(
+    Type.Union([
+      Type.Object({ version: Type.String(), notes: Type.String(), url: Type.String() }),
+      Type.Null(),
+    ]),
+  ),
+  note: Type.Optional(Type.String()),
   mode: Type.Union([Type.Literal('docker'), Type.Literal('unsupported')]),
   repoConfigured: Type.Boolean(),
   releasesUrl: Type.Union([Type.String(), Type.Null()]),
@@ -37,6 +46,10 @@ type UpdateJob = {
 }
 type Info = {
   current: string
+  channel?: 'stable' | 'edge'
+  currentUrl?: string | null
+  target?: { version: string; notes: string; url: string } | null
+  note?: string
   mode?: 'docker' | 'unsupported'
   repoConfigured?: boolean
   releasesUrl?: string | null
@@ -110,6 +123,7 @@ export function VersionPanel({ version }: { version: string }) {
   const controller = useRef<AbortController>(null),
     watching = useRef(false),
     checkRunning = useRef(false),
+    recheck = useRef(false),
     busyRef = useRef(false),
     checkedRef = useRef(false)
   const timers = useRef(new Map<ReturnType<typeof setTimeout>, () => void>())
@@ -149,12 +163,17 @@ export function VersionPanel({ version }: { version: string }) {
   }
   const local = async () => merge(await api<Info>('version?local=1'))
   const check = async (force = false) => {
-    if (checkRunning.current || busyRef.current || controller.current?.signal.aborted) return
+    if (controller.current?.signal.aborted) return
+    if (checkRunning.current || busyRef.current) {
+      if (force) recheck.current = true
+      return
+    }
     checkRunning.current = true
     setChecking(true)
     try {
       merge({
         releaseError: undefined,
+        note: undefined,
         ...(await api<Info>(`version${force ? '?force=1' : ''}`)),
       })
       checkedRef.current = true
@@ -164,6 +183,10 @@ export function VersionPanel({ version }: { version: string }) {
     } finally {
       checkRunning.current = false
       setChecking(false)
+      if (recheck.current && !busyRef.current) {
+        recheck.current = false
+        void check(true)
+      }
     }
   }
   const watch = async (job: UpdateJob | null) => {
@@ -226,8 +249,20 @@ export function VersionPanel({ version }: { version: string }) {
       setBusy(false)
       setRefreshPaused(false)
       setWaiting(false)
+      if (recheck.current) {
+        recheck.current = false
+        void check(true)
+      }
     }
   }
+  useEffect(() => {
+    const refresh = () => {
+      checkedRef.current = false
+      void check(true)
+    }
+    window.addEventListener('update-channel-changed', refresh)
+    return () => window.removeEventListener('update-channel-changed', refresh)
+  }, [])
   useEffect(() => {
     controller.current = new AbortController()
     void local()
@@ -297,7 +332,7 @@ export function VersionPanel({ version }: { version: string }) {
     if (notes.current && !expanded)
       setTruncated(notes.current.scrollHeight > notes.current.clientHeight)
   }, [info.latest, open, expanded])
-  const available = Boolean(info.hasUpdate && info.current !== 'dev' && info.latest)
+  const available = Boolean(info.hasUpdate && info.current !== 'dev' && info.target)
   let badge = 'info',
     description = checked ? '已是最新版本' : '尚未检查更新',
     detail = ''
@@ -316,7 +351,7 @@ export function VersionPanel({ version }: { version: string }) {
     detail = info.latest ? `最新发布 ${info.latest.tag}` : ''
   } else if (available) {
     badge = 'arrow'
-    description = `发现新版本 ${info.latest!.tag}`
+    description = `发现新版本 ${info.target!.version}`
   } else if (checked && info.latest) badge = 'check'
   else if (checked) description = '暂无可用发布'
   const prepare = async () => {
@@ -329,8 +364,8 @@ export function VersionPanel({ version }: { version: string }) {
         void watch(data.job)
         return
       }
-      if (!data.latest?.tag) throw new Error('目标版本不可用，请重新检查更新')
-      setSelection(data.latest.tag)
+      if (!data.target?.version) throw new Error('目标版本不可用，请重新检查更新')
+      setSelection(data.target.version)
       setMode('drain')
       setError('')
       setProgress(false)
@@ -349,7 +384,7 @@ export function VersionPanel({ version }: { version: string }) {
     setBusy(true)
     setError('')
     try {
-      const result = await api<{ job: UpdateJob }>('update', { mode, tag: selection })
+      const result = await api<{ job: UpdateJob }>('update', { mode, target: selection })
       void watch(result.job)
     } catch (e) {
       setError(message(e))
@@ -369,7 +404,7 @@ export function VersionPanel({ version }: { version: string }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="version-popover"
-        title={available ? `发现新版本 ${info.latest!.tag}` : '版本与更新'}
+        title={available ? `发现新版本 ${info.target!.version}` : '版本与更新'}
         onClick={() => {
           if (open) {
             setOpen(false)
@@ -394,7 +429,7 @@ export function VersionPanel({ version }: { version: string }) {
           hidden={!open}
         >
           <header className="version-head">
-            <b>当前版本</b>
+            <b>当前版本 · {info.channel === 'edge' ? '尝鲜版' : '稳定版'}</b>
             <button
               className={`version-icon-button${checking ? ' loading' : ''}`}
               type="button"
@@ -407,16 +442,28 @@ export function VersionPanel({ version }: { version: string }) {
           </header>
           <div className="version-body" aria-live="polite">
             <div className="version-number">
-              <strong>{info.current}</strong>
+              <strong>
+                {info.currentUrl ? (
+                  <a href={info.currentUrl} target="_blank" rel="noopener noreferrer">
+                    {info.current}
+                  </a>
+                ) : (
+                  info.current
+                )}
+              </strong>
               <span className={`version-badge version-badge--${badge}`}>
                 <Icon name={badge} />
               </span>
             </div>
-            <p className="muted">{description}</p>
+            <p className="muted">{!available && info.note ? info.note : description}</p>
             <p className="small muted" hidden={!detail}>
               {detail}
             </p>
-            <div hidden={!info.latest || !(available || info.current === 'dev')}>
+            <div
+              hidden={
+                info.channel === 'edge' || !info.latest || !(available || info.current === 'dev')
+              }
+            >
               <p ref={notes} className={`version-notes${expanded ? ' expanded' : ''}`}>
                 {info.latest?.body || ''}
               </p>
@@ -444,7 +491,7 @@ export function VersionPanel({ version }: { version: string }) {
               disabled={busy || Boolean(selection)}
               onClick={() => void prepare()}
             >
-              更新到 {info.latest?.tag || ''}
+              更新到 {info.target?.version || ''}
             </button>
             <a
               className="version-link"

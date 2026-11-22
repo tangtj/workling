@@ -209,3 +209,14 @@ test('镜像版本更高时清除过期 lastError 与 lastSuccess，并刷新 up
   expect(state).not.toHaveProperty('lastSuccess')
   expect(Date.parse(state.updatedAt)).toBeGreaterThan(Date.parse(updatedAt))
 })
+
+test('edge 仅在镜像版本匹配记录时启用，否则清除 current', async () => {
+  for (const matches of [true, false]) {
+    const f = await fixture('v1.0.0', 'edge-012345abcdef')
+    writeState(f.appHome, { ...f.state, image: matches ? 'v1.0.0' : 'v0.9.0' })
+    const result = await f.execute()
+    expect(result.code).toBe(0)
+    expect(result.stdout.split('\n')[0]).toBe(matches ? f.target : f.imageRoot)
+    expect(existsSync(join(f.appHome, 'current'))).toBe(matches)
+  }
+})

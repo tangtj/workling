@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
-import { TAG_PATTERN } from '../../runtime/version.ts'
+import { VERSION_PATTERN } from '../../runtime/version.ts'
 import {
   getJob,
   cancelJob,
@@ -13,7 +13,7 @@ import type { AppDeps } from '../app.ts'
 
 const mode = Type.Optional(Type.Union([Type.Literal('drain'), Type.Literal('now')]))
 const updateSchema = Type.Object(
-  { tag: Type.String({ pattern: TAG_PATTERN }), mode },
+  { target: Type.String({ pattern: VERSION_PATTERN }), mode },
   { additionalProperties: false },
 )
 
@@ -43,7 +43,12 @@ export function systemRoutes({ db, options }: AppDeps): Hono {
     }
     if (!Value.Check(updateSchema, body)) return c.json({ error: '参数无效' }, 400)
     try {
-      const job = await startUpdate({ db, data: options.workspace, tag: body.tag, mode: body.mode })
+      const job = await startUpdate({
+        db,
+        data: options.workspace,
+        target: body.target,
+        mode: body.mode,
+      })
       return c.json({ job }, 202)
     } catch (error) {
       const status =

@@ -20,9 +20,17 @@ import { issues } from '../db/schema.ts'
 import { ROOT } from '../runtime/paths.ts'
 import { run } from '../runtime/process.ts'
 import type { Command } from '../runtime/types.ts'
-import { readVersion, compareVersions, validTag } from '../runtime/version.ts'
+import { readVersion, compareVersions, validVersion, isEdge } from '../runtime/version.ts'
 import { redact } from '../contract/report.ts'
-import { downloadTarball, listReleases, repoPath, type UpdateFetch } from './github.ts'
+import {
+  downloadTarball,
+  listReleases,
+  repoPath,
+  getBranchHead,
+  compareRefs,
+  type UpdateFetch,
+} from './github.ts'
+import { readUpdateChannel } from '../config/update.ts'
 import { readState, writeState, type UpdateState } from './state.ts'
 
 export type UpdateJob = {
@@ -103,6 +111,11 @@ export function localVersionInfo(db: WorklingDatabase, root = ROOT) {
   }
   return {
     releasesUrl,
+    channel: readUpdateChannel(db),
+    currentUrl:
+      isEdge(readVersion(root)) && releasesUrl
+        ? `${releasesUrl.slice(0, -'/releases'.length)}/commit/${readVersion(root).slice(5)}`
+        : null,
     current: readVersion(root),
     image: mode ? readVersion(mode.imageRoot) : readVersion(root),
     mode: mode ? ('docker' as const) : ('unsupported' as const),
@@ -119,33 +132,70 @@ export async function versionInfo({
   db,
   force = false,
   fetch,
+  root = ROOT,
 }: {
   db: WorklingDatabase
   force?: boolean
   fetch?: UpdateFetch
+  root?: string
 }) {
-  const local = localVersionInfo(db)
+  const local = localVersionInfo(db, root)
   let releases: Awaited<ReturnType<typeof listReleases>> = []
   let releaseError: string | undefined
-  if (local.repoConfigured) {
+  let target: { version: string; notes: string; url: string } | null = null
+  let ref: string | undefined
+  let note: string | undefined
+  const repo = process.env.WORKLING_UPDATE_REPO
+  if (local.current === 'dev') note = '开发版本无法检查更新'
+  if (repo) {
     try {
-      releases = await listReleases({
-        repo: process.env.WORKLING_UPDATE_REPO!,
-        token: process.env.WORKLING_UPDATE_TOKEN,
-        force,
-        fetch,
-      })
+      const options = { repo, token: process.env.WORKLING_UPDATE_TOKEN, fetch, force }
+      if (local.channel === 'stable') {
+        releases = await listReleases(options)
+        const latest = releases[0]
+        if (latest && local.current !== 'dev') {
+          const eligible = isEdge(local.current)
+            ? ['ahead', 'identical'].includes(
+                (await compareRefs({ ...options, base: local.current.slice(5), head: latest.tag }))
+                  .status,
+              )
+            : compareVersions(latest.tag, local.current) > 0
+          if (eligible) {
+            target = { version: latest.tag, notes: latest.body, url: latest.url }
+            ref = latest.tag
+          } else if (isEdge(local.current))
+            note = '当前尝鲜版比最新正式版新，下一个正式版发布后会出现在这里'
+        }
+      } else if (local.current !== 'dev') {
+        const head = await getBranchHead({ ...options, branch: 'main' })
+        const comparison = await compareRefs({
+          ...options,
+          base: isEdge(local.current) ? local.current.slice(5) : local.current,
+          head: head.sha,
+        })
+        if (comparison.status === 'ahead') {
+          ref = head.sha
+          target = {
+            version: `edge-${head.sha.slice(0, 12)}`,
+            notes: '',
+            url: `https://github.com/${repoPath(repo)}/commit/${head.sha}`,
+          }
+        } else if (comparison.status !== 'identical')
+          note = '当前版本不在 main 最新提交之前，无法更新'
+      }
     } catch (error) {
       releaseError = safeError(error)
     }
   }
-  const latest = releases[0] ?? null
   return {
     ...local,
     releases,
-    latest,
-    hasUpdate: Boolean(latest && compareVersions(latest.tag, local.current) > 0),
+    latest: releases[0] ?? null,
+    target,
+    hasUpdate: target !== null,
+    ...(note ? { note } : {}),
     ...(releaseError ? { releaseError } : {}),
+    ...(ref ? { ref } : {}),
   }
 }
 
@@ -226,7 +276,7 @@ async function cleanReleases(appHome: string, state: UpdateState) {
     if (entry.name.endsWith('.partial'))
       await rm(join(root, entry.name), { recursive: true, force: true })
   }
-  const dirs = entries.filter((entry) => entry.isDirectory() && validTag(entry.name))
+  const dirs = entries.filter((entry) => entry.isDirectory() && validVersion(entry.name))
   const others = dirs.filter((entry) => ![state.current, state.previous].includes(entry.name))
   const dated = await Promise.all(
     others.map(async (entry) => ({
@@ -243,7 +293,7 @@ async function backupDatabase(data: string, version: string) {
   const dir = join(data, 'backups')
   await mkdir(dir, { recursive: true })
   const name = `workling-${new Date().toISOString().replace(/[^0-9TZ]/g, '')}-${version}-${crypto.randomUUID()}.db`
-  if (!/^workling-[0-9TZ]+-(?:dev|v[0-9A-Za-z.-]+)-[0-9a-f-]+\.db$/.test(name))
+  if (!/^workling-[0-9TZ]+-(?:dev|v[0-9A-Za-z.-]+|edge-[0-9a-f]{12})-[0-9a-f-]+\.db$/.test(name))
     throw new Error('数据库备份路径无效')
   const path = join(dir, name)
   const sqlite = new Database(join(data, 'workling.db'), { readonly: false, strict: true })
@@ -298,7 +348,7 @@ async function executeJob(
 }
 
 export async function startUpdate({
-  tag,
+  target: tag,
   db,
   mode: taskMode = 'drain',
   drainIntervalMs = 5000,
@@ -307,19 +357,17 @@ export async function startUpdate({
   exit = process.exit,
   root = ROOT,
   data = '/data',
-}: { tag: string } & UpdateOptions): Promise<UpdateJob> {
+}: { target: string } & UpdateOptions): Promise<UpdateJob> {
   const mode = requireMode()
-  if (!validTag(tag)) throw updateError('非法 tag', 400)
+  if (!validVersion(tag)) throw updateError('非法版本', 400)
   await lock(mode.appHome)
   try {
     const repo = process.env.WORKLING_UPDATE_REPO
     if (!repo) throw updateError('请在 .env 配置 WORKLING_UPDATE_REPO', 400)
-    const releases = await listReleases({ repo, token: process.env.WORKLING_UPDATE_TOKEN, fetch })
-    if (
-      !releases.some((release) => release.tag === tag) ||
-      compareVersions(tag, readVersion(root)) <= 0
-    )
-      throw updateError('只能升级到 Release 列表中比当前版本更新的版本', 400)
+    const checked = await versionInfo({ db, fetch, force: true, root })
+    if (checked.target?.version !== tag || !checked.ref)
+      throw updateError('目标版本已变化，请重新检查更新', 400)
+    const ref = checked.ref
     const active: UpdateJob = {
       kind: 'update',
       tag,
@@ -346,7 +394,7 @@ export async function startUpdate({
           active.logs.push(`下载 ${tag}`)
           await downloadTarball({
             repo,
-            tag,
+            ref,
             token: process.env.WORKLING_UPDATE_TOKEN,
             dest: tarball,
             fetch,
@@ -378,6 +426,18 @@ export async function startUpdate({
                 `该版本修改了运行环境（${file}），不能在线更新，请在服务器执行 ./update.sh ${tag} 拉取新镜像`,
               )
           }
+          const contract = async (dir: string) =>
+            (await readFile(join(dir, 'src/contract/spec.ts'), 'utf8').catch(() => '')).match(
+              /export const CONTRACT_VERSION = (\d+)/,
+            )?.[1]
+          const [downloadedContract, imageContract] = await Promise.all([
+            contract(partial),
+            contract(mode.imageRoot),
+          ])
+          if (!downloadedContract || !imageContract || downloadedContract !== imageContract)
+            throw new Error(
+              '该版本修改了任务契约（worker 镜像需要同步更新），不能在线更新，请在服务器执行 ./update.sh 拉取新镜像',
+            )
           active.logs.push('安装生产依赖')
           await command(
             ['bun', 'install', '--frozen-lockfile', '--ignore-scripts', '--production'],
@@ -405,6 +465,7 @@ export async function startUpdate({
           const lastSuccess = readState(mode.appHome)?.lastSuccess
           const state: UpdateState = {
             ...(lastSuccess ? { lastSuccess } : {}),
+            image: readVersion(mode.imageRoot),
             current: tag,
             previous: current,
             previousIsImage: realpathSync(root) === realpathSync(mode.imageRoot),

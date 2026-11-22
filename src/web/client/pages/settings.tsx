@@ -13,6 +13,7 @@ const sections = [
   ['pi', 'Pi 与 LLM'],
   ['git', '提交身份'],
   ['executor', '执行器'],
+  ['update', '更新渠道'],
   ['password', '管理密码'],
   ['env', '启动参数'],
   ['labels', '标签与命令'],
@@ -72,7 +73,7 @@ export function SettingsPage() {
       <div className="settings">
         <nav className="subnav" aria-label="设置分区">
           {sections.map(([id, title], index) => (
-            <a key={id} className={index === 5 ? 'subnav-divider' : ''} href={`#set-${id}`}>
+            <a key={id} className={index === 6 ? 'subnav-divider' : ''} href={`#set-${id}`}>
               {title}
             </a>
           ))}
@@ -81,6 +82,7 @@ export function SettingsPage() {
           {(['codex', 'pi', 'git', 'executor'] as const).map((card) => (
             <SettingsCard key={card} card={card} data={data} notice={setNotice} />
           ))}
+          <UpdateCard data={data} notice={setNotice} />
           <PasswordCard notice={setNotice} />
           <section className="card" id="set-env">
             <div className="card-head">
@@ -522,6 +524,74 @@ function PasswordCard({ notice }: { notice: (s: string) => void }) {
           {saved && <span className="small muted">已保存</span>}
           <button className="button button--primary button--sm" type="submit" disabled={pending}>
             修改密码
+          </button>
+        </div>
+        <div className="error-box" role="alert" hidden={!error}>
+          {error}
+        </div>
+      </form>
+    </section>
+  )
+}
+
+function UpdateCard({ data, notice }: { data: SettingsData; notice: (s: string) => void }) {
+  const client = useQueryClient()
+  const [channel, setChannel] = useState(data.update.channel)
+  const [unsupported, setUnsupported] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    setChannel(data.update.channel)
+  }, [data.update.channel])
+  useEffect(() => {
+    void fetch('/api/system/version?local=1')
+      .then((r) => r.json())
+      .then((v) => setUnsupported(v.mode !== 'docker'))
+      .catch(() => {})
+  }, [])
+  return (
+    <section id="set-update">
+      <form
+        className="card"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void (async () => {
+            try {
+              await repoRequest('/api/settings/update', 'PATCH', { channel })
+              await client.invalidateQueries({ queryKey: ['settings'] })
+              window.dispatchEvent(new Event('update-channel-changed'))
+              setError('')
+              notice('设置已保存')
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            }
+          })()
+        }}
+      >
+        <div className="card-head">
+          <h2>更新渠道</h2>
+        </div>
+        <div className="choice">
+          {(['stable', 'edge'] as const).map((value) => (
+            <label className={`opt${channel === value ? ' on' : ''}`} key={value}>
+              <input
+                type="radio"
+                name="channel"
+                checked={channel === value}
+                onChange={() => setChannel(value)}
+              />
+              <span>
+                <b>{value === 'stable' ? '稳定版（stable）' : '尝鲜版（edge）'}</b>
+                <small>
+                  {value === 'stable' ? '只更新到正式 Release' : '更新到 main 最新提交，可能不稳定'}
+                </small>
+              </span>
+            </label>
+          ))}
+        </div>
+        {unsupported && <p>当前部署方式不支持在线更新</p>}
+        <div className="card-foot">
+          <button className="button button--primary button--sm" type="submit">
+            保存
           </button>
         </div>
         <div className="error-box" role="alert" hidden={!error}>
