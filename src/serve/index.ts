@@ -26,6 +26,7 @@ import { ensureWorkerImage } from '../executor/worker-image.ts'
 import { checkDockerHost } from '../executor/docker-host.ts'
 import { observeFeedback, type FeedbackState } from './feedback.ts'
 import { triageIssues, type TriageState } from './triage.ts'
+import { waitForNext } from './wait.ts'
 type Log = (message: string) => void
 
 export type ServeStatus = {
@@ -38,19 +39,6 @@ export type ServeStatus = {
   lastPollError: string | null
   /** docker 执行器的 worker 镜像不兼容时的原因；此时暂停拉起新任务。 */
   workerError?: string | null
-}
-
-function waitForNext(seconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) return resolve()
-    const done = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', done)
-      resolve()
-    }
-    const timer = setTimeout(done, seconds * 1000)
-    signal.addEventListener('abort', done, { once: true })
-  })
 }
 
 export async function serve({
@@ -157,7 +145,9 @@ export async function serve({
     let wasPaused = false
     let warnedRootful = false
     const pulledImages = new Set<string>()
+    let previousWake: Awaited<ReturnType<typeof waitForNext>> = 'interval'
     while (!signal.aborted) {
+      let expanded = 0
       const pi = readPiSettings(db)
       const executorSettings = readExecutorSettings(db)
       try {
@@ -171,7 +161,7 @@ export async function serve({
         if (!signal.aborted) log(`PR 同步失败：${errorMessage(error)}`)
       }
       try {
-        await pollOnce({ db, command, signal, log, labeledRepos })
+        ;({ expanded } = await pollOnce({ db, command, signal, log, labeledRepos }))
         status.lastPollAt = new Date()
         status.lastPollError = null
       } catch (error) {
@@ -236,7 +226,15 @@ export async function serve({
           log(`拉起任务失败：${errorMessage(error)}`)
         }
       }
-      if (!signal.aborted) await waitForNext(settings.interval, signal)
+      if (!signal.aborted) {
+        previousWake = await waitForNext({
+          seconds: settings.interval,
+          signal,
+          db,
+          immediate: expanded > 0 && previousWake !== 'immediate',
+        })
+        if (previousWake === 'finished') log('有任务结束，提前开始下一轮')
+      }
     }
   } finally {
     server?.stop(true)
