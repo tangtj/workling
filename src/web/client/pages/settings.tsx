@@ -5,6 +5,7 @@ import type { SettingsData } from '../../settings.ts'
 import { executorSettingsSchema, piSettingsSchema } from '../../settings.ts'
 import * as Value from 'typebox/value'
 import { shellKey, usePageLayout } from '../layout.tsx'
+import { cliCommand, startCommand } from '../deploy.ts'
 import { repoRequest } from '../repos.ts'
 import { cardBody, cardDraft, isDirty, settingsOptions, syncDraft, type Card } from '../settings.ts'
 
@@ -137,9 +138,9 @@ export function SettingsPage() {
               </div>
               <div className="cmds">
                 {[
-                  ['启动服务', 'bun run start'],
-                  ['取消任务', 'workling cancel github:owner/repo#12'],
-                  ['重置密码', 'workling reset-password'],
+                  ['启动服务', startCommand],
+                  ['取消任务', cliCommand('cancel github:owner/repo#12')],
+                  ['重置密码', cliCommand('reset-password')],
                 ].map(([label, command]) => (
                   <CopyCommand key={command} label={label} command={command} />
                 ))}
