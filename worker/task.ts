@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { readPiOutcome, writeOutResult } from '../src/contract/out.ts'
+import { readPiOutcome, readReview, writeOutResult } from '../src/contract/out.ts'
 import { readLlmSecrets } from '../src/contract/secrets.ts'
 import { CONTRACT_VERSION, readSpec } from '../src/contract/spec.ts'
 import { createPiEventFormatter, duration, time } from './pi-events.ts'
@@ -112,17 +112,42 @@ export async function runTask(options: {
   const branchStatus = spec.repo.continued
     ? `接续此前运行的工作分支，当前末端 ${spec.repo.baseRef}`
     : `基于 ${spec.repo.baseRef}`
-  const instruction = `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
+  const review = spec.kind === 'review'
+  const sandbox = env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'
+  const docBranch = spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''
+  const instruction = review
+    ? `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
 仓库目录：${repo}
-任务分支：${spec.repo.branch}（已检出，${branchStatus}）${spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''}
+评审分支：${spec.repo.branch}（已检出）
+评审范围：git diff ${spec.repo.baseRef} HEAD${docBranch}
+运行类型：review
+任务目录：${dir}
+Issue 内容：${issuePath}
+上下文：${join(dir, 'input', 'pr.md')}、docs.md、runs.md（workling 生成：PR 正文与反馈、文档清单、历次运行）
+评审用 codex 模型：${spec.model.codex}
+评审用 codex 推理强度：${spec.model.effort}
+codex 沙箱模式：${sandbox === 'workspace-write' ? 'read-only' : sandbox}
+按系统提示中的评审约定评审这个改动。`
+    : `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
+仓库目录：${repo}
+任务分支：${spec.repo.branch}（已检出，${branchStatus}）${docBranch}
 运行类型：${spec.kind}
 任务目录：${dir}
 Issue 内容：${issuePath}
 上下文：${join(dir, 'input', 'runs.md')}、branch.md、pr.md、docs.md、feedback.md（workling 生成：历次运行、工作分支、PR 反馈、文档清单）
 默认 codex 模型：${spec.model.codex}
 默认 codex 推理强度：${spec.model.effort}
-codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
+codex 沙箱模式：${sandbox}
 按系统提示中的 workling 工作约定完成这个 Issue。`
+  const { baseRef, branch } = spec.repo
+  const branchRef = `refs/heads/${branch}`
+  const headArgs = ['rev-parse', '--verify', branchRef]
+  const reviewHead = review ? await git(headArgs) : undefined
+  if (review) {
+    // 单独运行时可复用目录，上一轮的结论不能充当本轮的产出。
+    await rm(join(outDir, 'result.json'), { force: true })
+    await rm(join(outDir, 'review.json'), { force: true })
+  }
   // watch 对 task 进程组发出的信号需要同时到达 Pi。
   log('拉起 Pi')
   const started = now().getTime()
@@ -137,7 +162,7 @@ codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
       '--session-dir',
       join(dir, 'pi-session'),
       '--append-system-prompt',
-      join(import.meta.dirname, 'configs/AGENTS.md'),
+      join(import.meta.dirname, 'configs', review ? 'REVIEW.md' : 'AGENTS.md'),
       '--extension',
       join(import.meta.dirname, 'configs/extensions/no-bash-timeout.ts'),
       ...modelArgs,
@@ -170,14 +195,31 @@ codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
   try {
     // Pi 即使因信号退出，也保留已经完成的本地提交和实际退出状态。
     const outputGit = (args: string[]) => command(['git', ...args], { cwd: repo, env })
-    const { baseRef, branch } = spec.repo
-    const ref = `refs/heads/${branch}`
-    const range = `${baseRef}..${ref}`
+    const bundle = join(outDir, 'commits.bundle')
+    if (review) {
+      await rm(bundle, { force: true })
+      const head = await outputGit(headArgs)
+      if (head !== reviewHead) {
+        const error = '评审运行不应产生提交'
+        log(error)
+        return { ...status, error }
+      }
+      await readReview(outDir)
+      await writeOutResult(outDir, {
+        contract: CONTRACT_VERSION,
+        outcome: 'reviewed',
+        branch,
+        head,
+        commits: 0,
+      })
+      return status
+    }
+
+    const range = `${baseRef}..${branchRef}`
     const count = await outputGit(['rev-list', '--count', range])
     const commits = Number(count)
     if (!/^\d+$/.test(count) || !Number.isSafeInteger(commits)) throw new Error('提交数量无效')
-    const bundle = join(outDir, 'commits.bundle')
-    const head = await outputGit(['rev-parse', '--verify', ref])
+    const head = await outputGit(headArgs)
     const report = await readFile(join(dir, 'report.md'), 'utf8').catch(() => '')
     const outcome = (await readPiOutcome(outDir)) ?? reportOutcome(report)
     if (commits > 0 && outcome !== 'answered') await outputGit(['bundle', 'create', bundle, range])
@@ -190,7 +232,7 @@ codex 沙箱模式：${env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'}
       commits,
     })
   } catch (cause) {
-    const error = `生成任务产出失败：${redact(errorMessage(cause), secrets)}`
+    const error = `生成${review ? '评审' : '任务'}产出失败：${redact(errorMessage(cause), secrets)}`
     log(error)
     return { ...status, error }
   }

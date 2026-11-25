@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
-import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as taskDir from '../src/contract/result.ts'
@@ -178,4 +178,50 @@ test('samples 列出内置样例', async () => {
   const lines = log.mock.calls.map((call) => String(call[0]))
   expect(lines).toContain('add-function\timplement\t增加 subtract 函数')
   expect(lines.some((line) => line.startsWith('answer-question\t'))).toBe(true)
+  expect(lines).toContain('review-diff\treview\t增加 sumRange 函数')
+})
+
+test('prepare review-diff 保留基点并把评审改动提交到任务分支', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'workling-review-sample-'))
+  try {
+    spyOn(console, 'log').mockImplementation(() => {})
+    const dir = join(root, 'run')
+    expect(await main(['prepare', 'review-diff', dir, '--effort', 'low'])).toBe(0)
+    const spec = await readSpec(dir)
+    expect(spec).toMatchObject({
+      kind: 'review',
+      issue: { ref: 'github:example/calc#2' },
+      model: { effort: 'low' },
+    })
+    const git = (...args: string[]) => run(['git', ...args], { cwd: join(dir, 'repo') })
+    expect(await git('symbolic-ref', 'HEAD')).toBe('refs/heads/workling/2-sum-range')
+    expect(await git('log', '--reverse', '--format=%s')).toBe('Sample base\nSample change')
+    expect(await git('rev-parse', 'HEAD^')).toBe(spec.repo.baseRef)
+    expect(await git('diff', spec.repo.baseRef, 'HEAD', '--', 'src/range.ts')).toContain(
+      '+export function sumRange',
+    )
+    expect(await git('diff', '--name-status', spec.repo.baseRef, 'HEAD')).toContain(
+      'A\ttest/sum-range.test.ts',
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('prepare 按样例类型校验 change/ 目录', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'workling-review-layout-'))
+  try {
+    const path = join(root, 'sample.json')
+    const sample = await Bun.file(
+      join(import.meta.dirname, '../worker/samples/add-function/sample.json'),
+    ).json()
+    const dest = join(root, 'run')
+    await writeFile(path, JSON.stringify({ ...sample, kind: 'review' }))
+    await expect(main(['prepare', root, dest])).rejects.toThrow('review 样例必须包含 change/ 目录')
+    await mkdir(join(root, 'change'))
+    await writeFile(path, JSON.stringify(sample))
+    await expect(main(['prepare', root, dest])).rejects.toThrow('只有 review 样例可以包含 change/')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

@@ -28,6 +28,12 @@ test('writeSpec 写入权限为 0600 的契约，readSpec 返回原值', async (
   expect((await stat(join(dir, 'spec.json'))).mode & 0o777).toBe(0o600)
 })
 
+test('review spec 使用契约版本 2 并能读回', async () => {
+  const review = { ...spec, kind: 'review' } as const
+  await writeSpec(dir, review)
+  expect(await readSpec(dir)).toEqual({ ...review, contract: 2 })
+})
+
 test.each([
   ['文件缺失', undefined, '缺少 spec.json'],
   ['不是 JSON', '{"contract":', 'spec.json 不是有效的 JSON'],

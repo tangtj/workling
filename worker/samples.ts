@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, stat } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
@@ -26,6 +26,10 @@ export async function readSample(dir: string) {
     throw new Error(`样例 ${dir} 缺少有效的 sample.json`, { cause })
   }
   if (!Value.Check(sampleSchema, value)) throw new Error(`样例 ${dir} 的 sample.json 结构无效`)
+  const change = await lstat(join(dir, 'change'), { throwIfNoEntry: false })
+  if (value.kind === 'review' && !change?.isDirectory())
+    throw new Error('review 样例必须包含 change/ 目录')
+  if (value.kind !== 'review' && change) throw new Error('只有 review 样例可以包含 change/')
   return value
 }
 
@@ -36,7 +40,7 @@ export function resolveSample(name: string): string {
 
 /**
  * 把样例展开成一个可以直接 `run` 的运行目录：复制 input/，把 repo/ 提交成 Git 工作副本并检出任务分支，
- * 写入 spec.json。固定提交时间，同一样例每次得到相同的基点，便于比较不同提示词或模型的产出。
+ * 评审样例再覆盖并提交 change/，最后写入 spec.json。固定提交时间便于比较不同提示词或模型的产出。
  */
 export async function prepareSample({
   sample,
@@ -76,6 +80,11 @@ export async function prepareSample({
   await git('commit', '--quiet', '--message', 'Sample base')
   const baseRef = await git('rev-parse', 'HEAD')
   await git('checkout', '--quiet', '-b', config.branch)
+  if (config.kind === 'review') {
+    await cp(join(sample, 'change'), repo, { recursive: true })
+    await git('add', '--all')
+    await git('commit', '--quiet', '--message', 'Sample change')
+  }
   const spec: Spec = {
     contract: CONTRACT_VERSION,
     kind: config.kind,
