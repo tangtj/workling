@@ -156,6 +156,13 @@ export function dockerExecutor({
     async finish(run) {
       if (!run.container) return
       try {
+        await command(['docker', 'container', 'inspect', '--format', '{{.Id}}', run.container], {
+          quietStderr: true,
+        })
+      } catch {
+        return
+      }
+      try {
         // Command 默认继承 stderr；固定脚本把 Docker 的两个日志流合并，容器名作为参数传递。
         const output = await command(['sh', '-c', 'docker logs "$1" 2>&1', 'sh', run.container])
         await writeFile(join(run.taskDir, 'container.log'), output)

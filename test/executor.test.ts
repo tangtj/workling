@@ -244,12 +244,13 @@ test('docker finish 写入容器日志且保留任务日志后删除容器，两
     log: (line) => logs.push(line),
     command: async (args) => {
       calls.push(args)
-      if (fail) throw new Error('unavailable')
+      if (fail && args[1] !== 'container') throw new Error('unavailable')
       return args[0] === 'sh' ? 'stdout\nstderr' : ''
     },
   })
   await executor.finish(handle)
   expect(calls).toEqual([
+    ['docker', 'container', 'inspect', '--format', '{{.Id}}', handle.container!],
     ['sh', '-c', 'docker logs "$1" 2>&1', 'sh', handle.container!],
     ['docker', 'rm', '-f', handle.container!],
   ])
@@ -261,7 +262,36 @@ test('docker finish 写入容器日志且保留任务日志后删除容器，两
     'workling-run-12 收集日志失败：unavailable',
     'workling-run-12 删除容器失败：unavailable',
   ])
-  expect(calls).toHaveLength(4)
+  expect(calls).toHaveLength(6)
+})
+
+test('docker finish 容器不存在时静默返回，不收集日志、写文件或删除容器', async () => {
+  const { config, handle } = await scenario()
+  const calls: string[][] = []
+  const logs: string[] = []
+  const executor = dockerExecutor({
+    config,
+    log: (line) => logs.push(line),
+    command: async (args, options) => {
+      calls.push(args)
+      expect(options?.quietStderr).toBe(true)
+      throw new Error('No such container')
+    },
+  })
+  await executor.finish(handle)
+  await executor.finish(handle)
+  expect(calls).toEqual(
+    Array.from({ length: 2 }, () => [
+      'docker',
+      'container',
+      'inspect',
+      '--format',
+      '{{.Id}}',
+      handle.container!,
+    ]),
+  )
+  expect(await Bun.file(join(handle.taskDir, 'container.log')).exists()).toBe(false)
+  expect(logs).toEqual([])
 })
 
 test('docker finish 的固定 shell 脚本实际合并 stdout 与 stderr', async () => {
@@ -347,7 +377,7 @@ test('createExecutor 按配置启动进程或 Docker，日志错误交给传入�
     },
     (line) => logs.push(line),
   ).finish(handle)
-  expect(logs).toHaveLength(2)
+  expect(logs).toHaveLength(0)
 })
 
 test.each(['none', 'docker'] as const)(
@@ -365,6 +395,7 @@ test.each(['none', 'docker'] as const)(
     expect(calls).toEqual([
       ['docker', 'inspect', '-f', '{{.State.Running}} {{.State.OOMKilled}}', handle.container!],
       ['docker', 'kill', '-s', 'SIGTERM', handle.container!],
+      ['docker', 'container', 'inspect', '--format', '{{.Id}}', handle.container!],
       ['sh', '-c', 'docker logs "$1" 2>&1', 'sh', handle.container!],
       ['docker', 'rm', '-f', handle.container!],
     ])
@@ -376,7 +407,7 @@ test.each(['none', 'docker'] as const)(
     await executor.finish(processRun)
     expect(alive).toHaveBeenCalledWith(123, handle.taskDir)
     expect(kill).toHaveBeenCalledWith(123, 'SIGKILL')
-    expect(calls).toHaveLength(4)
+    expect(calls).toHaveLength(5)
   },
 )
 

@@ -10,6 +10,8 @@ import { writeLlmSecrets } from '../src/contract/secrets.ts'
 import { issues, runs } from '../src/db/schema.ts'
 import { writeResult } from '../src/contract/result.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
+import { mirrorPath } from '../src/serve/mirror.ts'
+import { localRemote } from './helpers/git.ts'
 import { fakeExecutor, clock, scenario } from './helpers/serve.ts'
 
 test('对账退出码 0 落地成功后标记 done，保存链接与结果时间并安全删除 repo', async () => {
@@ -62,6 +64,116 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
     expect(s.calls.at(-1)?.options?.input).toBe(
       `workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('对账完成自动变基交付后同时记录新基点与 Issue 终态', async () => {
+  const s = await scenario()
+  try {
+    const { dir, run } = await s.running({ delivery: true })
+    const remote = await localRemote(s.workspace)
+    const initial = await remote.commit('refs/heads/main', 'initial')
+    const upstream = 'workling/12-upstream'
+    const upstreamRef = `refs/heads/${upstream}`
+    const upstreamStart = await remote.commit(upstreamRef, 'upstream step one', initial)
+    const baseRef = await remote.commit(upstreamRef, 'upstream change', upstreamStart)
+    const ref = `refs/heads/${run.branch!}`
+    const tip = await remote.commit(ref, 'downstream change', baseRef)
+    const mirror = mirrorPath(s.workspace, s.repo)
+    await mkdir(join(mirror, '..'), { recursive: true })
+    await remote.git(['git', 'clone', '--bare', remote.path, mirror], { quietStderr: true })
+    const out = join(dir, 'out')
+    await remote.write(['bundle', 'create', join(out, 'commits.bundle'), `${baseRef}..${ref}`])
+    await writeOutResult(out, {
+      contract: 2,
+      outcome: 'completed',
+      branch: run.branch!,
+      head: tip,
+      commits: 1,
+    })
+    await remote.write(['update-ref', '-d', ref])
+    const newBase = await remote.commit('refs/heads/main', 'upstream change', initial)
+    await remote.write(['update-ref', '-d', upstreamRef])
+    s.db.update(runs).set({ baseRef, stackBranch: upstream }).where(eq(runs.id, run.id)).run()
+    await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
+    const prUrl = 'https://github.com/a/b/pull/1'
+    let prBase: string | undefined
+    await reconcile({
+      ...s.options,
+      command: (args, options) => {
+        if (args[0] === 'git') return remote.git(args, options)
+        if (args[1] === 'pr' && args[2] === 'list')
+          return Promise.resolve(args.includes('merged') ? '[{"number":12}]' : '[]')
+        if (args[1] === 'pr' && args[2] === 'create') {
+          prBase = args[args.indexOf('--base') + 1]
+          return Promise.resolve(prUrl)
+        }
+        if (args.includes('workling:done')) {
+          expect(s.db.select().from(issues).get()).toMatchObject({ status: 'done', prUrl })
+          expect(s.db.select().from(runs).get()).toMatchObject({
+            stackBranch: null,
+            baseRef: newBase,
+          })
+        }
+        return s.command(args, options)
+      },
+    })
+    expect(prBase).toBe('main')
+    expect(await remote.write(['rev-parse', `${ref}^`])).toBe(newBase)
+    expect(s.db.select().from(issues).get()).toMatchObject({ status: 'done', prUrl })
+    expect(s.db.select().from(runs).get()).toMatchObject({ stackBranch: null, baseRef: newBase })
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('交付持续抛错超过 30 分钟后对账标记失败并发出脱敏评论', async () => {
+  const s = await scenario()
+  try {
+    const { dir } = await s.running({ delivery: true })
+    await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
+    let attempts = 0
+    let now = clock
+    const options: Parameters<typeof reconcile>[0] = {
+      ...s.options,
+      now: () => now,
+      command: (args, opts) => {
+        if (args[1] === 'pr' && args[2] === 'list') {
+          attempts++
+          throw new Error('GitHub 拒绝请求 repo-secret')
+        }
+        return s.command(args, opts)
+      },
+    }
+    for (const minutes of [0, 29, 30]) {
+      now = new Date(clock.getTime() + minutes * 60_000)
+      await reconcile(options)
+      expect(s.db.select().from(issues).get()?.status).toBe('running')
+      expect(s.db.select().from(runs).get()?.endedAt).toBeNull()
+      expect(s.calls).toEqual([])
+    }
+    now = new Date(clock.getTime() + 31 * 60_000)
+    await reconcile(options)
+    expect(s.db.select().from(issues).get()?.status).toBe('failed')
+    expect(s.db.select().from(runs).get()).toMatchObject({
+      endedAt: now,
+      exitCode: 0,
+      error: 'GitHub 拒绝请求 ***',
+    })
+    expect(s.calls).toHaveLength(2)
+    expect(s.calls[0]?.args).toContain('workling:failed')
+    expect(s.calls[1]?.options?.input).toStartWith(
+      'workling：对账持续失败（GitHub 拒绝请求 ***），已停止重试。',
+    )
+    expect(s.calls[1]?.options?.input).toContain(
+      '重新打上 workling:ready，或评论 `/workling <补充说明>` 即可重试。',
+    )
+    expect(s.logs.join('\n')).not.toContain('repo-secret')
+    await reconcile(options)
+    expect(attempts).toBe(4)
+    expect(s.calls).toHaveLength(2)
   } finally {
     await s.dispose()
   }
