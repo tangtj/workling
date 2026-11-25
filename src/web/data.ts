@@ -1,16 +1,17 @@
 import { readExecutorSettings } from '../config/executor.ts'
-import { eq } from 'drizzle-orm'
+import { eq, ne } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
 import { feedback, issues, repos, runs } from '../db/schema.ts'
 import { issueStage, type Stage } from './stage.ts'
 import type { ServeStatus } from '../serve/index.ts'
 
 export type Repo = typeof repos.$inferSelect
-export type Run = typeof runs.$inferSelect
+type Run = typeof runs.$inferSelect
+type DeliveryRun = Run & { kind: Exclude<Run['kind'], 'review'> }
 export type Issue = typeof issues.$inferSelect & {
   repo: Repo
-  runs: Run[]
-  lastRun: Run | null
+  runs: DeliveryRun[]
+  lastRun: DeliveryRun | null
   stage: Stage
 }
 export type PageData = {
@@ -23,7 +24,12 @@ export type PageData = {
 
 export function pageData(db: WorklingDatabase, now: number, status?: ServeStatus): PageData {
   const allRepos = db.select().from(repos).orderBy(repos.id).all()
-  const allRuns = db.select().from(runs).all()
+  const allRuns = db
+    .select()
+    .from(runs)
+    .where(ne(runs.kind, 'review'))
+    .all()
+    .filter((run): run is DeliveryRun => run.kind !== 'review')
   const capped = db
     .select({ issueId: feedback.issueId, createdAt: feedback.createdAt })
     .from(feedback)

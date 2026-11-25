@@ -1,5 +1,5 @@
 import { repoTriage, triageOverview } from '../triage.ts'
-import { feedback, triageRecords } from '../../db/schema.ts'
+import { feedback, runs, triageRecords } from '../../db/schema.ts'
 import { and, eq, asc } from 'drizzle-orm'
 import { countAutoRounds, prNumberOf } from '../../serve/rework.ts'
 import { failureReason } from '../issue-view.ts'
@@ -109,7 +109,12 @@ export function pagesRoutes(deps: AppDeps): Hono {
     if (!Value.Check(issueListSchema, body)) throw new Error('任务列表数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
-  const detail = (issue: Issue, time: number, limit: number | null): IssueDetailData => ({
+  const detail = (
+    issue: Issue,
+    time: number,
+    limit: number | null,
+    reviewRun?: typeof runs.$inferSelect,
+  ): IssueDetailData => ({
     now: new Date(time).toISOString(),
     issue: {
       id: issue.id,
@@ -157,7 +162,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
         : 0,
       limit,
     },
-    runs: issue.runs.map((run) => ({
+    runs: (reviewRun ? [...issue.runs, reviewRun] : issue.runs).map((run) => ({
       id: run.id,
       worker: run.worker,
       branch: run.branch,
@@ -186,9 +191,16 @@ export function pagesRoutes(deps: AppDeps): Hono {
   app.get('/api/runs/:id/detail', (c) => {
     const page = data()
     const id = repoId(c.req.param('id'))
-    const issue = page.issues.find((item) => item.runs.some((run) => run.id === id))
-    if (!issue) return c.json({ error: '执行记录不存在' }, 404)
-    const body = detail(issue, page.now, page.status?.reworkLimit ?? null)
+    const run = id ? db.select().from(runs).where(eq(runs.id, id)).get() : undefined
+    const issue = run && page.issues.find((item) => item.id === run.issueId)
+    if (!run || !issue) return c.json({ error: '执行记录不存在' }, 404)
+    // 只在直接查看评审日志时把这一条评审运行放入返回值。
+    const body = detail(
+      issue,
+      page.now,
+      page.status?.reworkLimit ?? null,
+      run.kind === 'review' ? run : undefined,
+    )
     if (!Value.Check(issueDetailSchema, body)) throw new Error('Issue 详情数据无效')
     return c.json(body, 200, { 'Cache-Control': 'no-store' })
   })
@@ -341,7 +353,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
   app.get('/runs/:id/log', (c) => {
     const id = repoId(c.req.param('id'))
     const exists =
-      id !== undefined && data().issues.some((issue) => issue.runs.some((run) => run.id === id))
+      id !== undefined && db.select({ id: runs.id }).from(runs).where(eq(runs.id, id)).get()
     return shell(c, exists ? 200 : 404)
   })
   return app

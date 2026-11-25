@@ -18,6 +18,10 @@ export const repos = sqliteTable('repos', {
     .notNull()
     .default('off'),
   triageSince: integer('triage_since', { mode: 'timestamp' }),
+  reviewLevel: text('review_level', { enum: ['off', 'shadow'] })
+    .notNull()
+    .default('off'),
+  reviewSince: integer('review_since', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 })
@@ -59,7 +63,7 @@ export const runs = sqliteTable('runs', {
   issueId: integer('issue_id')
     .notNull()
     .references(() => issues.id, { onDelete: 'cascade' }),
-  kind: text('kind', { enum: ['implement', 'rework'] })
+  kind: text('kind', { enum: ['implement', 'rework', 'review'] })
     .notNull()
     .default('implement'),
   worker: text('worker').notNull(),
@@ -78,10 +82,43 @@ export const runs = sqliteTable('runs', {
   stackBranch: text('stack_branch'),
 })
 
+export const reviews = sqliteTable(
+  'reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    repoId: integer('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    issueId: integer('issue_id')
+      .notNull()
+      .references(() => issues.id, { onDelete: 'cascade' }),
+    deliveryRunId: integer('delivery_run_id').notNull(),
+    prUrl: text('pr_url').notNull(),
+    branch: text('branch').notNull(),
+    headSha: text('head_sha').notNull(),
+    partial: integer('partial', { mode: 'boolean' }).notNull(),
+    status: text('status', { enum: ['queued', 'running', 'done', 'failed', 'skipped'] }).notNull(),
+    runId: integer('run_id'),
+    model: text('model'),
+    effort: text('effort'),
+    verdict: text('verdict', { enum: ['pass', 'changes'] }),
+    summary: text('summary'),
+    checks: text('checks'),
+    acceptance: text('acceptance'),
+    findings: text('findings'),
+    error: text('error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    endedAt: integer('ended_at', { mode: 'timestamp' }),
+  },
+  (table) => [uniqueIndex('reviews_delivery_run_unique').on(table.deliveryRunId)],
+)
+
 export const piSettings = sqliteTable('pi_settings', {
   id: integer('id').primaryKey(),
   model: text('model').notNull(),
   effort: text('effort', { enum: ['low', 'medium', 'high', 'xhigh'] }).notNull(),
+  reviewModel: text('review_model'),
+  reviewEffort: text('review_effort', { enum: ['low', 'medium', 'high', 'xhigh'] }),
   piModel: text('pi_model'),
   llmBaseUrl: text('llm_base_url'),
   llmApiKey: text('llm_api_key'),

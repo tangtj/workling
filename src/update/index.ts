@@ -14,9 +14,8 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
-import { count, eq } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
-import { issues } from '../db/schema.ts'
+import { countRunningTasks } from '../serve/slots.ts'
 import { ROOT } from '../runtime/paths.ts'
 import { run } from '../runtime/process.ts'
 import type { Command } from '../runtime/types.ts'
@@ -59,10 +58,6 @@ export async function cancelJob(): Promise<UpdateJob> {
   return current.job
 }
 
-function runningTasks(db: WorklingDatabase): number {
-  return db.select({ count: count() }).from(issues).where(eq(issues.status, 'running')).get()!.count
-}
-
 async function waitForDrain(
   db: WorklingDatabase,
   active: UpdateJob,
@@ -74,7 +69,7 @@ async function waitForDrain(
   let previous = -1
   for (;;) {
     signal.throwIfAborted()
-    const remaining = runningTasks(db)
+    const remaining = countRunningTasks(db)
     if (remaining === 0) break
     active.status = 'waiting'
     if (remaining !== previous) active.logs.push(`等待 ${remaining} 个运行中的任务结束`)
@@ -121,7 +116,7 @@ export function localVersionInfo(db: WorklingDatabase, root = ROOT) {
     mode: mode ? ('docker' as const) : ('unsupported' as const),
     repoConfigured: Boolean(process.env.WORKLING_UPDATE_REPO),
     previous: state?.previous ?? null,
-    runningTasks: runningTasks(db),
+    runningTasks: countRunningTasks(db),
     lastError: state?.lastError ?? null,
     lastSuccess: state?.lastSuccess ?? null,
     job,

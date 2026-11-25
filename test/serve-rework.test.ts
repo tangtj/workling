@@ -388,6 +388,19 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
       .set({ lastRunId: prior.id, prState: 'open', prUrl: 'https://github.com/a/b/pull/9' })
       .where(eq(issues.id, issue.id))
       .run()
+    const reviewBranch = 'workling/42-review'
+    await remote.commit(`refs/heads/${reviewBranch}`, 'other change', priorTip)
+    s.db
+      .insert(runs)
+      .values({
+        issueId: issue.id,
+        kind: 'review',
+        worker: 'shadow',
+        startedAt: clock,
+        endedAt: clock,
+        branch: reviewBranch,
+      })
+      .run()
     const date = new Date(clock.getTime() + 1000)
     const review = s.db
       .insert(feedback)

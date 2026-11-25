@@ -11,7 +11,7 @@ import { run } from '../../runtime/process.ts'
 import { ghEnv } from '../../platform/github.ts'
 import { errorMessage } from '../../runtime/errors.ts'
 import { trustedUserSchema, trustedUsersSchema } from '../feedback.ts'
-import { reposSchema } from '../repos.ts'
+import { reposSchema, reviewLevelSchema } from '../repos.ts'
 import { repoTriage, triageOverview, triageOverviewSchema } from '../triage.ts'
 
 const createSchema = Type.Object(
@@ -28,6 +28,7 @@ function responseRepo(row: typeof repos.$inferSelect) {
     ...row,
     token: maskToken(row.token),
     triageSince: row.triageSince?.toISOString() ?? null,
+    reviewSince: row.reviewSince?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -107,6 +108,22 @@ export function reposRoutes(deps: AppDeps): Hono {
     if (!Value.Check(schema, body)) return c.json({ error: '分诊级别无效' }, 400)
     db.update(repos)
       .set({ triageLevel: body.level, triageSince: new Date(), updatedAt: new Date() })
+      .where(eq(repos.id, repo.id))
+      .run()
+    return c.json(body)
+  })
+  app.put('/api/repos/:id/review', async (c) => {
+    const id = repoId(c.req.param('id'))
+    const repo = id ? db.select().from(repos).where(eq(repos.id, id)).get() : undefined
+    if (!repo) return c.json({ error: '仓库不存在' }, 404)
+    if (repo.platform !== 'github' || repo.host !== 'github.com')
+      return c.json({ error: '暂只支持 github.com' }, 400)
+    const body: unknown = await c.req.json().catch(() => null)
+    const schema = Type.Object({ level: reviewLevelSchema }, { additionalProperties: false })
+    if (!Value.Check(schema, body)) return c.json({ error: '评审级别无效' }, 400)
+    const now = new Date()
+    db.update(repos)
+      .set({ reviewLevel: body.level, reviewSince: now, updatedAt: now })
       .where(eq(repos.id, repo.id))
       .run()
     return c.json(body)

@@ -20,7 +20,7 @@ const sections = [
   ['labels', '标签与命令'],
 ]
 const descriptions: Record<Card, [string, string, string]> = {
-  codex: ['Codex', '实现 Issue 时使用的默认模型与推理强度', ''],
+  codex: ['Codex', '实现与评审使用的模型与推理强度', ''],
   pi: ['Pi 与 LLM 接入', 'Pi 负责组装提示词、核对和交付 PR', '留空 Key 表示不修改'],
   git: ['提交身份', 'Pi 提交代码时的作者信息', 'PR 作者仍是仓库 token 对应的账号'],
   executor: ['执行器', '切换只影响之后拉起的任务', '本机进程模式下容器参数不生效'],
@@ -220,6 +220,7 @@ function SettingsCard({
     field: string,
     label: string,
     extra: {
+      placeholder?: string
       type?: string
       required?: boolean
       min?: string
@@ -234,6 +235,7 @@ function SettingsCard({
       <input
         name={field}
         type={extra.type}
+        placeholder={extra.placeholder}
         required={extra.required}
         min={extra.min}
         max={extra.max}
@@ -308,6 +310,21 @@ function SettingsCard({
             ))}
           </div>
         </fieldset>
+        {input('reviewModel', '评审模型', { placeholder: '与实现相同' })}
+        <label className="field">
+          评审强度
+          <select
+            value={draft.reviewEffort}
+            onChange={(event) => update('reviewEffort', event.target.value)}
+          >
+            <option value="">high</option>
+            {['low', 'medium', 'high', 'xhigh'].map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
     )
   else if (card === 'pi')

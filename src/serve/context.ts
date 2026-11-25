@@ -15,15 +15,13 @@ import { assertTaskDir } from '../contract/result.ts'
 import { redactSecrets } from './secret-scan.ts'
 
 const login = Type.Object({ login: Type.String() })
-const prsSchema = Type.Array(
-  Type.Object({
-    number: Type.Integer(),
-    url: Type.String(),
-    title: Type.String(),
-    body: Type.String(),
-    isDraft: Type.Boolean(),
-  }),
-)
+const prSchema = Type.Object({
+  number: Type.Integer(),
+  url: Type.String(),
+  title: Type.String(),
+  body: Type.String(),
+  isDraft: Type.Boolean(),
+})
 const prDetailSchema = Type.Object({
   reviews: Type.Array(
     Type.Object({
@@ -69,6 +67,7 @@ export async function writeRunContext({
   issue,
   runId,
   kind = 'implement',
+  prUrl,
   checkout,
   chain,
   command,
@@ -81,6 +80,7 @@ export async function writeRunContext({
   issue: { id: number; number: number }
   runId: number
   kind?: Spec['kind']
+  prUrl?: string
   checkout: Spec['repo'] & { start: string }
   chain?: {
     parent: number
@@ -185,7 +185,7 @@ export async function writeRunContext({
     const previous = db
       .select()
       .from(runs)
-      .where(and(eq(runs.issueId, issue.id), ne(runs.id, runId)))
+      .where(and(eq(runs.issueId, issue.id), ne(runs.id, runId), ne(runs.kind, 'review')))
       .orderBy(desc(runs.id))
       .limit(5)
       .all()
@@ -224,6 +224,8 @@ export async function writeRunContext({
       `- 是否接续：${continued ? '是' : '否'}`,
       `- 起点分支：${start}`,
     ]
+    if (kind === 'review')
+      return [...lines, '', `评审范围：git diff ${checkout.baseRef} HEAD`].join('\n')
     if (!continued) return [...lines, '', '本次从起点新建，暂无提交。'].join('\n')
     const ref = origin(start)
     const commits = await git('log', '--oneline', '--no-decorate', '-n', '50', `${ref}..HEAD`)
@@ -236,71 +238,88 @@ export async function writeRunContext({
   })
 
   await write('pr.md', async () => {
-    const listed: unknown = JSON.parse(
-      await gh(
-        'pr',
-        'list',
-        '-R',
-        repo.path,
-        '--head',
-        checkout.branch,
-        '--state',
-        'open',
-        '--json',
-        'number,url,title,body,isDraft',
-      ),
-    )
-    if (!Value.Check(prsSchema, listed)) throw new Error('PR 列表格式无效')
-    const [pr] = listed
+    const fields = 'number,url,title,body,isDraft'
+    let pr: Type.Static<typeof prSchema> | undefined
+    if (prUrl) {
+      const value: unknown = JSON.parse(await gh('pr', 'view', prUrl, '--json', fields))
+      if (!Value.Check(prSchema, value)) throw new Error('PR 格式无效')
+      pr = value
+    } else {
+      const listed: unknown = JSON.parse(
+        await gh(
+          'pr',
+          'list',
+          '-R',
+          repo.path,
+          '--head',
+          checkout.branch,
+          '--state',
+          'open',
+          '--json',
+          fields,
+        ),
+      )
+      if (!Value.Check(Type.Array(prSchema), listed)) throw new Error('PR 列表格式无效')
+      pr = listed[0]
+    }
     if (!pr) return '无 open PR。'
-    const detail: unknown = JSON.parse(
-      await gh(
-        'pr',
-        'view',
-        String(pr.number),
-        '-R',
-        repo.path,
-        '--json',
-        'reviews,comments,statusCheckRollup',
-      ),
-    )
-    if (!Value.Check(prDetailSchema, detail)) throw new Error('PR 详情格式无效')
-    const pages: unknown = JSON.parse(
-      await gh('api', `repos/${repo.path}/pulls/${pr.number}/comments`, '--paginate', '--slurp'),
-    )
-    if (!Value.Check(inlinePagesSchema, pages)) throw new Error('PR 行内评论格式无效')
-    return [
+    const intro = [
       `# ${pr.title}`,
       `- 链接：${pr.url}`,
       `- 是否草稿：${pr.isDraft ? '是' : '否'}`,
       '',
       pr.body,
-      '',
-      '## Review',
-      ...detail.reviews.map(
-        (review) =>
-          `\n- ${review.author.login} · ${review.state} · ${review.submittedAt}\n\n${review.body}`,
-      ),
-      '',
-      '## 评论',
-      ...detail.comments.map(
-        (comment) => `\n- ${comment.author.login} · ${comment.createdAt}\n\n${comment.body}`,
-      ),
-      '',
-      '## 行内评论',
-      ...pages
-        .flat()
-        .map(
-          (comment) =>
-            `\n- ${comment.path}:${comment.line ?? comment.original_line ?? '未知'} · ${comment.user.login} · ${comment.created_at}\n\n${comment.body}`,
+    ]
+    try {
+      const detail: unknown = JSON.parse(
+        await gh(
+          'pr',
+          'view',
+          String(pr.number),
+          '-R',
+          repo.path,
+          '--json',
+          'reviews,comments,statusCheckRollup',
         ),
-      '',
-      '## 检查',
-      ...detail.statusCheckRollup.map(
-        (check) =>
-          `- ${check.name || check.context || '未知'}：${check.conclusion || check.state || '未知'}`,
-      ),
-    ].join('\n')
+      )
+      if (!Value.Check(prDetailSchema, detail)) throw new Error('PR 详情格式无效')
+      const pages: unknown = JSON.parse(
+        await gh('api', `repos/${repo.path}/pulls/${pr.number}/comments`, '--paginate', '--slurp'),
+      )
+      if (!Value.Check(inlinePagesSchema, pages)) throw new Error('PR 行内评论格式无效')
+      return [
+        ...intro,
+        '',
+        '## Review',
+        ...detail.reviews.map(
+          (review) =>
+            `\n- ${review.author.login} · ${review.state} · ${review.submittedAt}\n\n${review.body}`,
+        ),
+        '',
+        '## 评论',
+        ...detail.comments.map(
+          (comment) => `\n- ${comment.author.login} · ${comment.createdAt}\n\n${comment.body}`,
+        ),
+        '',
+        '## 行内评论',
+        ...pages
+          .flat()
+          .map(
+            (comment) =>
+              `\n- ${comment.path}:${comment.line ?? comment.original_line ?? '未知'} · ${comment.user.login} · ${comment.created_at}\n\n${comment.body}`,
+          ),
+        '',
+        '## 检查',
+        ...detail.statusCheckRollup.map(
+          (check) =>
+            `- ${check.name || check.context || '未知'}：${check.conclusion || check.state || '未知'}`,
+        ),
+      ].join('\n')
+    } catch (error) {
+      if (!prUrl) throw error
+      warn('PR 反馈', error)
+      return intro.join('\n')
+    }
   })
 
   await write('docs.md', async () => {

@@ -164,6 +164,8 @@ test.each(['成功', '冲突', '远端已更新', '运行中'])('上游合并后
       })
       .returning()
       .get()
+    for (const issueId of [upstream.id, downstream.id])
+      s.db.insert(runs).values({ issueId, kind: 'review', worker: 'test', startedAt: clock }).run()
     const calls: { args: string[]; input?: string }[] = []
     const command: typeof s.command = async (args, options) => {
       calls.push({ args, input: options?.input })

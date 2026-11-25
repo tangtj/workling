@@ -13,7 +13,9 @@ export type OverviewIssue = IssueRow & {
   runs: OverviewRun[]
   lastRun: OverviewRun | null
 }
-export const runResult = (run: OverviewRun): 'running' | 'done' | 'failed' =>
+export const runResult = (
+  run: Pick<OverviewRun, 'endedAt' | 'exitCode' | 'error'>,
+): 'running' | 'done' | 'failed' =>
   !run.endedAt ? 'running' : run.exitCode === 0 && !run.error ? 'done' : 'failed'
 export function overviewModel<T extends OverviewIssue>(
   issues: T[],

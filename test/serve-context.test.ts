@@ -94,6 +94,16 @@ test('runs.md 只列此前最近五次运行，包含脱敏并截断的回报与
         })
         .run()
     }
+    s.db
+      .insert(runs)
+      .values({
+        issueId: s.context.issue.id,
+        kind: 'review',
+        worker: 'worker',
+        startedAt: clock,
+        reportResult: '影子评审记录',
+      })
+      .run()
     const other = await s.issue(43)
     s.db
       .insert(runs)
@@ -107,7 +117,14 @@ test('runs.md 只列此前最近五次运行，包含脱敏并截断的回报与
     expect(content).toContain('### 回报\n\n此前回报 ***')
     expect(content).toContain('### Pi 的说明\n\n此前说明 ***')
     expect(content.match(/（已截断）/g)).toHaveLength(2)
-    for (const missing of ['历史结果 0', '本次运行', '其他 Issue', 'repo-secret', 'llm-secret'])
+    for (const missing of [
+      '历史结果 0',
+      '本次运行',
+      '其他 Issue',
+      '影子评审记录',
+      'repo-secret',
+      'llm-secret',
+    ])
       expect(content).not.toContain(missing)
   } finally {
     await s.dispose()

@@ -56,6 +56,12 @@ bun run start          # or: workling serve
 4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort. For larger designs, keep the documents on a branch and add a `分支：<name>` line; the task branch is created from it.
 5. Follow progress and logs in the admin UI. Results show up as labels: `workling:queued` → `workling:running` → `workling:done` / `workling:failed`. To retry a failed Issue, add `workling:ready` again. When a task fails, is partially completed, or its PR remains open, comment `/workling <additional instructions>` or mention the machine account (derived from Pi’s `gitEmail` setting, `@workling-agent` by default) to continue on the same branch.
 
+### Shadow review
+
+Review is off by default. Set **Review level** to **Shadow** in a GitHub repository's settings to review each new completed or partially completed delivery. The Issue detail page shows the verdict, findings, and a link to the review log. Shadow review leaves GitHub comments and labels untouched and does not start rework.
+
+The Codex card under **Settings** lets you choose a separate model and reasoning effort for reviews. If left blank, reviews use the implementation model with `high` effort.
+
 ## Adopting in other projects
 
 After setup, development tasks in the target repository work like this: the local AI assistant writes requirements and design documents and creates an Issue, a person adds `workling:ready`, and workling implements it and opens a PR. Developers of that repository only need an authenticated `gh`; they do not install workling.

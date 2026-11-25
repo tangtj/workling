@@ -11,8 +11,9 @@ import { localRemote } from './helpers/git.ts'
 const issue = { number: 42, title: 'Ship this' }
 const repo = { host: 'github.com', path: 'a/b', token: 'configured-test-secret' }
 const prUrl = 'https://github.com/a/b/pull/3'
-const landed = { status: 'done', prUrl, prState: 'open', commits: 1, created: true } as const
-const updated = { ...landed, created: false }
+const landed = (head: string, partial = false) =>
+  ({ status: 'done', prUrl, prState: 'open', commits: 1, created: true, head, partial }) as const
+const updated = (head: string) => ({ ...landed(head), created: false })
 const branch = 'workling/42-task'
 const dirs: string[] = []
 afterEach(async () => {
@@ -138,11 +139,11 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
     await chmod(path, 0o700)
   }
   const result = await landRun(s.options)
-  expect(result).toEqual(landed)
+  expect(result).toEqual(landed(tip))
   await writeFile(join(s.out, 'issue-comment.md'), '@someone: checks passed.')
-  await publishIssueResult({ ...s.options, taskDir: s.options.run.taskDir, landed })
+  await publishIssueResult({ ...s.options, taskDir: s.options.run.taskDir, landed: landed(tip) })
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
-  expect(await landRun(s.options)).toEqual(updated)
+  expect(await landRun(s.options)).toEqual(updated(tip))
   expect(await Bun.file(marker).exists()).toBe(false)
   expect(await Bun.file(join(s.landing, 'HEAD')).exists()).toBe(false)
   expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
@@ -187,7 +188,7 @@ test.each(['partial', 'incomplete'] as const)(
     const tip = await s.deliver({ outcome })
     await writeFile(join(s.out, 'pr-body.md'), 'Closes #42 done')
 
-    expect(await landRun(s.options)).toEqual(landed)
+    expect(await landRun(s.options)).toEqual(landed(tip, true))
     expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
     const create = s.calls.find(({ args }) => args[2] === 'create')
     expect(create?.args).toContain('--draft')
@@ -215,9 +216,9 @@ test.each([false, true])(
         return s.options.command(args, options)
       }) satisfies Command,
     }
-    expect(await landRun(options)).toEqual(updated)
+    expect(await landRun(options)).toEqual(updated(tip))
     expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
-    expect(await landRun(options)).toEqual(updated)
+    expect(await landRun(options)).toEqual(updated(tip))
     const pushes = s.calls.filter(({ args }) => args.includes('push'))
     expect(pushes.map(({ args }) => args.slice(5))).toEqual([
       ['push', '--', s.remote.path, `${tip}:${s.ref}`],
@@ -245,10 +246,10 @@ test.each([false, true])(
 test('正文以 Refs 开头时按部分完成处理且不前置 Closes', async () => {
   const s = await scenario()
   await s.commit()
-  await s.deliver()
+  const tip = await s.deliver()
   await writeFile(join(s.out, 'pr-body.md'), 'Refs #42\n> 部分完成：后续处理')
 
-  expect(await landRun(s.options)).toEqual(landed)
+  expect(await landRun(s.options)).toEqual(landed(tip, true))
   const create = s.calls.find(({ args }) => args[2] === 'create')
   expect(create?.args[create.args.indexOf('--title') + 1]).toBe('[部分完成] Ship this')
   expect(create?.options?.input).toBe(`Refs #42\n> 部分完成：后续处理\n\n\n${AI_NOTICE}`)
@@ -336,7 +337,7 @@ test('PR 查询抛错后清理落地仓库，下轮使用已推送的分支', as
   ).rejects.toThrow('API unavailable')
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
   expect(await Bun.file(join(s.landing, 'HEAD')).exists()).toBe(false)
-  expect(await landRun(s.options)).toEqual(landed)
+  expect(await landRun(s.options)).toEqual(landed(tip))
   expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
     `fIxEs #42 by \`@someone\`\n\n\n${AI_NOTICE}`,
@@ -346,7 +347,7 @@ test('PR 查询抛错后清理落地仓库，下轮使用已推送的分支', as
 test('有原文反引号时转义提及；两条评论失败只记录，不影响落地也不重发', async () => {
   const s = await scenario()
   await s.commit()
-  await s.deliver()
+  const tip = await s.deliver()
   await writeFile(join(s.out, 'pr-body.md'), '`example @inside` thanks @someone')
   let attempts = 0
   const options = {
@@ -359,12 +360,12 @@ test('有原文反引号时转义提及；两条评论失败只记录，不影�
       return s.options.command(args, opts)
     }) satisfies Command,
   }
-  expect(await landRun(options)).toEqual(landed)
-  await publishIssueResult({ ...options, taskDir: options.run.taskDir, landed })
+  expect(await landRun(options)).toEqual(landed(tip))
+  await publishIssueResult({ ...options, taskDir: options.run.taskDir, landed: landed(tip) })
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
     `Closes #42\n\n\`example <code>&#64;inside</code>\` thanks <code>&#64;someone</code>\n\n\n${AI_NOTICE}`,
   )
-  expect(await landRun(options)).toEqual(updated)
+  expect(await landRun(options)).toEqual(updated(tip))
   expect(s.logs).toEqual(['a/b #42 发送 PR 评论失败', 'a/b #42 发送 Issue 评论失败'])
   expect(attempts).toBe(2)
 })
@@ -430,8 +431,9 @@ test.each(['不存在', '基点', '旧 tip'])(
     const previous = remoteState === '旧 tip' ? s.oldTip : remoteState === '基点' ? s.base : ''
     if (remoteState === '旧 tip') await s.git('push', s.remote.path, `${s.oldTip}:${s.ref}`)
     else if (previous) await s.remote.write(['update-ref', s.ref, previous])
-    expect(await landRun(s.options)).toEqual({ ...landed, restacked: { baseRef: s.newBase } })
+    const result = await landRun(s.options)
     const newTip = await s.remote.write(['rev-parse', s.ref])
+    expect(result).toEqual({ ...landed(newTip), restacked: { baseRef: s.newBase } })
     expect(newTip).not.toBe(s.oldTip)
     expect(await s.remote.write(['rev-parse', `${s.ref}^`])).toBe(s.newBase)
     expect(await s.remote.write(['show', `${s.ref}:upstream.txt`])).toBe('merged upstream')
@@ -487,7 +489,7 @@ test('变基结果推送成功但建 PR 失败，下轮识别新 tip 并跳过�
             : opts,
         ),
     }),
-  ).toEqual({ ...landed, restacked: { baseRef: s.newBase } })
+  ).toEqual({ ...landed(firstTip), restacked: { baseRef: s.newBase } })
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(firstTip)
   expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
 })
