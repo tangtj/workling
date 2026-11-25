@@ -65,6 +65,7 @@ const issueSchema = Type.Array(
     updated_at: Type.String(),
     labels: Type.Array(Type.Object({ name: Type.String() })),
     pull_request: Type.Optional(Type.Unknown()),
+    sub_issues_summary: Type.Optional(Type.Object({ total: Type.Integer() })),
   }),
 )
 const resultSchema = Type.Object({
@@ -211,6 +212,34 @@ export async function triageIssues({
         if (signal.aborted) break
         const updated = new Date(item.updated_at)
         if ('pull_request' in item) continue
+        // 主 Issue 的验收在子 Issue 中，按普通 Issue 的必需章节判断会误报。
+        if ((item.sub_issues_summary?.total ?? 0) > 0) {
+          if (
+            (repo.triageLevel === 'suggest' || repo.triageLevel === 'auto') &&
+            item.labels.some((label) => label.name === 'workling:needs-info')
+          ) {
+            try {
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'edit',
+                  String(item.number),
+                  '-R',
+                  repo.path,
+                  '--remove-label',
+                  'workling:needs-info',
+                ],
+                { env, signal },
+              )
+            } catch (error) {
+              log(
+                `${repo.ref} #${item.number} 摘标签失败：${redactSecrets(errorMessage(error), [repo.token, pi.llmApiKey])}`,
+              )
+            }
+          }
+          continue
+        }
         const body = item.body ?? ''
         const hash = createHash('sha256').update(`${item.title}\n${body}`).digest('hex')
         const old = db
