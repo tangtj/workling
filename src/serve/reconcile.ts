@@ -26,6 +26,13 @@ import { publishReplies } from './replies.ts'
 import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
 
+const reconcileFailureTimeoutMs = 30 * 60_000
+const reconcileFailures = new Map<number, Date>()
+
+export function clearReconcileFailures(): void {
+  reconcileFailures.clear()
+}
+
 export function recoverOrphanFeedback(db: WorklingDatabase): void {
   const orphanIds = db
     .select({ id: runs.id })
@@ -105,23 +112,27 @@ export async function reconcile({
     .leftJoin(runs, eq(issueStates.lastRunId, runs.id))
     .where(eq(issueStates.status, 'running'))
     .all()
+  const runningIds = new Set(rows.map(({ issue }) => issue.id))
+  for (const id of reconcileFailures.keys()) if (!runningIds.has(id)) reconcileFailures.delete(id)
   for (const { issue, repo, run } of rows) {
+    const current = now()
+    let status: 'done' | 'failed' | 'canceled' = 'failed'
+    let error: string | null = null
+    let endedAt = current
+    let exitCode: number | null = null
+    let prUrl: string | undefined
+    let prState: typeof issue.prState | undefined
+    let readyToLand = false
+    let answerDir: string | undefined
+    let delivery:
+      | {
+          taskDir: string
+          landed: Extract<Awaited<ReturnType<typeof landRun>>, { status: 'done' }>
+        }
+      | undefined
+    let sustainedFailure = false
+    let terminalSaved = false
     try {
-      const current = now()
-      let status: 'done' | 'failed' | 'canceled' = 'failed'
-      let error: string | null = null
-      let endedAt = current
-      let exitCode: number | null = null
-      let prUrl: string | undefined
-      let prState: typeof issue.prState | undefined
-      let readyToLand = false
-      let answerDir: string | undefined
-      let delivery:
-        | {
-            taskDir: string
-            landed: Extract<Awaited<ReturnType<typeof landRun>>, { status: 'done' }>
-          }
-        | undefined
       if (!run?.taskDir) error = '缺少任务目录'
       else {
         const result = await readResult(run.taskDir)
@@ -188,6 +199,37 @@ export async function reconcile({
           } else error = landed.error
         }
       }
+      await finish()
+    } catch (caught) {
+      const message = redactSecrets(errorMessage(caught), [repo.token, pi.llmApiKey ?? ''])
+      log(`${repo.ref} #${issue.number} 对账失败：${message}`)
+      if (terminalSaved) {
+        reconcileFailures.delete(issue.id)
+        continue
+      }
+      const failedAt = now()
+      const firstFailure = reconcileFailures.get(issue.id)
+      if (!firstFailure) reconcileFailures.set(issue.id, failedAt)
+      else if (failedAt.getTime() - firstFailure.getTime() > reconcileFailureTimeoutMs) {
+        status = 'failed'
+        error = message
+        endedAt = failedAt
+        delivery = undefined
+        answerDir = undefined
+        prUrl = undefined
+        prState = undefined
+        sustainedFailure = true
+        try {
+          await finish()
+        } catch (finishError) {
+          log(
+            `${repo.ref} #${issue.number} 对账收尾失败：${redactSecrets(errorMessage(finishError), [repo.token, pi.llmApiKey ?? ''])}`,
+          )
+        }
+        if (terminalSaved) reconcileFailures.delete(issue.id)
+      }
+    }
+    async function finish() {
       const summary = run?.taskDir
         ? await extractSummary(run.taskDir, [repo.token, pi.llmApiKey ?? ''])
         : { summary: null, reportResult: null, logTail: null }
@@ -198,10 +240,19 @@ export async function reconcile({
           .run()
         if (run)
           tx.update(runs)
-            .set({ endedAt, exitCode, error, ...summary })
+            .set({
+              endedAt,
+              exitCode,
+              error,
+              ...summary,
+              ...(delivery?.landed.restacked
+                ? { stackBranch: null, baseRef: delivery.landed.restacked.baseRef }
+                : {}),
+            })
             .where(eq(runs.id, run.id))
             .run()
       })
+      terminalSaved = true
       // 库是执行状态的事实来源；GitHub 同步失败不能回滚终态。
       const sync = async (args: string[], input?: string) => {
         try {
@@ -350,7 +401,10 @@ export async function reconcile({
           const minutes = run
             ? Math.ceil((endedAt.getTime() - run.startedAt.getTime()) / 60_000)
             : 0
-          const body = `workling：执行未完成（${error}）。\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。${explanation ? `\n\n### Pi 的说明\n\n${explanation}` : ''}`
+          const header = sustainedFailure
+            ? `workling：对账持续失败（${error}），已停止重试。`
+            : `workling：执行未完成（${error}）。`
+          const body = `${header}\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。${explanation ? `\n\n### Pi 的说明\n\n${explanation}` : ''}`
           await sync(
             ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
             markComment(neutralizeMentions(redactSecrets(body, secrets))),
@@ -364,8 +418,7 @@ export async function reconcile({
         })
       await cleanTaskDirs(db, settings.workspace, repo, issue, settings.keepRuns)
       log(`${repo.ref} #${issue.number} 已标记为 ${status}${error ? `：${error}` : ''}`)
-    } catch (error) {
-      log(`${repo.ref} #${issue.number} 对账失败：${errorMessage(error)}`)
+      reconcileFailures.delete(issue.id)
     }
   }
 }

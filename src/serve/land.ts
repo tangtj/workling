@@ -1,5 +1,5 @@
 import { AI_NOTICE, markComment, neutralizeMentions } from './comment.ts'
-import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
@@ -27,6 +27,7 @@ const prsSchema = Type.Array(
     isDraft: Type.Boolean(),
   }),
 )
+const mergedPrsSchema = Type.Array(Type.Object({ number: Type.Integer({ minimum: 1 }) }))
 
 type Landed = {
   status: 'done'
@@ -34,6 +35,7 @@ type Landed = {
   prState: 'open'
   commits: number
   created: boolean
+  restacked?: { baseRef: string }
 }
 type LandResult = Landed | { status: 'answered' } | { status: 'failed'; error: string }
 
@@ -188,7 +190,7 @@ export async function landRun({
   const landing = resolve(workspace, 'landing', `${run.id}.git`)
   const env = ghEnv(repo.token, repo.host)
   const secrets = [repo.token, llmApiKey ?? '']
-  // 只在主体创建的 bare 仓库里运行 Git；worker 的 Git 配置和 hooks 不可信。
+  // Git 只在主体创建的仓库里运行，避免使用 worker 的配置和 hooks。
   const git = (...args: string[]) => command(['git', ...args], { cwd: landing, quietStderr: true })
   const remoteGit = (...args: string[]) =>
     command(
@@ -317,14 +319,94 @@ export async function landRun({
         `新增内容命中密钥规则：${hits.map(({ rule, file }) => `${rule}（${file}）`).join('、')}`,
       )
 
+    const oldTip = tip
+    let restacked: { baseRef: string; baseBranch: string; upstreamNumber: number } | undefined
+    if (run.stackBranch) {
+      const stackRef = `refs/heads/${run.stackBranch}`
+      const upstream = (await remoteGit('ls-remote', '--heads', '--', remoteUrl, stackRef))
+        .split('\n')
+        .find((line) => line.endsWith(`\t${stackRef}`))
+      if (!upstream) {
+        const merged: unknown = JSON.parse(
+          await gh([
+            'pr',
+            'list',
+            '-R',
+            repo.path,
+            '--head',
+            run.stackBranch,
+            '--state',
+            'merged',
+            '--json',
+            'number',
+            '--limit',
+            '1',
+          ]),
+        )
+        if (!Value.Check(mergedPrsSchema, merged)) throw new Error('已合并 PR 列表格式无效')
+        const upstreamNumber = merged[0]?.number
+        if (!upstreamNumber)
+          return failed(`上游分支 ${run.stackBranch} 已删除且未合并，无法堆叠交付`)
+        const base = await readDefaultBranch({ repo, command })
+        await git('check-ref-format', `refs/heads/${base}`)
+        await remoteGit('fetch', '--no-tags', '--', remoteUrl, `refs/heads/${base}`)
+        const newBase = await git('rev-parse', '--verify', 'FETCH_HEAD^{commit}')
+        if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(newBase)) throw new Error('默认分支提交无效')
+        const dir = await mkdtemp(join(landing, 'rebase-'))
+        await git('clone', '--template=', '--no-hardlinks', '--no-checkout', '--', landing, dir)
+        const rebaseGit = (...args: string[]) =>
+          command(['git', ...args], {
+            cwd: dir,
+            env: { ...process.env, GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' },
+            quietStderr: true,
+          })
+        await rebaseGit('switch', '-C', branch, oldTip)
+        try {
+          await rebaseGit(
+            '-c',
+            'user.name=workling',
+            '-c',
+            'user.email=workling@localhost',
+            'rebase',
+            // 重试时生成同一 tip，才能识别上一轮已推送的变基结果。
+            '--committer-date-is-author-date',
+            '--onto',
+            newBase,
+            baseRef,
+            branch,
+          )
+        } catch (error) {
+          const files = await rebaseGit('diff', '--name-only', '--diff-filter=U', '-z')
+          if (!files) throw error
+          await rebaseGit('rebase', '--abort')
+          return failed(
+            `上游 #${upstreamNumber} 已合并，变基到 ${base} 冲突：${redactSecrets(files.split('\0').filter(Boolean).join('、'), secrets)}`,
+          )
+        }
+        await git('fetch', '--no-tags', '--', dir, `+${ref}:${ref}`)
+        tip = await git('rev-parse', '--verify', `${ref}^{commit}`)
+        restacked = { baseRef: newBase, baseBranch: base, upstreamNumber }
+      }
+    }
+
     const remote = (await remoteGit('ls-remote', '--heads', '--', remoteUrl, ref))
       .split('\n')
       .find((line) => line.endsWith(`\t${ref}`))
     let pushed = false
     if (remote !== `${tip}\t${ref}`) {
-      if (remote && remote !== `${baseRef}\t${ref}`)
+      if (
+        remote &&
+        remote !== `${baseRef}\t${ref}` &&
+        !(restacked && remote === `${oldTip}\t${ref}`)
+      )
         return failed('远端分支已更新，与本次基点不一致')
-      await remoteGit('push', '--', remoteUrl, `${tip}:${ref}`)
+      await remoteGit(
+        'push',
+        ...(restacked ? [`--force-with-lease=${ref}:${remote?.split('\t')[0] ?? ''}`] : []),
+        '--',
+        remoteUrl,
+        `${tip}:${ref}`,
+      )
       pushed = true
     }
 
@@ -344,8 +426,15 @@ export async function landRun({
     )
     if (!Value.Check(prsSchema, prs)) throw new Error('PR 列表格式无效')
     const existing = prs[0]
-    if (existing && !pushed)
+    if (existing && !pushed && !restacked)
       return { status: 'done', prUrl: existing.url, prState: 'open', commits, created: false }
+
+    const deliveryBody = (body: string) =>
+      restacked
+        ? `${body}\n\n上游 #${restacked.upstreamNumber} 已在本任务运行期间合并，已自动变基到 ${restacked.baseBranch}。`
+        : run.stackBranch
+          ? `${body}\n\n堆叠于 #${run.stackBranch.match(/^workling\/(\d+)-/)?.[1] ?? '?'} 的分支 \`${run.stackBranch}\`，请先审阅并合并上游 PR。`
+          : body
 
     const prFields = async () =>
       preparePr(
@@ -370,8 +459,21 @@ export async function landRun({
       prUrl = existing.url
       try {
         const { title, body } = await prFields()
-        await gh(['pr', 'edit', prUrl, '--title', title, '--body-file', '-'], withAiNotice(body))
-      } catch {
+        await gh(
+          [
+            'pr',
+            'edit',
+            prUrl,
+            ...(restacked ? ['--base', restacked.baseBranch] : []),
+            '--title',
+            title,
+            '--body-file',
+            '-',
+          ],
+          withAiNotice(restacked ? deliveryBody(body) : body),
+        )
+      } catch (error) {
+        if (restacked) throw error
         warn('更新 PR')
       }
       if (outcome === 'completed' && existing.isDraft) {
@@ -382,7 +484,8 @@ export async function landRun({
         }
       }
     } else {
-      const base = run.stackBranch ?? (await readDefaultBranch({ repo, command }))
+      const base =
+        restacked?.baseBranch ?? run.stackBranch ?? (await readDefaultBranch({ repo, command }))
       if (!base) throw new Error('无法读取仓库默认分支')
       const { title, body, partial } = await prFields()
       prUrl = await gh(
@@ -401,11 +504,7 @@ export async function landRun({
           '-',
           ...(partial ? ['--draft'] : []),
         ],
-        withAiNotice(
-          run.stackBranch
-            ? `${body}\n\n堆叠于 #${run.stackBranch.match(/^workling\/(\d+)-/)?.[1] ?? '?'} 的分支 \`${run.stackBranch}\`，请先审阅并合并上游 PR。`
-            : body,
-        ),
+        withAiNotice(deliveryBody(body)),
       )
       if (!prUrl) throw new Error('创建 PR 未返回链接')
     }
@@ -419,7 +518,14 @@ export async function landRun({
         warn('发送 PR 评论')
       }
     }
-    return { status: 'done', prUrl, prState: 'open', commits, created: !existing }
+    return {
+      status: 'done',
+      prUrl,
+      prState: 'open',
+      commits,
+      created: !existing,
+      ...(restacked ? { restacked: { baseRef: restacked.baseRef } } : {}),
+    }
   } finally {
     await rm(landing, { recursive: true, force: true })
   }

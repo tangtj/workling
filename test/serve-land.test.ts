@@ -42,8 +42,14 @@ async function scenario(taskBranch = branch, draft?: boolean) {
   const command: Command = async (args, options) => {
     calls.push({ args, options })
     if (args[0] === 'git') {
-      expect(options?.cwd).toBe(landing)
-      if (args.includes('ls-remote') || args.includes('push')) {
+      expect(options?.cwd === landing || options?.cwd?.startsWith(join(landing, 'rebase-'))).toBe(
+        true,
+      )
+      if (
+        args.includes('ls-remote') ||
+        args.includes('push') ||
+        args.includes('credential.helper=')
+      ) {
         expect(args.slice(1, 5)).toEqual([
           '-c',
           'credential.helper=',
@@ -367,7 +373,11 @@ test('堆叠 PR 的标识位于堆叠说明之后', async () => {
   const s = await scenario()
   await s.commit()
   await s.deliver()
+  await s.remote.write(['update-ref', 'refs/heads/workling/12-upstream', s.base])
   await landRun({ ...s.options, run: { ...s.options.run, stackBranch: 'workling/12-upstream' } })
+  const create = s.calls.find(({ args }) => args[2] === 'create')
+  expect(create?.args[create.args.indexOf('--base') + 1]).toBe('workling/12-upstream')
+  expect(s.calls.some(({ args }) => args.includes('rebase'))).toBe(false)
   const body = s.calls.find(({ args }) => args[2] === 'create')?.options?.input
   expect(body).toEndWith(
     `堆叠于 #12 的分支 \`workling/12-upstream\`，请先审阅并合并上游 PR。\n\n\n${AI_NOTICE}`,
@@ -383,4 +393,142 @@ test('更新 PR 时正文已有标识也只保留一个', async () => {
   await landRun(s.options)
   const body = s.calls.find(({ args }) => args[1] === 'pr' && args[2] === 'edit')?.options?.input
   expect(body).toBe(`Closes #42\n\n说明\n\n\n${AI_NOTICE}`)
+})
+
+async function mergedUpstreamScenario(conflict = false) {
+  const s = await scenario()
+  await s.commit()
+  const oldTip = await s.deliver()
+  let newBase: string
+  if (conflict) newBase = await s.remote.commit('refs/heads/main', 'conflicting change', s.base)
+  else {
+    await s.git('switch', 'main')
+    await writeFile(join(s.cwd, 'upstream.txt'), 'merged upstream')
+    await s.git('add', 'upstream.txt')
+    await s.git('commit', '-m', 'Merge upstream')
+    newBase = await s.git('rev-parse', 'HEAD')
+    await s.git('push', s.remote.path, 'main')
+  }
+  const options = {
+    ...s.options,
+    run: { ...s.options.run, stackBranch: 'workling/12-upstream' },
+    command: (async (args, opts) => {
+      if (args[0] === 'gh' && args.includes('merged')) {
+        s.calls.push({ args, options: opts })
+        return '[{"number":12}]'
+      }
+      return s.options.command(args, opts)
+    }) satisfies Command,
+  }
+  return { ...s, options, newBase, oldTip }
+}
+
+test.each(['不存在', '基点', '旧 tip'])(
+  '上游已合并且分支删除，远端分支为%s时带 lease 变基交付到默认分支',
+  async (remoteState) => {
+    const s = await mergedUpstreamScenario()
+    const previous = remoteState === '旧 tip' ? s.oldTip : remoteState === '基点' ? s.base : ''
+    if (remoteState === '旧 tip') await s.git('push', s.remote.path, `${s.oldTip}:${s.ref}`)
+    else if (previous) await s.remote.write(['update-ref', s.ref, previous])
+    expect(await landRun(s.options)).toEqual({ ...landed, restacked: { baseRef: s.newBase } })
+    const newTip = await s.remote.write(['rev-parse', s.ref])
+    expect(newTip).not.toBe(s.oldTip)
+    expect(await s.remote.write(['rev-parse', `${s.ref}^`])).toBe(s.newBase)
+    expect(await s.remote.write(['show', `${s.ref}:upstream.txt`])).toBe('merged upstream')
+    const push = s.calls.find(({ args }) => args.includes('push'))
+    expect(push?.args).toContain(`--force-with-lease=${s.ref}:${previous}`)
+    const create = s.calls.find(({ args }) => args[2] === 'create')
+    expect(create?.args[create.args.indexOf('--base') + 1]).toBe('main')
+    expect(create?.options?.input).toContain('上游 #12 已在本任务运行期间合并，已自动变基到 main。')
+    expect(create?.options?.input).not.toContain('堆叠于')
+    expect(s.calls.find(({ args }) => args.includes('merged'))?.args).toEqual([
+      'gh',
+      'pr',
+      'list',
+      '-R',
+      'a/b',
+      '--head',
+      'workling/12-upstream',
+      '--state',
+      'merged',
+      '--json',
+      'number',
+      '--limit',
+      '1',
+    ])
+    expect(await Bun.file(join(s.landing, 'HEAD')).exists()).toBe(false)
+  },
+)
+
+test('变基结果推送成功但建 PR 失败，下轮识别新 tip 并跳过推送', async () => {
+  const s = await mergedUpstreamScenario()
+  await expect(
+    landRun({
+      ...s.options,
+      command: (args, opts) => {
+        if (args[0] === 'gh' && args[2] === 'create') throw new Error('API unavailable')
+        return s.options.command(args, opts)
+      },
+    }),
+  ).rejects.toThrow('API unavailable')
+  const firstTip = await s.remote.write(['rev-parse', s.ref])
+  // 即使下一轮的提交者时钟变化，重试也必须生成相同的 tip。
+  expect(
+    await landRun({
+      ...s.options,
+      command: (args, opts) =>
+        s.options.command(
+          args,
+          args.includes('rebase')
+            ? {
+                ...opts,
+                env: { ...opts?.env, GIT_COMMITTER_DATE: '2030-01-01T00:00:00Z' },
+              }
+            : opts,
+        ),
+    }),
+  ).toEqual({ ...landed, restacked: { baseRef: s.newBase } })
+  expect(await s.remote.write(['rev-parse', s.ref])).toBe(firstTip)
+  expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
+})
+
+test('上游已合并后的变基发生冲突，返回冲突文件并 abort，不推送', async () => {
+  const s = await mergedUpstreamScenario(true)
+  expect(await landRun(s.options)).toEqual({
+    status: 'failed',
+    error: '上游 #12 已合并，变基到 main 冲突：content.txt',
+  })
+  expect(s.calls.some(({ args }) => args.includes('--abort'))).toBe(true)
+  expect(s.calls.some(({ args }) => args.includes('push'))).toBe(false)
+  expect(await Bun.file(join(s.landing, 'HEAD')).exists()).toBe(false)
+})
+
+test.each(['未合并', '格式无效'])('上游分支删除且 PR %s，拒绝交付并保留远端', async (kind) => {
+  const s = await mergedUpstreamScenario()
+  const options = {
+    ...s.options,
+    command: (args: string[], opts?: RunOptions) => {
+      if (args[0] === 'gh' && args.includes('merged'))
+        return Promise.resolve(kind === '未合并' ? '[]' : '[{"number":"12"}]')
+      return s.options.command(args, opts)
+    },
+  }
+  if (kind === '未合并')
+    expect(await landRun(options)).toEqual({
+      status: 'failed',
+      error: '上游分支 workling/12-upstream 已删除且未合并，无法堆叠交付',
+    })
+  else await expect(landRun(options)).rejects.toThrow('已合并 PR 列表格式无效')
+  expect(s.calls.some(({ args }) => args.includes('push'))).toBe(false)
+})
+
+test('变基交付时远端已被他人更新，拒绝覆盖', async () => {
+  const s = await mergedUpstreamScenario()
+  const other = await s.remote.commit(s.ref, 'other', s.base)
+  expect(await landRun(s.options)).toEqual({
+    status: 'failed',
+    error: '远端分支已更新，与本次基点不一致',
+  })
+  expect(await s.remote.write(['rev-parse', s.ref])).toBe(other)
+  expect(s.calls.some(({ args }) => args.includes('push'))).toBe(false)
 })
