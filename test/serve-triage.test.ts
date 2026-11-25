@@ -278,6 +278,171 @@ test('缺少 LLM 配置只记录一次日志，配置后每轮最多调用五次
   }
 })
 
+test('建议级跳过主 Issue 并摘标签，同轮普通 Issue 正常分诊', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'triage-parent-'))
+  const conn = await openDatabase(dir)
+  try {
+    const now = new Date('2026-01-01T12:00:00Z')
+    const repo = conn.db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'token',
+        triageLevel: 'suggest',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()
+    conn.db
+      .insert(trustedUsers)
+      .values({ repoId: repo.id, userId: '1', login: 'user', createdAt: now })
+      .run()
+    updatePiSettings(conn.db, { llmBaseUrl: 'https://example.com', llmApiKey: 'key' })
+    const item = {
+      number: 1,
+      title: 'parent',
+      body: '## 目标\nwork',
+      user: { id: 1, login: 'user', type: 'User' },
+      labels: [{ name: 'workling:needs-info' }],
+      updated_at: now.toISOString(),
+      sub_issues_summary: { total: 2 },
+    }
+    const commands: string[][] = []
+    const classified: string[] = []
+    const signal = new AbortController().signal
+    await triageIssues({
+      db: conn.db,
+      state: { permissions: new Map() },
+      now,
+      signal,
+      log: () => {},
+      command: async (args, options) => {
+        commands.push(args)
+        if (args[1] === 'api')
+          return JSON.stringify([
+            item,
+            {
+              ...item,
+              number: 2,
+              title: 'ordinary',
+              body: '## 目标\nwork\n## 验收\ntest',
+              labels: [],
+              sub_issues_summary: { total: 0 },
+            },
+          ])
+        expect(options?.signal).toBe(signal)
+        expect(options?.env).toBeDefined()
+        return ''
+      },
+      classify: async ({ title }) => {
+        classified.push(title)
+        return { decision: 'accept', missing: [], note: '' }
+      },
+    })
+    expect(classified).toEqual(['ordinary'])
+    expect(
+      conn.db
+        .select()
+        .from(triageRecords)
+        .all()
+        .map((row) => row.number),
+    ).toEqual([2])
+    expect(commands.filter((args) => args[2] === 'comment')).toHaveLength(0)
+    expect(commands.filter((args) => args.includes('--remove-label'))).toEqual([
+      ['gh', 'issue', 'edit', '1', '-R', 'a/b', '--remove-label', 'workling:needs-info'],
+    ])
+  } finally {
+    conn.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('主 Issue 摘标签失败时脱敏记录日志并继续分诊，影子级不摘标签', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'triage-parent-error-'))
+  const conn = await openDatabase(dir)
+  try {
+    const now = new Date('2026-01-01T12:00:00Z')
+    const repo = conn.db
+      .insert(repos)
+      .values({
+        ref: 'github:a/b',
+        platform: 'github',
+        host: 'github.com',
+        path: 'a/b',
+        token: 'repo-secret',
+        triageLevel: 'shadow',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()
+    conn.db
+      .insert(trustedUsers)
+      .values({ repoId: repo.id, userId: '1', login: 'user', createdAt: now })
+      .run()
+    updatePiSettings(conn.db, { llmBaseUrl: 'https://example.com', llmApiKey: 'llm-secret' })
+    const parent = {
+      number: 1,
+      title: 'parent',
+      body: '## 目标\nwork',
+      user: { id: 1, login: 'user', type: 'User' },
+      labels: [{ name: 'workling:needs-info' }],
+      updated_at: now.toISOString(),
+      sub_issues_summary: { total: 2 },
+    }
+    let items = [parent]
+    const commands: string[][] = []
+    const logs: string[] = []
+    let classifications = 0
+    const options = {
+      db: conn.db,
+      state: { permissions: new Map() },
+      now,
+      signal: new AbortController().signal,
+      log: (message: string) => logs.push(message),
+      command: async (args: string[]) => {
+        commands.push(args)
+        if (args[1] === 'api') return JSON.stringify(items)
+        throw new Error('repo-secret llm-secret')
+      },
+      classify: async () => {
+        classifications++
+        return { decision: 'ignore', missing: [], note: '' }
+      },
+    }
+    await triageIssues(options)
+    expect(commands).toHaveLength(1)
+    expect(classifications).toBe(0)
+    conn.db.update(repos).set({ triageLevel: 'auto' }).run()
+    items = [
+      parent,
+      ...Array.from({ length: 5 }, (_, i) => ({
+        ...parent,
+        number: i + 2,
+        labels: [],
+        sub_issues_summary: { total: 0 },
+      })),
+    ]
+    await triageIssues(options)
+    expect(logs).toEqual(['github:a/b #1 摘标签失败：*** ***'])
+    expect(classifications).toBe(5)
+    expect(
+      conn.db
+        .select()
+        .from(triageRecords)
+        .all()
+        .map((row) => row.number),
+    ).toEqual([2, 3, 4, 5, 6])
+  } finally {
+    conn.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('建议级提示、相同缺失项去重并在进入流程时摘标签', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'triage-suggest-'))
   const conn = await openDatabase(dir)
