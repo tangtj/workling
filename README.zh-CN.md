@@ -192,6 +192,8 @@ workling-worker prepare add-function /tmp/run-b --codex-model gpt-6-luna --effor
 workling-worker run /tmp/run-a                                 # 执行，产出在 /tmp/run-a/out/
 ```
 
+[`review-diff`](worker/samples/review-diff/README.md) 是评审样例，评审结论写入 `out/review.json`。
+
 未执行 `bun link` 时把 `workling-worker` 换成 `bun worker/cli.ts`。需要自定义模型服务时在运行目录写入 `secrets/llm.json`（`{ baseUrl, apiKey, api }`），否则使用本机 codex / Pi 的登录。
 
 开发约定见 [AGENTS.md](AGENTS.md)。

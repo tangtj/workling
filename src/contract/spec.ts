@@ -3,11 +3,12 @@ import { join } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 
+// 评审不改变原有运行的契约。旧 worker 会拒绝 review spec，只影响该次评审。
 export const CONTRACT_VERSION = 2
 
 export const specSchema = Type.Object({
   contract: Type.Literal(CONTRACT_VERSION),
-  kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
+  kind: Type.Union([Type.Literal('implement'), Type.Literal('rework'), Type.Literal('review')]),
   issue: Type.Object({ ref: Type.String(), title: Type.String() }),
   repo: Type.Object({
     baseRef: Type.String(),

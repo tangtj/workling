@@ -1,0 +1,7 @@
+{
+  "kind": "review",
+  "issue": { "ref": "github:example/calc#2", "title": "增加 sumRange 函数" },
+  "branch": "workling/2-sum-range",
+  "model": { "codex": "gpt-6.1-sol", "effort": "high" },
+  "git": { "name": "Workling", "email": "workling@example.invalid" }
+}

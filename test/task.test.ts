@@ -12,6 +12,8 @@ import type { Command, Environment } from '../src/runtime/types.ts'
 import { assertTaskDir, readResult, writeResult } from '../src/contract/result.ts'
 import { createTaskDir, taskDirName } from '../src/serve/task-dir.ts'
 import { runTask } from '../worker/task.ts'
+import { run } from '../worker/process.ts'
+import { prepareSample, resolveSample } from '../worker/samples.ts'
 import { localRemote } from './helpers/git.ts'
 
 const ref = 'github:a/b#12'
@@ -611,4 +613,93 @@ test('workling-events 写入全部 step 与 pi_exit，保留退出码和信号�
       { type: 'pi_exit', ts: new Date(2000).toISOString(), ...status, durationMs: 1000 },
     ])
   }
+})
+
+const validReview = JSON.stringify({
+  verdict: 'pass',
+  summary: '检查通过。',
+  checks: [],
+  acceptance: [],
+  findings: [],
+})
+
+async function setupReview() {
+  const dir = join(await temp(), 'run')
+  const spec = await prepareSample({
+    sample: resolveSample('review-diff'),
+    dest: dir,
+    command: run,
+  })
+  const record = join(dir, 'pi.json')
+  const outDir = join(dir, 'out')
+  const env: Environment = { ...process.env, WORKLING_TEST_RECORD: record }
+  return {
+    spec,
+    record,
+    outDir,
+    env,
+    dir,
+    ref: spec.issue.ref,
+    command: run,
+    signal: new AbortController().signal,
+    pi: [process.execPath, resolve('test/fixtures/pi.ts')],
+    out: () => {},
+  }
+}
+
+test.each([
+  [undefined, 'read-only'],
+  ['workspace-write', 'read-only'],
+  ['danger-full-access', 'danger-full-access'],
+] as const)('review 使用评审提示词与沙箱配置 %s 并产出 reviewed', async (sandbox, expected) => {
+  const options = await setupReview()
+  if (sandbox !== undefined) options.env.WORKLING_CODEX_SANDBOX = sandbox
+  options.env.WORKLING_TEST_REVIEW = validReview
+  const { outDir, spec } = options
+  const repo = join(options.dir, 'repo')
+  const head = await run(['git', 'rev-parse', 'HEAD'], { cwd: repo })
+  await mkdir(outDir)
+  await writeFile(join(outDir, 'commits.bundle'), 'stale')
+  await writeFile(join(outDir, 'outcome.json'), '{"outcome":"answered"}')
+  await writeFile(join(repo, 'check-output.txt'), 'untracked')
+  expect(await runTask(options)).toEqual({ code: 0, signal: null })
+  const { args } = (await Bun.file(options.record).json()) as { args: string[] }
+  expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(
+    join(ROOT, 'worker/configs/REVIEW.md'),
+  )
+  expect(args.at(-1)).toContain(`评审范围：git diff ${spec.repo.baseRef} HEAD\n`)
+  expect(args.at(-1)).toContain(`codex 沙箱模式：${expected}\n`)
+  expect(await readOutResult(outDir, { allowReview: true })).toEqual({
+    contract: 2,
+    outcome: 'reviewed',
+    branch: spec.repo.branch,
+    head,
+    commits: 0,
+  })
+  await expect(readOutResult(outDir)).rejects.toThrow('out/result.json 的结构无效')
+  expect(await Bun.file(join(outDir, 'commits.bundle')).exists()).toBe(false)
+})
+
+test.each([
+  [undefined, '缺少 out/review.json'],
+  ['{}', 'out/review.json 的结构无效'],
+] as const)('review 缺少有效产出时返回 %s 对应的错误', async (raw, reason) => {
+  const options = await setupReview()
+  await mkdir(options.outDir)
+  await writeFile(join(options.outDir, 'review.json'), validReview)
+  if (raw !== undefined) options.env.WORKLING_TEST_REVIEW = raw
+  expect(await runTask(options)).toEqual({
+    code: 0,
+    signal: null,
+    error: `生成评审产出失败：${reason}`,
+  })
+  expect(await Bun.file(join(options.outDir, 'result.json')).exists()).toBe(false)
+})
+
+test('review 拒绝 Pi 在评审分支上新增提交', async () => {
+  const options = await setupReview()
+  options.env.WORKLING_TEST_REVIEW = validReview
+  options.env.WORKLING_TEST_REVIEW_COMMIT = '1'
+  expect(await runTask(options)).toEqual({ code: 0, signal: null, error: '评审运行不应产生提交' })
+  expect(await Bun.file(join(options.outDir, 'result.json')).exists()).toBe(false)
 })

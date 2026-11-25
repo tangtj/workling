@@ -11,6 +11,7 @@ export const piOutcomeSchema = Type.Object({
     Type.Literal('partial'),
     Type.Literal('incomplete'),
     Type.Literal('answered'),
+    Type.Literal('reviewed'),
   ]),
 })
 
@@ -23,6 +24,7 @@ export const outResultSchema = Type.Object({
 })
 
 export type OutResult = Type.Static<typeof outResultSchema>
+type TaskOutcome = Exclude<OutResult['outcome'], 'reviewed'>
 
 export const checklistSchema = Type.Array(
   Type.Object({
@@ -44,6 +46,40 @@ export const repliesSchema = Type.Array(
 )
 
 export type Reply = Type.Static<typeof repliesSchema>[number]
+
+export const reviewSchema = Type.Object({
+  verdict: Type.Union([Type.Literal('pass'), Type.Literal('changes')]),
+  summary: Type.String({ minLength: 1, maxLength: 2000 }),
+  checks: Type.Array(
+    Type.Object({
+      command: Type.String({ minLength: 1, maxLength: 500 }),
+      passed: Type.Boolean(),
+      detail: Type.String({ maxLength: 2000 }),
+    }),
+    { maxItems: 20 },
+  ),
+  acceptance: Type.Array(
+    Type.Object({
+      item: Type.String({ minLength: 1, maxLength: 500 }),
+      met: Type.Union([Type.Literal('yes'), Type.Literal('no'), Type.Literal('unverified')]),
+      evidence: Type.String({ maxLength: 1000 }),
+    }),
+    { maxItems: 50 },
+  ),
+  findings: Type.Array(
+    Type.Object({
+      severity: Type.Union([Type.Literal('blocker'), Type.Literal('major'), Type.Literal('minor')]),
+      path: Type.Union([Type.String({ minLength: 1, maxLength: 500 }), Type.Null()]),
+      line: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+      scenario: Type.String({ minLength: 1, maxLength: 2000 }),
+      body: Type.String({ minLength: 1, maxLength: 4000 }),
+      known: Type.Boolean(),
+    }),
+    { maxItems: 30 },
+  ),
+})
+
+export type Review = Type.Static<typeof reviewSchema>
 
 export function missingOutput(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
@@ -78,11 +114,11 @@ export async function readOutputFile(
   }
 }
 
-export async function readPiOutcome(dir: string): Promise<OutResult['outcome'] | undefined> {
+export async function readPiOutcome(dir: string): Promise<TaskOutcome | undefined> {
   try {
     const raw = await readOutputFile(dir, 'outcome.json', 4096)
     const value: unknown = JSON.parse(raw.toString('utf8'))
-    if (Value.Check(piOutcomeSchema, value)) return value.outcome
+    if (Value.Check(piOutcomeSchema, value) && value.outcome !== 'reviewed') return value.outcome
   } catch {
     // Pi 的输出不可用时仍可从报告判定结果。
   }
@@ -121,6 +157,21 @@ export async function readReplies(dir: string): Promise<Reply[]> {
   return value
 }
 
+export async function readReview(dir: string): Promise<Review> {
+  const raw = await readOutputFile(dir, 'review.json', 1024 * 1024).catch((cause: unknown) => {
+    if (missingOutput(cause)) throw new Error('缺少 out/review.json', { cause })
+    throw cause
+  })
+  let value: unknown
+  try {
+    value = JSON.parse(raw.toString('utf8'))
+  } catch (cause) {
+    throw new Error('out/review.json 不是有效的 JSON', { cause })
+  }
+  if (!Value.Check(reviewSchema, value)) throw new Error('out/review.json 的结构无效')
+  return value
+}
+
 export const maxCommentLength = 60_000
 
 export function truncateComment(text: string): string {
@@ -146,7 +197,13 @@ export async function writeOutResult(dir: string, value: OutResult): Promise<voi
   await rename(tmp, join(dir, 'result.json'))
 }
 
-export async function readOutResult(dir: string): Promise<OutResult> {
+// 交付流程仍只读取实现和返工产出。评审调用方需要显式启用 reviewed。
+export function readOutResult(dir: string): Promise<OutResult & { outcome: TaskOutcome }>
+export function readOutResult(dir: string, options: { allowReview: true }): Promise<OutResult>
+export async function readOutResult(
+  dir: string,
+  options?: { allowReview: true },
+): Promise<OutResult> {
   let raw: string
   try {
     raw = (await readOutputFile(dir, 'result.json', 64 * 1024)).toString('utf8')
@@ -167,6 +224,10 @@ export async function readOutResult(dir: string): Promise<OutResult> {
     value.contract !== CONTRACT_VERSION
   )
     throw new Error(`out/result.json 的契约版本不受支持，需要版本 ${CONTRACT_VERSION}`)
-  if (!Value.Check(outResultSchema, value)) throw new Error('out/result.json 的结构无效')
+  if (
+    !Value.Check(outResultSchema, value) ||
+    (!options?.allowReview && value.outcome === 'reviewed')
+  )
+    throw new Error('out/result.json 的结构无效')
   return value
 }

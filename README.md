@@ -192,6 +192,8 @@ workling-worker prepare add-function /tmp/run-b --codex-model gpt-6-luna --effor
 workling-worker run /tmp/run-a                                 # run it; outputs land in /tmp/run-a/out/
 ```
 
+The [`review-diff`](worker/samples/review-diff/README.md) sample runs a review and writes its conclusion to `out/review.json`.
+
 Without `bun link`, replace `workling-worker` with `bun worker/cli.ts`. To use a custom model endpoint, write `secrets/llm.json` (`{ baseUrl, apiKey, api }`) into the run directory; otherwise the local codex / Pi login is used.
 
 Contribution conventions are in [AGENTS.md](AGENTS.md) (Chinese).
