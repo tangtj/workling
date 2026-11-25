@@ -8,7 +8,12 @@ import { ghEnv } from '../platform/github.ts'
 import type { Command } from '../runtime/types.ts'
 import { setStatusLabel } from './status-label.ts'
 const issuesSchema = Type.Array(
-  Type.Object({ number: Type.Integer(), title: Type.String(), url: Type.String() }),
+  Type.Object({
+    number: Type.Integer(),
+    title: Type.String(),
+    url: Type.String(),
+    labels: Type.Array(Type.Object({ name: Type.String() })),
+  }),
 )
 
 type Log = (message: string) => void
@@ -98,7 +103,7 @@ export async function pollOnce({
           '--limit',
           '100',
           '--json',
-          'number,title,url',
+          'number,title,url,labels',
         ],
         {
           env: ghEnv(row.token, row.host),
@@ -207,6 +212,7 @@ export async function pollOnce({
               command,
               signal,
               removeReady: true,
+              labels: issue.labels.map((label) => label.name),
             })
             log(`${row.ref} #${issue.number} 已标记 workling:queued`)
           } catch (error) {

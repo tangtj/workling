@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { eq } from 'drizzle-orm'
 import { issues, runs } from '../src/db/schema.ts'
-import { chainGate } from '../src/serve/launch.ts'
+import { chainGate, launchQueued } from '../src/serve/launch.ts'
 import { pollOnce } from '../src/serve/poll.ts'
 import { scenario, clock } from './helpers/serve.ts'
 import type { Command } from '../src/runtime/types.ts'
@@ -82,7 +82,20 @@ test('主 Issue 展开可执行子项并跳过已完成项目', async () => {
     const edits: string[][] = []
     const command: Command = async (args) => {
       if (args[1] === 'label') return ''
-      if (args[2] === 'list') return JSON.stringify([{ number: 10, title: 'parent', url: 'url' }])
+      if (args[2] === 'list')
+        return JSON.stringify([
+          {
+            number: 10,
+            title: 'parent',
+            url: 'url',
+            labels: [
+              { name: 'workling:ready' },
+              { name: 'workling:running' },
+              { name: 'workling:done' },
+              { name: 'workling:failed' },
+            ],
+          },
+        ])
       if (args[1] === 'api')
         return JSON.stringify(
           [1, 2, 3].map((number) => ({
@@ -108,6 +121,40 @@ test('主 Issue 展开可执行子项并跳过已完成项目', async () => {
     expect(edits[0]).toContain('workling:ready')
     expect(edits[1]).toContain('workling:running')
     expect(edits[1]).toContain('workling:ready')
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('同轮同仓库的排队子 Issue 共享父 Issue 查询，每轮重新读取', async () => {
+  const s = await scenario()
+  try {
+    await s.issue(2, 'queued')
+    await s.issue(3, 'queued')
+    const calls: string[] = []
+    const command: Command = async (args) => {
+      const path = args[2]!
+      calls.push(path)
+      if (path.endsWith('/parent')) return '{"number":10}'
+      if (path.includes('/sub_issues?'))
+        return JSON.stringify(
+          [1, 2, 3].map((number) => ({
+            number,
+            title: 'child',
+            state: 'open',
+            state_reason: null,
+            repository_url: 'https://api.github.com/repos/a/b',
+          })),
+        )
+      return '{"title":"parent"}'
+    }
+    await launchQueued({ ...s.options, command })
+    expect(calls.filter((path) => path.endsWith('/parent'))).toHaveLength(2)
+    expect(calls.filter((path) => path.includes('/sub_issues?'))).toHaveLength(1)
+    expect(calls.filter((path) => path.endsWith('/issues/10'))).toHaveLength(1)
+    await launchQueued({ ...s.options, command })
+    expect(calls.filter((path) => path.includes('/sub_issues?'))).toHaveLength(2)
+    expect(calls.filter((path) => path.endsWith('/issues/10'))).toHaveLength(2)
   } finally {
     await s.dispose()
   }

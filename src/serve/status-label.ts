@@ -14,6 +14,7 @@ export async function setStatusLabel({
   command,
   signal,
   removeReady = false,
+  labels,
 }: {
   repo: typeof repos.$inferSelect
   number: number
@@ -21,15 +22,19 @@ export async function setStatusLabel({
   command: Command
   signal?: AbortSignal
   removeReady?: boolean
+  labels?: string[]
 }) {
   const options = { env: ghEnv(repo.token, repo.host), signal }
-  const output = await command(
-    ['gh', 'issue', 'view', String(number), '-R', repo.path, '--json', 'labels'],
-    options,
-  )
-  const parsed: unknown = JSON.parse(output)
-  if (!Value.Check(labelsSchema, parsed)) throw new Error('Issue 标签格式无效')
-  const names = parsed.labels.map((label) => label.name)
+  let names = labels
+  if (!names) {
+    const output = await command(
+      ['gh', 'issue', 'view', String(number), '-R', repo.path, '--json', 'labels'],
+      options,
+    )
+    const parsed: unknown = JSON.parse(output)
+    if (!Value.Check(labelsSchema, parsed)) throw new Error('Issue 标签格式无效')
+    names = parsed.labels.map((label) => label.name)
+  }
   const remove = [
     ...statuses.filter((status) => status !== target).map((status) => `workling:${status}`),
     ...(removeReady ? ['workling:ready'] : []),

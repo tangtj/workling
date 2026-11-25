@@ -7,8 +7,8 @@ import { CONTRACT_VERSION, writeSpec, type Spec } from '../contract/spec.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs, feedback } from '../db/schema.ts'
 import { createExecutor, workerEnv, type Executor } from '../executor/index.ts'
-import { ghEnv } from '../platform/github.ts'
-import { readParent, readSubIssues, previousSibling } from '../issue/chain.ts'
+import { defaultBranch as readDefaultBranch, ghEnv } from '../platform/github.ts'
+import { readParent, readSubIssues, previousSibling, type SubIssue } from '../issue/chain.ts'
 import { docBranch, taskBranch } from '../issue/branch.ts'
 import { readIssue } from '../issue/read.ts'
 import { parseIssueRef } from '../issue/reference.ts'
@@ -26,33 +26,56 @@ type Log = (message: string) => void
 
 const waiting = new Map<number, string>()
 
+export type ChainCache = {
+  subs: Map<number, Promise<SubIssue[]>>
+  titles: Map<number, Promise<string>>
+}
+
+function cached<T>(map: Map<number, Promise<T>>, key: number, load: () => Promise<T>): Promise<T> {
+  let value = map.get(key)
+  if (!value) {
+    value = load().catch((error: unknown) => {
+      map.delete(key)
+      throw error
+    })
+    map.set(key, value)
+  }
+  return value
+}
+
 export async function chainGate(
   db: WorklingDatabase,
   repo: typeof repos.$inferSelect,
   issue: typeof issueStates.$inferSelect,
   command: Command,
   signal: AbortSignal,
+  cache?: ChainCache,
 ) {
   const rework = issue.prState === 'open'
   try {
     const parent = await readParent({ repo, number: issue.number, command, signal })
     if (!parent) return { kind: 'free' as const }
-    const subs = await readSubIssues({ repo, number: parent.number, command, signal })
+    const subs = await cached(cache?.subs ?? new Map(), parent.number, () =>
+      readSubIssues({ repo, number: parent.number, command, signal }),
+    )
     const position = subs.findIndex((sub) => sub.number === issue.number) + 1
-    const parentData: unknown = JSON.parse(
-      await command(['gh', 'api', `repos/${repo.path}/issues/${parent.number}`], {
-        env: ghEnv(repo.token, repo.host),
-        signal,
-      }),
-    )
-    if (
-      !parentData ||
-      typeof parentData !== 'object' ||
-      !('title' in parentData) ||
-      typeof parentData.title !== 'string'
-    )
-      throw new Error('父 Issue 标题格式无效')
-    const chain = { parent: parent.number, title: parentData.title, position, total: subs.length }
+    const title = await cached(cache?.titles ?? new Map(), parent.number, async () => {
+      const parentData: unknown = JSON.parse(
+        await command(['gh', 'api', `repos/${repo.path}/issues/${parent.number}`], {
+          env: ghEnv(repo.token, repo.host),
+          signal,
+        }),
+      )
+      if (
+        !parentData ||
+        typeof parentData !== 'object' ||
+        !('title' in parentData) ||
+        typeof parentData.title !== 'string'
+      )
+        throw new Error('父 Issue 标题格式无效')
+      return parentData.title
+    })
+    const chain = { parent: parent.number, title, position, total: subs.length }
     if (rework) return { kind: 'free' as const, chain }
     const previous = previousSibling(subs, issue.number)
     if (!previous) return { kind: 'free' as const, chain }
@@ -145,10 +168,7 @@ async function prepareCheckout({
   )
     return { error: `上一个子任务的分支「${stackOn.branch}」不存在` }
   const defaultBranch = async () => {
-    const name = await command(['gh', 'api', `repos/${repo.path}`, '--jq', '.default_branch'], {
-      env: ghEnv(repo.token, repo.host),
-      signal,
-    })
+    const name = await readDefaultBranch({ repo, command, signal })
     await command(['git', 'check-ref-format', branchRef(name)], mirrorOptions)
     return name
   }
@@ -259,13 +279,19 @@ export async function launchQueued({
     return
   }
   if (slots <= 0) return
+  const caches = new Map<number, ChainCache>()
   for (const { issue, repo } of rows) {
     if (slots <= 0 || signal.aborted) break
     if (repo.host !== 'github.com') {
       log(`${repo.ref} #${issue.number} 跳过：M1 只支持 github.com`)
       continue
     }
-    const gate = await chainGate(db, repo, issue, command, signal)
+    let cache = caches.get(repo.id)
+    if (!cache) {
+      cache = { subs: new Map(), titles: new Map() }
+      caches.set(repo.id, cache)
+    }
+    const gate = await chainGate(db, repo, issue, command, signal, cache)
     if (gate.kind === 'wait') {
       if (waiting.get(issue.id) !== gate.reason)
         log(`${repo.ref} #${issue.number} 等待${gate.reason}`)

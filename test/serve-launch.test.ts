@@ -502,13 +502,7 @@ test.each([
       }),
     })
     expect(baseRequests).toEqual(
-      Array.from({ length: docBranch ? 2 : 1 }, () => [
-        'gh',
-        'api',
-        'repos/a/b',
-        '--jq',
-        '.default_branch',
-      ]),
+      Array.from({ length: 1 }, () => ['gh', 'api', 'repos/a/b', '--jq', '.default_branch']),
     )
     expect(s.db.select().from(runs).get()).toMatchObject({
       pid: 123,
