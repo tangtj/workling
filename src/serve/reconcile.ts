@@ -1,15 +1,17 @@
-import { markComment, neutralizeMentions } from './comment.ts'
+import {
+  formatDuration,
+  markComment,
+  neutralizeMentions,
+  normalizeBody,
+  runComment,
+  runKindLabel,
+  runRound,
+} from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import {
-  maxCommentLength,
-  readExecution,
-  readPlan,
-  truncateComment,
-  type Execution,
-} from '../contract/out.ts'
+import { readExecution, readPlan, type Execution } from '../contract/out.ts'
 import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { feedback, issues as issueStates, repos, reviews, runs } from '../db/schema.ts'
@@ -399,9 +401,17 @@ export async function reconcile({
         } catch (error) {
           log(`${repo.ref} #${issue.number} 汇总主 Issue 失败：${errorMessage(error)}`)
         }
-        if (delivery) {
+        const round = run ? runRound(db, issue.id, run.id) : 0
+        const facts = run ? [formatDuration(run.startedAt, endedAt), `运行 #${run.id}`] : []
+        const postRunComment = (parts: Parameters<typeof runComment>[0]) =>
+          sync(
+            ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
+            markComment(neutralizeMentions(redactSecrets(runComment(parts), secrets))),
+          )
+        if (delivery && run) {
           await publishIssueResult({
             ...delivery,
+            run: { ...run, round, endedAt, executor: execution.executor },
             repo,
             issue,
             command,
@@ -412,52 +422,44 @@ export async function reconcile({
             db,
             repo,
             issue,
-            runId: run!.id,
+            runId: run.id,
             taskDir: delivery.taskDir,
             prUrl: delivery.landed.prUrl,
             command,
             llmApiKey: pi.llmApiKey,
             log,
           })
-        } else if (answer) {
+        } else if (answer && run) {
           const explanation = await readRunIssueComment(answer.taskDir, (step) =>
             log(`${repo.ref} #${issue.number} ${step}失败`),
           )
-          const clean = (body: string) => neutralizeMentions(redactSecrets(body, secrets))
-          let body: string
           if (answer.planned) {
             const list = answer.planned.children.map(
-              ({ number, title }, i) => `${i + 1}. #${number} ${clean(title.replace(/\s+/g, ' '))}`,
+              ({ number, title }, i) => `${i + 1}. #${number} ${title.replace(/\s+/g, ' ')}`,
             )
             const docs = answer.planned.branch
               ? `\n\n设计文档：<https://${repo.host}/${repo.path}/tree/${answer.planned.branch}>`
               : ''
-            const suffix = `\n\n### 子 Issue\n\n${list.join('\n')}${docs}\n\n审阅文档与子 Issue 后，给本 Issue 重新打上 \`workling:ready\`，子 Issue 会按上面的顺序执行。要调整可以直接编辑子 Issue；要整体重新拆解，请把子 Issue 全部关闭为「不计划」，再评论 \`/workling <说明>\`。`
-            const intro = clean(
-              ['workling：已完成拆解。', summary.summary, explanation.trim()]
-                .filter(Boolean)
-                .join('\n\n'),
-            )
-            const limit = maxCommentLength - suffix.length
-            const truncated = '\n\n（已截断）'
-            body =
-              (intro.length > limit
-                ? intro.slice(0, limit - truncated.length).replace(/[\uD800-\uDBFF]$/, '') +
-                  truncated
-                : intro) + suffix
-          } else
-            body = truncateComment(
-              clean(`workling：已答复。\n\n${explanation.trim() || '（Pi 未写说明）'}`),
-            )
-          await sync(
-            ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-            markComment(body),
-          )
+            await postRunComment({
+              title: `🧩 第 ${round} 轮 · 拆解 · 完成`,
+              facts: [`${list.length} 个子 Issue`, ...facts],
+              body: normalizeBody([summary.summary, explanation].filter(Boolean).join('\n\n')),
+              tail: `**子 Issue**\n\n${list.join('\n')}${docs}`,
+              next: '审阅文档与子 Issue 后，给本 Issue 重新打上 `workling:ready`，子 Issue 会按上面的顺序执行。要调整可以直接编辑子 Issue；要整体重新拆解，请把子 Issue 全部关闭为「不计划」，再评论 `/workling <说明>`。',
+            })
+          } else {
+            await postRunComment({
+              title: `💬 第 ${round} 轮 · 答复`,
+              facts,
+              body: normalizeBody(explanation) || '（Pi 未写说明）',
+              next: '还有问题或需要改代码时评论 `/workling <说明>`。',
+            })
+          }
           await publishReplies({
             db,
             repo,
             issue,
-            runId: run!.id,
+            runId: run.id,
             taskDir: answer.taskDir,
             prUrl: !answer.planned && issue.prState === 'open' ? issue.prUrl : null,
             command,
@@ -483,17 +485,18 @@ export async function reconcile({
                 log(`${repo.ref} #${issue.number} 读取报告失败：${errorMessage(error)}`)
             }
           }
-          const minutes = run
-            ? Math.ceil((endedAt.getTime() - run.startedAt.getTime()) / 60_000)
-            : 0
-          const header = sustainedFailure
-            ? `workling：对账持续失败（${error}），已停止重试。`
-            : `workling：执行未完成（${error}）。`
-          const body = `${header}\n\n- 机器：${settings.worker}\n- 耗时：${minutes} 分钟\n- 任务目录：${run?.taskDir ?? ''}\n\n${report ? `${report}\n\n` : ''}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。${explanation ? `\n\n### Pi 的说明\n\n${explanation}` : ''}`
-          await sync(
-            ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-            markComment(neutralizeMentions(redactSecrets(body, secrets))),
-          )
+          const failure = sustainedFailure ? '对账失败，已停止重试' : '未完成'
+          await postRunComment({
+            title: run
+              ? `❌ 第 ${round} 轮 · ${runKindLabel[run.kind]} · ${failure}`
+              : '❌ 执行未完成',
+            facts,
+            body: [`**原因**：${error}`, normalizeBody(explanation)].filter(Boolean).join('\n\n'),
+            tail: report
+              ? `<details><summary>回报摘录</summary>\n\n${report}\n\n</details>`
+              : undefined,
+            next: '重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。',
+          })
         }
       }
       if (status === 'done' && run?.taskDir)

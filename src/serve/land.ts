@@ -1,4 +1,12 @@
-import { AI_NOTICE, markComment, neutralizeMentions } from './comment.ts'
+import {
+  AI_NOTICE,
+  formatDuration,
+  markComment,
+  neutralizeMentions,
+  normalizeBody,
+  runComment,
+  runKindLabel,
+} from './comment.ts'
 import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import * as Type from 'typebox'
@@ -9,7 +17,6 @@ import {
   readIssueComment,
   readOutputFile,
   readOutResult,
-  truncateComment,
   type OutResult,
   type Plan,
 } from '../contract/out.ts'
@@ -100,11 +107,31 @@ export async function readRunIssueComment(
 
 const issueBodySchema = Type.Object({ body: Type.String() })
 
+function checklistTail({ changes, skipped }: ReturnType<typeof planChecklist>): string {
+  const checked = changes.filter((item) => item.checked).length
+  const unchecked = changes.length - checked
+  const counts = [
+    checked && `勾选 ${checked} 项`,
+    unchecked && `取消 ${unchecked} 项`,
+    skipped.length && `跳过 ${skipped.length} 项`,
+  ].filter(Boolean)
+  const reasons = { missing: '找不到原文行', ambiguous: '匹配多行', unchanged: '已是目标状态' }
+  const itemText = (line: string) => line.replace(/^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s*/, '')
+  const details = changes.map(
+    ({ line, checked, evidence }) =>
+      `- ${checked ? '☑' : '☐'} ${itemText(line)}${checked ? '' : '（取消勾选）'}\n  - 依据：${evidence.replace(/\s+/g, ' ')}`,
+  )
+  for (const { item, reason } of skipped)
+    details.push(`- 跳过：${itemText(item.line)}（${reasons[reason]}）`)
+  return `**验收勾选**：${counts.join('，')}\n\n<details><summary>逐项依据</summary>\n\n${details.join('\n')}\n\n</details>`
+}
+
 export async function publishIssueResult({
   repo,
   issue,
   taskDir,
   landed,
+  run,
   command,
   llmApiKey,
   log,
@@ -113,6 +140,10 @@ export async function publishIssueResult({
   issue: { number: number }
   taskDir: string
   landed: Landed
+  run: Pick<typeof runs.$inferSelect, 'id' | 'kind' | 'startedAt' | 'executor'> & {
+    round: number
+    endedAt: Date
+  }
   command: Command
   llmApiKey: string | null
   log: (message: string) => void
@@ -128,45 +159,59 @@ export async function publishIssueResult({
       ['--body-file', '-'],
       markComment(neutralizeMentions(redactSecrets(text, [repo.token, llmApiKey ?? '']))),
     )
-  const explanation = await readRunIssueComment(taskDir, warn)
-  const header = landed.created
-    ? `workling：已创建 PR ${landed.prUrl}（${landed.commits} 个提交）`
-    : `workling：已更新 PR ${landed.prUrl}（本次 ${landed.commits} 个提交）`
-  try {
-    await comment(explanation ? truncateComment(`${header}\n\n${explanation}`) : header)
-  } catch {
-    warn('发送 Issue 评论')
+  const explanation = normalizeBody(await readRunIssueComment(taskDir, warn))
+  const readBody = async () => {
+    const value: unknown = JSON.parse(await gh('view', ['--json', 'body']))
+    if (!Value.Check(issueBodySchema, value)) throw new Error('Issue 正文格式无效')
+    return value.body
   }
-
+  let checklist: ReturnType<typeof planChecklist> | undefined
   let step = '读取待办变更'
   try {
     const items = await readChecklist(await runOutDir(taskDir))
-    if (!items.length) return
-    const readBody = async () => {
-      const value: unknown = JSON.parse(await gh('view', ['--json', 'body']))
-      if (!Value.Check(issueBodySchema, value)) throw new Error('Issue 正文格式无效')
-      return value.body
-    }
     step = '读取 Issue 正文'
-    const { changes, skipped } = planChecklist(await readBody(), items)
-    if (!changes.length) return
-    const reasons = { missing: '找不到原文行', ambiguous: '匹配多行', unchanged: '已是目标状态' }
-    const details = changes.map(
-      ({ line, checked, evidence }) =>
-        `- ${checked ? '勾选' : '取消勾选'}：${line}\n  - 依据：${evidence}`,
+    if (items.length) checklist = planChecklist(await readBody(), items)
+  } catch (error) {
+    if (step !== '读取待办变更' || !missingOutput(error)) warn(step)
+  }
+
+  const pr = /\/pull\/(\d+)$/.exec(landed.prUrl)
+  const executors = { pi: 'Pi 实现', codex: 'codex 实现', mixed: 'Pi + codex 实现' }
+  const { partial } = landed
+  try {
+    await comment(
+      runComment({
+        title: `${partial ? '🟡' : '✅'} 第 ${run.round} 轮 · ${runKindLabel[run.kind]} · ${partial ? '部分完成' : '完成'}`,
+        facts: [
+          pr ? `[PR #${pr[1]}](${landed.prUrl})` : landed.prUrl,
+          landed.created ? '新建' : '更新',
+          `${landed.commits} 个提交`,
+          formatDuration(run.startedAt, run.endedAt),
+          ...(run.executor ? [executors[run.executor]] : []),
+          `运行 #${run.id}`,
+        ],
+        body: explanation,
+        tail: checklist?.changes.length ? checklistTail(checklist) : undefined,
+        next: partial
+          ? 'PR 为草稿。要继续时评论 `/workling <补充说明>`，或把剩余部分另开 Issue。'
+          : '评审并合并 PR。需要修改时在 PR 或本 Issue 评论 `/workling <说明>`。',
+      }),
     )
-    for (const { item, reason } of skipped)
-      details.push(`- 跳过：${item.line}（${reasons[reason]}）`)
-    step = '发送待办变更评论'
-    await comment(`workling：即将更新 Issue 待办\n\n${details.join('\n')}`)
-    step = '重新读取 Issue 正文'
+  } catch {
+    warn('发送 Issue 评论')
+    return
+  }
+
+  if (!checklist?.changes.length) return
+  step = '重新读取 Issue 正文'
+  try {
     const latest = await readBody()
-    const updated = applyChecklist(latest, changes)
+    const updated = applyChecklist(latest, checklist.changes)
     if (updated === latest) return
     step = '更新 Issue 待办'
     await gh('edit', ['--body-file', '-'], updated)
-  } catch (error) {
-    if (step !== '读取待办变更' || !missingOutput(error)) warn(step)
+  } catch {
+    warn(step)
   }
 }
 

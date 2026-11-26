@@ -162,7 +162,7 @@ test.each([false, true])('拉起拆解运行并选择默认或覆盖模型，接
     })
     expect(await Bun.file(join(run.taskDir!, 'input', 'branch.md')).exists()).toBe(true)
     expect(s.calls.find(({ args }) => args[2] === 'comment')?.options?.input).toContain(
-      '开始拆解需求',
+      `### ▶️ 第 ${continued ? 2 : 1} 轮 · 拆解 · 开始`,
     )
   } finally {
     await s.dispose()
@@ -286,7 +286,7 @@ test('对账保存拆解结果并等待人工放行，放行后概览移除提�
         })),
       }),
     )
-    await writeFile(join(out, 'issue-comment.md'), '请核对格式选择。')
+    await writeFile(join(out, 'issue-comment.md'), '## 检查\n\n请核对格式选择。')
     const command: Command = async (args, opts) => {
       if (args[1] === 'api' && args[2] === '-X') {
         const { title } = JSON.parse(opts!.input!)
@@ -313,10 +313,14 @@ test('对账保存拆解结果并等待人工放行，放行后概览移除提�
       true,
     )
     const comment = s.calls.find(({ args }) => args[2] === 'comment')?.options?.input
-    expect(comment).toContain('请核对格式选择。')
+    expect(comment).toStartWith(
+      '### 🧩 第 1 轮 · 拆解 · 完成\n\n2 个子 Issue · 用时 2 分钟 · 运行 #1\n\n先实现导出，再处理格式。\n\n**检查**\n\n请核对格式选择。\n\n**子 Issue**\n\n',
+    )
     expect(comment).toContain('1. #43 实现导出\n2. #44 支持格式')
     expect(comment).toContain('设计文档：<https://github.com/a/b/tree/workling/42-issue>')
-    expect(comment).toContain('重新打上 `workling:ready`')
+    expect(comment).toContain(
+      '**下一步**：审阅文档与子 Issue 后，给本 Issue 重新打上 `workling:ready`，子 Issue 会按上面的顺序执行。要调整可以直接编辑子 Issue；要整体重新拆解，请把子 Issue 全部关闭为「不计划」，再评论 `/workling <说明>`。',
+    )
     expect(s.calls.some(({ args }) => args[1] === 'pr')).toBe(false)
 
     const app = createApp(s.db, { workspace: s.workspace })

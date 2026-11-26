@@ -88,7 +88,7 @@ workling 从文档分支切出任务分支 `workling/<号>-<短名>`，PR 同时
 
 - workling 的提交署名为 Workling（GitHub 机器账号 [workling-agent](https://github.com/workling-agent)），作者或 `Co-authored-by` 指向它。
 - 进度看 Issue 标签：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`。
-- 领取时 workling 会在 Issue 下评论；运行中亲自确认的待办项会勾选，修改勾选状态前先评论说明。
+- 每轮开始和结束时 workling 会在 Issue 下评论，结束时的评论写明轮次、结果和下一步；运行中亲自确认的待办项会勾选，依据写在这条评论里。
 - 失败或要返工：修改 Issue 正文或文档分支上的文档（推送到文档分支），再重新打上 `workling:ready`。
 - 接着做：失败、部分完成或 PR 仍开着时，评论 `/workling <补充说明>` 或 `@workling-agent <补充说明>` 即可在同一条工作分支上继续；workling 会把此前运行的回报、分支提交和 PR 反馈一并交给执行方。只提问不要求改代码时，会直接在 Issue 下答复。提及可在评论任意位置，代码块和引用里的不算。
 - 从头来：关闭（或合并）PR 后重新打上 `workling:ready`，会从默认分支或文档分支重新切出任务分支。
