@@ -1,4 +1,4 @@
-import { markComment } from './comment.ts'
+import { markComment, runComment, runKindLabel, runRound } from './comment.ts'
 import { and, desc, eq, ne, inArray } from 'drizzle-orm'
 import { join } from 'node:path'
 import { removeSecrets, writeLlmSecrets } from '../contract/secrets.ts'
@@ -28,6 +28,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import { writeRunContext } from './context.ts'
 import { syncMirror } from './mirror.ts'
 import { selectBatch } from './rework.ts'
+import { redactSecrets } from './secret-scan.ts'
 type Log = (message: string) => void
 
 const waiting = new Map<number, string>()
@@ -577,16 +578,23 @@ export async function launchQueued({
         .slice(0, 10)
         .map((row) => `- ${names[row.source]} · @${row.authorLogin} · ${row.url}`)
       if (included.length > 10) lines.push(`等 ${included.length} 条`)
-      const first =
-        kind === 'plan'
-          ? 'workling：已领取，开始拆解需求。'
-          : kind === 'rework'
-            ? 'workling：收到 PR 反馈，开始返工。'
-            : 'workling：已领取，开始执行。'
-      const body = `${first}\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}${lines.length ? `\n\n触发反馈：\n${lines.join('\n')}` : ''}`
+      const runId = record!.id
+      const branch = db
+        .select({ branch: runs.branch })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .get()?.branch
+      const body = runComment({
+        title: `▶️ 第 ${runRound(db, issue.id, runId)} 轮 · ${runKindLabel[kind]} · 开始`,
+        facts: [...(branch ? [`分支 \`${branch}\``] : []), `运行 #${runId}`],
+        tail: lines.length ? `**触发反馈**\n\n${lines.join('\n')}` : undefined,
+      })
       await command(
         ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-        { env: ghEnv(repo.token, repo.host), input: markComment(body) },
+        {
+          env: ghEnv(repo.token, repo.host),
+          input: markComment(redactSecrets(body, [repo.token, pi.llmApiKey ?? ''])),
+        },
       )
     } catch (error) {
       log(`${repo.ref} #${issue.number} 发送领取评论失败：${errorMessage(error)}`)

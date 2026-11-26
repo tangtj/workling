@@ -20,6 +20,7 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
     const { dir } = await s.running({ delivery: true })
     await mkdir(join(dir, 'repo'))
     await writeFile(join(dir, 'report.md'), '保留')
+    await writeFile(join(dir, 'out', 'outcome.json'), '{"outcome":"completed","executor":"pi"}')
     await writeResult(dir, { exitCode: 0, signal: null, finishedAt: '2026-11-14T10:29:59Z' })
     await reconcile(s.options)
     expect(s.db.select().from(issues).get()).toMatchObject({
@@ -30,6 +31,7 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
     expect(s.db.select().from(runs).get()).toMatchObject({
       endedAt: new Date('2026-11-14T10:29:59Z'),
       exitCode: 0,
+      executor: 'pi',
       error: null,
     })
     expect((await readdir(dir)).sort()).toEqual(['out', 'report.md', 'result.json'])
@@ -62,7 +64,7 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
-      `workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+      `### ✅ 第 1 轮 · 实现 · 完成\n\n[PR #1](https://github.com/a/b/pull/1) · 更新 · 1 个提交 · 用时 1 分钟 · Pi 实现 · 运行 #1\n\n**下一步**：评审并合并 PR。需要修改时在 PR 或本 Issue 评论 \`/workling <说明>\`。\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
   } finally {
     await s.dispose()
@@ -226,10 +228,10 @@ test('交付持续抛错超过 30 分钟后对账标记失败并发出脱敏评�
     expect(s.calls).toHaveLength(2)
     expect(s.calls[0]?.args).toContain('workling:failed')
     expect(s.calls[1]?.options?.input).toStartWith(
-      'workling：对账持续失败（GitHub 拒绝请求 ***），已停止重试。',
+      '### ❌ 第 1 轮 · 实现 · 对账失败，已停止重试\n\n用时 33 分钟 · 运行 #1\n\n**原因**：GitHub 拒绝请求 ***',
     )
     expect(s.calls[1]?.options?.input).toContain(
-      '重新打上 workling:ready，或评论 `/workling <补充说明>` 即可重试。',
+      '**下一步**：重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。',
     )
     expect(s.logs.join('\n')).not.toContain('repo-secret')
     await reconcile(options)
@@ -256,7 +258,11 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
       head: null,
       commits,
     })
-    if (commits) await writeFile(join(out, 'issue-comment.md'), '请 @someone 核对 repo-secret')
+    if (commits)
+      await writeFile(
+        join(out, 'issue-comment.md'),
+        '结果：完成。请 @someone 核对 repo-secret\n\n### 检查',
+      )
     await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
     const commands: string[][] = []
     await reconcile({
@@ -290,7 +296,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
-      `workling：已答复。\n\n${commits ? '请 `@someone` 核对 ***' : '（Pi 未写说明）'}\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+      `### 💬 第 1 轮 · 答复\n\n用时 2 分钟 · 运行 #1\n\n${commits ? '请 <code>&#64;someone</code> 核对 ***\n\n**检查**' : '（Pi 未写说明）'}\n\n**下一步**：还有问题或需要改代码时评论 \`/workling <说明>\`。\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
     expect(s.logs.some((line) => line.includes('答复模式下存在提交，已忽略'))).toBe(commits > 0)
   } finally {
@@ -317,13 +323,13 @@ test('对账退出码 0 但旧运行缺少分支记录时判失败', async () =>
 })
 
 test.each([
-  ['全部成功', ['结果评论', '读取', '待办评论', '重读', '编辑']],
-  ['结果评论', ['结果评论', '读取', '待办评论', '重读', '编辑']],
-  ['读取', ['结果评论', '读取']],
-  ['待办评论', ['结果评论', '读取', '待办评论']],
-  ['重读', ['结果评论', '读取', '待办评论', '重读']],
-  ['编辑', ['结果评论', '读取', '待办评论', '重读', '编辑']],
-  ['无变更', ['结果评论', '读取']],
+  ['全部成功', ['读取', '结果评论', '重读', '编辑']],
+  ['结果评论', ['读取', '结果评论']],
+  ['读取', ['读取', '结果评论']],
+  ['重读', ['读取', '结果评论', '重读']],
+  ['编辑', ['读取', '结果评论', '重读', '编辑']],
+  ['无变更', ['读取', '结果评论']],
+  ['仅取消勾选', ['读取', '结果评论', '重读', '编辑']],
 ] as const)('落地后的 Issue 同步：%s，保持 done 且下轮不重发', async (failure, expected) => {
   const s = await scenario()
   try {
@@ -332,7 +338,7 @@ test.each([
     await writeFile(
       join(dir, 'out', 'checklist.json'),
       JSON.stringify([
-        { line: '- [ ] Run tests', checked: true, evidence: 'bun run check @reviewer' },
+        { line: '- [ ] Run tests', checked: true, evidence: 'bun run check\n  @reviewer' },
         { line: '* [x] Old', checked: false, evidence: '命令退出 1' },
         { line: '- [ ] Missing', checked: true, evidence: 'checked' },
         { line: '- [ ] Duplicate', checked: true, evidence: 'checked' },
@@ -359,9 +365,7 @@ test.each([
               : '读取'
             : args[2] === 'edit'
               ? '编辑'
-              : steps.length
-                ? '待办评论'
-                : '结果评论'
+              : '结果评论'
         steps.push(step)
         if (step === failure) throw new Error('API failed')
         if (step === '读取')
@@ -369,10 +373,17 @@ test.each([
             body:
               failure === '无变更'
                 ? '- [x] Run tests'
-                : '- [ ] Run tests \r\n* [x] Old\r\n- [ ] Duplicate\r\n- [ ] Duplicate',
+                : failure === '仅取消勾选'
+                  ? '* [x] Old'
+                  : '- [ ] Run tests \r\n* [x] Old\r\n- [ ] Duplicate\r\n- [ ] Duplicate',
           })
         if (step === '重读')
-          return JSON.stringify({ body: '新标题\r\n- [ ] Run tests \r\n* [x] Renamed\r\n' })
+          return JSON.stringify({
+            body:
+              failure === '仅取消勾选'
+                ? '* [x] Old'
+                : '新标题\r\n- [ ] Run tests \r\n* [x] Renamed\r\n',
+          })
         if (step === '编辑') {
           edited = options?.input
           expect(edited).not.toContain(AI_NOTICE)
@@ -384,17 +395,25 @@ test.each([
     await reconcile(options)
     expect(s.db.select().from(issues).get()?.status).toBe('done')
     expect(steps).toEqual([...expected])
+    expect(messages).toHaveLength(failure === '结果评论' ? 0 : 1)
     if (failure === '全部成功') {
-      expect(messages).toHaveLength(2)
-      expect(messages[0]).toBe(
-        `workling：已更新 PR https://github.com/a/b/pull/1（本次 1 个提交）\n\n检查通过 \`@someone\`\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+      expect(messages[0]).toContain(
+        '**验收勾选**：勾选 1 项，取消 1 项，跳过 2 项\n\n<details><summary>逐项依据</summary>\n\n' +
+          '- ☑ Run tests\n  - 依据：bun run check <code>&#64;reviewer</code>\n' +
+          '- ☐ Old（取消勾选）\n  - 依据：命令退出 1\n' +
+          '- 跳过：Missing（找不到原文行）\n- 跳过：Duplicate（匹配多行）\n\n</details>\n\n**下一步**',
       )
-      expect(messages[1]).toContain('勾选：- [ ] Run tests')
-      expect(messages[1]).toContain('取消勾选：* [x] Old')
-      expect(messages[1]).toContain('依据：bun run check `@reviewer`')
-      expect(messages[1]).toContain('- [ ] Missing（找不到原文行）')
-      expect(messages[1]).toContain('- [ ] Duplicate（匹配多行）')
       expect(edited).toBe('新标题\r\n- [x] Run tests \r\n* [x] Renamed\r\n')
+    } else if (failure === '仅取消勾选') {
+      expect(messages[0]).toContain('**验收勾选**：取消 1 项，跳过 3 项')
+      expect(edited).toBe('* [ ] Old')
+    } else if (failure === '读取' || failure === '无变更') {
+      expect(messages[0]).toStartWith('### ✅')
+      expect(messages[0]).not.toContain('**验收勾选**')
+      if (failure === '读取') expect(s.logs).toContain('a/b #42 读取 Issue 正文失败')
+    } else if (failure === '结果评论') {
+      expect(s.logs).toContain('a/b #42 发送 Issue 评论失败')
+      expect(edited).toBeUndefined()
     }
   } finally {
     await s.dispose()
@@ -592,23 +611,34 @@ test.each(['有结果', '无结果', '仍存活'])(
   },
 )
 
-test.each(['无 run', 'run 不存在', '无目录'])('缺少任务目录优先判失败：%s', async (kind) => {
-  const s = await scenario()
-  try {
-    if (kind === '无目录') await s.running({ taskDir: null })
-    else {
-      const row = await s.issue()
-      if (kind === 'run 不存在')
-        s.db.update(issues).set({ lastRunId: 999 }).where(eq(issues.id, row.id)).run()
+test.each(['无 run', 'run 不存在', '无目录'])(
+  '缺少任务目录时标记失败并根据运行记录生成标题和事实行：%s',
+  async (kind) => {
+    const s = await scenario()
+    try {
+      if (kind === '无目录') await s.running({ taskDir: null })
+      else {
+        const row = await s.issue()
+        if (kind === 'run 不存在')
+          s.db.update(issues).set({ lastRunId: 999 }).where(eq(issues.id, row.id)).run()
+      }
+      await reconcile(s.options)
+      expect(s.db.select().from(issues).get()?.status).toBe('failed')
+      const header =
+        kind === '无目录'
+          ? '### ❌ 第 1 轮 · 实现 · 未完成\n\n用时 2 分钟 · 运行 #1'
+          : '### ❌ 执行未完成'
+      expect(s.calls[1]!.options!.input).toBe(
+        `${header}\n\n**原因**：缺少任务目录\n\n` +
+          '**下一步**：重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。' +
+          `\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+      )
+      if (kind === '无目录') expect(s.db.select().from(runs).get()?.error).toBe('缺少任务目录')
+    } finally {
+      await s.dispose()
     }
-    await reconcile(s.options)
-    expect(s.db.select().from(issues).get()?.status).toBe('failed')
-    expect(s.calls[1]!.options!.input).toContain('执行未完成（缺少任务目录）')
-    if (kind === '无目录') expect(s.db.select().from(runs).get()?.error).toBe('缺少任务目录')
-  } finally {
-    await s.dispose()
-  }
-})
+  },
+)
 
 test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
   '终态先事务落库再同步标签与兜底评论，%s 正文符合模板且 GitHub 失败不回滚',
@@ -623,7 +653,10 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
         )
       if (kind === '有报告和 Pi 说明') {
         await mkdir(join(dir, 'out'))
-        await writeFile(join(dir, 'out', 'issue-comment.md'), '@someone 检查未通过')
+        await writeFile(
+          join(dir, 'out', 'issue-comment.md'),
+          '未找到错误前的步骤。\n\n### 检查\n\n@someone 检查未通过',
+        )
       }
       await reconcile({
         ...s.options,
@@ -664,13 +697,17 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
         })
       const report =
         kind !== '无报告'
-          ? Array.from({ length: 22 }, (_, i) => `> line ${i + 1}`).join('\n') + '\n\n'
+          ? '\n\n<details><summary>回报摘录</summary>\n\n' +
+            Array.from({ length: 22 }, (_, i) => `> line ${i + 1}`).join('\n') +
+            '\n\n</details>'
+          : ''
+      const explanation =
+        kind === '有报告和 Pi 说明'
+          ? '\n\n未找到错误前的步骤。\n\n**检查**\n\n<code>&#64;someone</code> 检查未通过'
           : ''
       expect(s.calls[1]!.options!.input).toBe(
-        `workling：执行未完成（进程丢失）。\n\n- 机器：worker\n- 耗时：2 分钟\n- 任务目录：${dir}\n\n${report}重新打上 workling:ready，或评论 \`/workling <补充说明>\` 即可重试。` +
-          (kind === '有报告和 Pi 说明'
-            ? '\n\n### Pi 的说明\n\n<code>&#64;someone</code> 检查未通过'
-            : '') +
+        `### ❌ 第 1 轮 · 实现 · 未完成\n\n用时 2 分钟 · 运行 #1\n\n**原因**：进程丢失${explanation}${report}\n\n` +
+          '**下一步**：重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。' +
           `\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
       )
       expect(s.logs.filter((line) => line.includes('更新 GitHub 失败'))).toHaveLength(2)

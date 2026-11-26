@@ -511,7 +511,7 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
     ).toBe(true)
     const claim = s.calls.find(({ args }) => args[1] === 'issue' && args[2] === 'comment')?.options
       ?.input
-    expect(claim).toContain('收到 PR 反馈，开始返工')
+    expect(claim).toContain('轮 · 返工 · 开始')
     expect(claim).toContain('https://example.com/review/12')
     expect(claim).toContain('等 11 条')
     await reconcile({ ...s.options, command, executor: fakeExecutor() })

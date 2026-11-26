@@ -540,7 +540,9 @@ test('Pi 工作约定使用本地 Issue 和附件路径', async () => {
   expect(prohibitions).toContain('git push')
   expect(prohibitions).toContain('运行任何 `gh` 命令')
   expect(prompt).not.toContain('gh ')
-  expect(steps).toContain('<任务目录>/out/issue-comment.md')
+  expect(steps).toContain('把本轮说明写到 `<任务目录>/out/issue-comment.md`')
+  expect(steps).toContain('由 workling 生成，你只写中间的正文')
+  expect(steps).toContain('格式遵循第 10 步的方向，不用 `#` 标题')
   expect(steps).toContain('<任务目录>/out/checklist.json')
   expect(steps).not.toContain('在 PR 下评论')
   for (const removed of [

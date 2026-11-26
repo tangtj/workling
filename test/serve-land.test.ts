@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { chmod, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOutResult, type Plan } from '../src/contract/out.ts'
+import { maxCommentLength, writeOutResult, type Plan } from '../src/contract/out.ts'
 import { openDatabase } from '../src/db/index.ts'
 import { issues, planChildren, repos, runs } from '../src/db/schema.ts'
 import type { Command, RunOptions } from '../src/runtime/types.ts'
@@ -16,6 +16,14 @@ const repo = { host: 'github.com', path: 'a/b', token: 'configured-test-secret' 
 const prUrl = 'https://github.com/a/b/pull/3'
 const landed = (head: string, partial = false) =>
   ({ status: 'done', prUrl, prState: 'open', commits: 1, created: true, head, partial }) as const
+const commentRun = {
+  id: 1,
+  kind: 'implement',
+  round: 1,
+  startedAt: new Date('2026-11-14T10:00:00Z'),
+  endedAt: new Date('2026-11-14T10:24:00Z'),
+  executor: 'codex',
+} as const
 const updated = (head: string) => ({ ...landed(head), created: false })
 const branch = 'workling/42-task'
 const dirs: string[] = []
@@ -148,8 +156,16 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
   }
   const result = await landRun(s.options)
   expect(result).toEqual(landed(tip))
-  await writeFile(join(s.out, 'issue-comment.md'), '@someone: checks passed.')
-  await publishIssueResult({ ...s.options, taskDir: s.options.run.taskDir, landed: landed(tip) })
+  await writeFile(
+    join(s.out, 'issue-comment.md'),
+    '交付结果：完成。\n## 检查\n\n@someone: checks passed. configured-test-secret configured-model-secret',
+  )
+  await publishIssueResult({
+    ...s.options,
+    taskDir: s.options.run.taskDir,
+    landed: landed(tip),
+    run: commentRun,
+  })
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(tip)
   expect(await landRun(s.options)).toEqual(updated(tip))
   expect(await Bun.file(marker).exists()).toBe(false)
@@ -183,7 +199,7 @@ test('落地推送并创建 PR，处理正文和评论，重试复用分支与 P
     ['pr', `workling：Checked by \`@reviewer\`.\n\n\n${AI_NOTICE}\n\n<!-- workling -->`],
     [
       'issue',
-      `workling：已创建 PR ${prUrl}（1 个提交）\n\n\`@someone\`: checks passed.\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+      `### ✅ 第 1 轮 · 实现 · 完成\n\n[PR #3](${prUrl}) · 新建 · 1 个提交 · 用时 24 分钟 · codex 实现 · 运行 #1\n\n**检查**\n\n<code>&#64;someone</code>: checks passed. *** ***\n\n**下一步**：评审并合并 PR。需要修改时在 PR 或本 Issue 评论 \`/workling <说明>\`。\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     ],
   ])
 })
@@ -369,7 +385,12 @@ test('有原文反引号时转义提及；两条评论失败只记录，不影�
     }) satisfies Command,
   }
   expect(await landRun(options)).toEqual(landed(tip))
-  await publishIssueResult({ ...options, taskDir: options.run.taskDir, landed: landed(tip) })
+  await publishIssueResult({
+    ...options,
+    taskDir: options.run.taskDir,
+    landed: landed(tip),
+    run: commentRun,
+  })
   expect(s.calls.find(({ args }) => args[2] === 'create')?.options?.input).toBe(
     `Closes #42\n\n\`example <code>&#64;inside</code>\` thanks <code>&#64;someone</code>\n\n\n${AI_NOTICE}`,
   )
@@ -767,4 +788,41 @@ test('拆解运行接受答复，拒绝其他运行类型的结果', async () =>
     expect(await s.land()).toEqual({ status: 'failed', error: `拆解运行的结果无效：${outcome}` })
   }
   expect(s.posts).toEqual([])
+})
+
+test('部分完成评论保留下步，待办文件无法读取仍发送并截断超长说明', async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), 'workling-issue-result-'))
+  dirs.push(taskDir)
+  const out = join(taskDir, 'out')
+  await mkdir(out)
+  await writeFile(join(out, 'issue-comment.md'), '长'.repeat(maxCommentLength + 1))
+  await writeFile(join(out, 'checklist.json'), '{')
+  const calls: string[][] = []
+  const logs: string[] = []
+  let comment = ''
+  await publishIssueResult({
+    repo,
+    issue,
+    taskDir,
+    landed: { ...landed('a'.repeat(40), true), created: false, prUrl: 'https://example.com/pr' },
+    run: { ...commentRun, id: 9, round: 2, kind: 'rework', executor: 'mixed' },
+    command: async (args, options) => {
+      calls.push(args)
+      comment = options?.input ?? ''
+      return ''
+    },
+    llmApiKey: null,
+    log: (line) => logs.push(line),
+  })
+  expect(calls).toEqual([['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-']])
+  expect(logs).toEqual(['a/b #42 读取待办变更失败'])
+  expect(
+    comment.startsWith(
+      '### 🟡 第 2 轮 · 返工 · 部分完成\n\nhttps://example.com/pr · 更新 · 1 个提交 · 用时 24 分钟 · Pi + codex 实现 · 运行 #9\n\n长',
+    ),
+  ).toBe(true)
+  expect(comment).toEndWith(
+    `\n\n（已截断）\n\n**下一步**：PR 为草稿。要继续时评论 \`/workling <补充说明>\`，或把剩余部分另开 Issue。\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+  )
+  expect(comment.match(/（已截断）/g)).toHaveLength(1)
 })

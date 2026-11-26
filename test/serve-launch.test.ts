@@ -11,7 +11,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readLlmSecrets } from '../src/contract/secrets.ts'
 import { readSpec } from '../src/contract/spec.ts'
-import { issues, repos, runs } from '../src/db/schema.ts'
+import { feedback, issues, repos, runs } from '../src/db/schema.ts'
 import { parsePiSettings, readPiSettings, updatePiSettings } from '../src/config/pi.ts'
 import { launchQueued } from '../src/serve/launch.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
@@ -140,7 +140,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
       '-',
     ])
     expect(s.calls[3]!.options?.input).toBe(
-      `workling：已领取，开始执行。\n\n- 机器：worker\n- 开始时间：${clock.toISOString()}\n- 任务目录：${launched[0]!.taskDir}\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+      `### ▶️ 第 1 轮 · 实现 · 开始\n\n分支 \`workling/2-issue\` · 运行 #1\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
     expect(s.logs.some((line) => line.includes('跳过'))).toBe(true)
     await launchQueued({
@@ -686,6 +686,53 @@ test.each([
     expect(run).toMatchObject({ error: `拉起失败：${failure}`, endedAt: clock, pid: null })
     expect(await readResult(run.taskDir!)).toBeUndefined()
     expect(s.calls.map(({ args }) => args[2])).toEqual(['view'])
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('返工领取展示已保存的分支及触发反馈，保留原始提及', async () => {
+  const s = await scenario()
+  try {
+    const { issue, run } = await s.running({ delivery: true })
+    s.db
+      .update(issues)
+      .set({ status: 'queued', prState: 'open' })
+      .where(eq(issues.id, issue.id))
+      .run()
+    s.db.update(runs).set({ endedAt: clock }).where(eq(runs.id, run.id)).run()
+    const url = 'https://github.com/a/b/issues/42#issuecomment-1'
+    s.db
+      .insert(feedback)
+      .values({
+        repoId: s.repo.id,
+        issueId: issue.id,
+        source: 'issue_comment',
+        externalId: '1',
+        authorId: '1',
+        authorLogin: 'alice',
+        trust: 'write',
+        isCommand: true,
+        body: '/workling 请补充检查',
+        url,
+        status: 'pending',
+        createdAt: clock,
+        updatedAt: clock,
+        seenAt: clock,
+      })
+      .run()
+    await launchQueued({
+      ...s.options,
+      executor: fakeExecutor(),
+      now: () => new Date(clock.getTime() + 1000),
+      command: (args, options) =>
+        args[0] === 'git' && args[1] === 'for-each-ref'
+          ? Promise.resolve(args.at(-1) ?? '')
+          : s.command(args, options),
+    })
+    expect(s.calls.find(({ args }) => args[2] === 'comment')?.options?.input).toBe(
+      `### ▶️ 第 2 轮 · 返工 · 开始\n\n分支 \`workling/42-issue\` · 运行 #2\n\n**触发反馈**\n\n- Issue 评论 · @alice · ${url}\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
+    )
   } finally {
     await s.dispose()
   }
