@@ -62,6 +62,8 @@ type Info = {
   lastSuccess?: { tag: string; at: string } | null
 }
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+// 只缩短展示：edge 版本号在 VERSION、state.json 与更新接口里仍是完整的 12 位。
+const short = (version: string) => version.replace(/^(edge-[0-9a-f]{7})[0-9a-f]{5}$/, '$1')
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     refresh: 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2',
@@ -226,7 +228,7 @@ export function VersionPanel({ version }: { version: string }) {
         try {
           const current = await local()
           if (current.current !== original) {
-            setStatus(`已更新到 ${current.current}`)
+            setStatus(`已更新到 ${short(current.current)}`)
             await pause(1000)
             if (!controller.current?.signal.aborted) location.reload()
             return
@@ -351,7 +353,7 @@ export function VersionPanel({ version }: { version: string }) {
     detail = info.latest ? `最新发布 ${info.latest.tag}` : ''
   } else if (available) {
     badge = 'arrow'
-    description = `发现新版本 ${info.target!.version}`
+    description = `发现新版本 ${short(info.target!.version)}`
   } else if (checked && info.latest) badge = 'check'
   else if (checked) description = '暂无可用发布'
   const prepare = async () => {
@@ -404,7 +406,7 @@ export function VersionPanel({ version }: { version: string }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="version-popover"
-        title={available ? `发现新版本 ${info.target!.version}` : '版本与更新'}
+        title={available ? `发现新版本 ${short(info.target!.version)}` : '版本与更新'}
         onClick={() => {
           if (open) {
             setOpen(false)
@@ -415,7 +417,7 @@ export function VersionPanel({ version }: { version: string }) {
           }
         }}
       >
-        <span>{info.current}</span>
+        <span>{short(info.current)}</span>
         <span className="dot" hidden={!available}></span>
       </button>
       {createPortal(
@@ -442,13 +444,13 @@ export function VersionPanel({ version }: { version: string }) {
           </header>
           <div className="version-body" aria-live="polite">
             <div className="version-number">
-              <strong>
+              <strong title={info.current}>
                 {info.currentUrl ? (
                   <a href={info.currentUrl} target="_blank" rel="noopener noreferrer">
-                    {info.current}
+                    {short(info.current)}
                   </a>
                 ) : (
-                  info.current
+                  short(info.current)
                 )}
               </strong>
               <span className={`version-badge version-badge--${badge}`}>
@@ -491,7 +493,7 @@ export function VersionPanel({ version }: { version: string }) {
               disabled={busy || Boolean(selection)}
               onClick={() => void prepare()}
             >
-              更新到 {info.target?.version || ''}
+              更新到 {info.target ? short(info.target.version) : ''}
             </button>
             <a
               className="version-link"
@@ -505,7 +507,7 @@ export function VersionPanel({ version }: { version: string }) {
             </a>
           </div>
           <section className="version-section" hidden={!selection}>
-            <b>更新到 {selection}</b>
+            <b>更新到 {short(selection)}</b>
             <p className="small">会备份数据库并重启服务。</p>
             <fieldset hidden={!info.runningTasks}>
               <legend>执行方式</legend>
@@ -590,7 +592,7 @@ export function VersionPanel({ version }: { version: string }) {
           <footer className="version-footer">
             <p className="small muted" hidden={!info.lastSuccess}>
               {info.lastSuccess
-                ? `上次更新：${info.lastSuccess.tag} · ${new Date(info.lastSuccess.at).toLocaleString()}`
+                ? `上次更新：${short(info.lastSuccess.tag)} · ${new Date(info.lastSuccess.at).toLocaleString()}`
                 : ''}
             </p>
             <p className="small version-warning" hidden={!info.lastError}>
