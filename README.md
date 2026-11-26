@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-workling watches GitHub Issues and hands them to [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Pi builds the prompt, calls codex, commits locally and replies on the Issue. workling queues and launches tasks, validates commits before pushing and opening a PR, and updates status labels. It also ships a small admin UI.
+workling watches GitHub Issues and hands them to [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Pi assesses the task, then builds the prompt and calls codex (Pi handles simple, clearly specified tasks, merge conflicts and small fix-ups itself), commits locally and replies on the Issue. workling queues and launches tasks, validates commits before pushing and opening a PR, and updates status labels. It also ships a small admin UI.
 
 ```text
 Issue labeled workling:ready → serve queues it → launches a task → Pi calls codex and commits locally → serve validates commits, opens a PR and sets workling:done / workling:failed
@@ -53,7 +53,7 @@ bun run start          # or: workling serve
 1. On first start the admin password is printed to the terminal (shown only once). Open <http://127.0.0.1:7420> and sign in.
 2. Under **Settings**, fill in the LLM base URL and key.
 3. Under **Repos**, add a repository (e.g. `github:owner/repo`) with a token that can read and write its Issues, code and pull requests. workling creates the `workling:*` labels in that repository.
-4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort. For larger designs, keep the documents on a branch and add a `分支：<name>` line; the task branch is created from it.
+4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort, and `执行：pi` or `执行：codex` picks who implements. For larger designs, keep the documents on a branch and add a `分支：<name>` line; the task branch is created from it.
 5. Follow progress and logs in the admin UI. Results show up as labels: `workling:queued` → `workling:running` → `workling:done` / `workling:failed`. To retry a failed Issue, add `workling:ready` again. When a task fails, is partially completed, or its PR remains open, comment `/workling <additional instructions>` or mention the machine account (derived from Pi’s `gitEmail` setting, `@workling-agent` by default) to continue on the same branch.
 
 To have workling turn a requirement into design docs and ordered sub-issues, add `模式：拆解` on its own line and label the issue `workling:ready`. Review the result and apply the label again when the sub-issues are ready to run.

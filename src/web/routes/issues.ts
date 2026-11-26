@@ -20,6 +20,10 @@ function responseRun(row: typeof runs.$inferSelect) {
     error: row.error,
     summary: row.summary,
     reportResult: row.reportResult,
+    executor: row.executor,
+    difficulty: row.difficulty,
+    clarity: row.clarity,
+    assessmentNote: row.assessmentNote,
     logTail: row.logTail,
   }
 }

@@ -27,10 +27,16 @@ export async function readSample(dir: string) {
   }
   if (!Value.Check(sampleSchema, value)) throw new Error(`样例 ${dir} 的 sample.json 结构无效`)
   const change = await lstat(join(dir, 'change'), { throwIfNoEntry: false })
+  const target = await lstat(join(dir, 'target'), { throwIfNoEntry: false })
   if (value.kind === 'review' && !change?.isDirectory())
     throw new Error('review 样例必须包含 change/ 目录')
-  if (value.kind !== 'review' && change) throw new Error('只有 review 样例可以包含 change/')
-  return value
+  if (target) {
+    if (value.kind !== 'implement' && value.kind !== 'rework')
+      throw new Error('只有实现类样例可以包含 target/')
+    if (!target.isDirectory() || !change?.isDirectory())
+      throw new Error('包含 target/ 的样例必须同时包含 change/ 目录')
+  } else if (value.kind !== 'review' && change) throw new Error('只有 review 样例可以包含 change/')
+  return { ...value, continued: Boolean(target) }
 }
 
 /** 样例名指向 worker/samples/ 下的目录，也可以直接给出路径。 */
@@ -40,7 +46,9 @@ export function resolveSample(name: string): string {
 
 /**
  * 把样例展开成一个可以直接 `run` 的运行目录：复制 input/，把 repo/ 提交成 Git 工作副本并检出任务分支，
- * 评审样例再覆盖并提交 change/，最后写入 spec.json。固定提交时间便于比较不同提示词或模型的产出。
+ * 评审样例再覆盖并提交 change/，最后写入 spec.json。带 target/ 的样例模拟接续运行：change/ 是任务分支上
+ * 已有的提交，target/ 是合并目标 main 在分叉后的提交，并建立 origin/main 供 Pi 合并。
+ * 固定提交时间便于比较不同提示词或模型的产出。
  */
 export async function prepareSample({
   sample,
@@ -53,7 +61,7 @@ export async function prepareSample({
   command: Command
   model?: ModelOverrides
 }): Promise<Spec> {
-  const config = await readSample(sample)
+  const { continued, ...config } = await readSample(sample)
   if (await stat(dest).catch(() => null)) throw new Error(`运行目录已存在：${dest}`)
   await mkdir(dest, { recursive: true, mode: 0o700 })
   await cp(join(sample, 'input'), join(dest, 'input'), { recursive: true })
@@ -78,18 +86,28 @@ export async function prepareSample({
   await git('init', '--quiet')
   await git('add', '--all')
   await git('commit', '--quiet', '--message', 'Sample base')
-  const baseRef = await git('rev-parse', 'HEAD')
+  let baseRef = await git('rev-parse', 'HEAD')
   await git('checkout', '--quiet', '-b', config.branch)
-  if (config.kind === 'review') {
+  if (config.kind === 'review' || continued) {
     await cp(join(sample, 'change'), repo, { recursive: true })
     await git('add', '--all')
     await git('commit', '--quiet', '--message', 'Sample change')
+  }
+  if (continued) {
+    // 接续运行的基点是任务分支此前的末端，与主体的记录方式一致。
+    baseRef = await git('rev-parse', 'HEAD')
+    await git('checkout', '--quiet', 'main')
+    await cp(join(sample, 'target'), repo, { recursive: true })
+    await git('add', '--all')
+    await git('commit', '--quiet', '--message', 'Sample target')
+    await git('update-ref', 'refs/remotes/origin/main', 'main')
+    await git('checkout', '--quiet', config.branch)
   }
   const spec: Spec = {
     contract: CONTRACT_VERSION,
     kind: config.kind,
     issue: config.issue,
-    repo: { baseRef, branch: config.branch },
+    repo: { baseRef, branch: config.branch, ...(continued ? { continued: true } : {}) },
     model: { ...config.model, ...model },
     git: config.git,
   }

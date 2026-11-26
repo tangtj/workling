@@ -179,7 +179,35 @@ test('samples 列出内置样例', async () => {
   expect(lines).toContain('add-function\timplement\t增加 subtract 函数')
   expect(lines.some((line) => line.startsWith('answer-question\t'))).toBe(true)
   expect(lines).toContain('plan-notes\tplan\t为笔记添加标签')
+  expect(lines).toContain('resolve-conflict\timplement\tgreet 支持自定义问候语')
   expect(lines).toContain('review-diff\treview\t增加 sumRange 函数')
+})
+
+test('prepare resolve-conflict 展开为与 origin/main 冲突的接续分支', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'workling-conflict-sample-'))
+  try {
+    spyOn(console, 'log').mockImplementation(() => {})
+    const dir = join(root, 'run')
+    expect(await main(['prepare', 'resolve-conflict', dir])).toBe(0)
+    const spec = await readSpec(dir)
+    expect(spec).toMatchObject({
+      kind: 'implement',
+      repo: { branch: 'workling/4-greeting', continued: true },
+    })
+    const git = (...args: string[]) => run(['git', ...args], { cwd: join(dir, 'repo') })
+    expect(await git('symbolic-ref', 'HEAD')).toBe('refs/heads/workling/4-greeting')
+    expect(await git('rev-parse', 'HEAD')).toBe(spec.repo.baseRef)
+    expect(await git('log', '--format=%s', 'HEAD..origin/main')).toBe('Sample target')
+    await expect(git('merge-tree', '--write-tree', 'HEAD', 'origin/main')).rejects.toThrow(
+      '退出码 1',
+    )
+    expect(await git('status', '--porcelain')).toBe('')
+    expect(await readFile(join(dir, 'input/branch.md'), 'utf8')).toContain(
+      '## 与合并目标的冲突\n\n- src/greet.ts',
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('prepare review-diff 保留基点并把评审改动提交到任务分支', async () => {
@@ -247,6 +275,14 @@ test('prepare 按样例类型校验 change/ 目录', async () => {
         '只有 review 样例可以包含 change/',
       )
     }
+    await mkdir(join(root, 'target'))
+    await writeFile(path, JSON.stringify({ ...sample, kind: 'plan' }))
+    await expect(main(['prepare', root, dest])).rejects.toThrow('只有实现类样例可以包含 target/')
+    await rm(join(root, 'change'), { recursive: true })
+    await writeFile(path, JSON.stringify(sample))
+    await expect(main(['prepare', root, dest])).rejects.toThrow(
+      '包含 target/ 的样例必须同时包含 change/ 目录',
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }

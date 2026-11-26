@@ -11,7 +11,7 @@ import { NotFound } from '../not-found.tsx'
 import { issueReviewsOptions, ReviewCard } from '../issue-reviews.tsx'
 import { loadFeedback } from '../feedback.ts'
 import { RunTimeline } from '../run-timeline.tsx'
-import { runKindLabels } from '../../run-kind.ts'
+import { assessmentText, executorLabels, runKindLabels } from '../../run-kind.ts'
 
 type Detail = NonNullable<Awaited<ReturnType<ReturnType<typeof issueDetailOptions>['queryFn']>>>
 
@@ -89,9 +89,21 @@ function RunCard({
               <dd>{run.exitCode ?? '—'}</dd>
             </div>
             <div>
-              <dt>codex 结论</dt>
+              <dt>回报结论</dt>
               <dd>{run.reportResult ?? '—'}</dd>
             </div>
+            {run.executor && (
+              <div>
+                <dt>执行方</dt>
+                <dd>{executorLabels[run.executor]}</dd>
+              </div>
+            )}
+            {assessmentText(run) && (
+              <div>
+                <dt>执行评估</dt>
+                <dd title={run.assessmentNote ?? undefined}>{assessmentText(run)}</dd>
+              </div>
+            )}
             <div>
               <dt>机器</dt>
               <dd className="mono">{run.worker}</dd>

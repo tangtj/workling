@@ -821,6 +821,19 @@ test.each(['done', '非零结果', 'invalid', '丢失', 'canceled'])(
           expect(s.db.select().from(runs).get()?.endedAt).toBeNull()
           await writeFile(join(dir, 'task.log'), 'finish repo-secret')
           await writeFile(join(dir, 'report.md'), '结果：完成 repo-secret')
+          await mkdir(join(dir, 'out'), { recursive: true })
+          await writeFile(
+            join(dir, 'out', 'outcome.json'),
+            JSON.stringify({
+              outcome: 'completed',
+              executor: 'mixed',
+              assessment: {
+                difficulty: 'high',
+                clarity: 'unclear',
+                reason: '涉及迁移 repo-secret',
+              },
+            }),
+          )
           await writeFile(
             join(dir, 'pi-events.jsonl'),
             JSON.stringify({
@@ -849,6 +862,10 @@ test.each(['done', '非零结果', 'invalid', '丢失', 'canceled'])(
         logTail: 'finish ***',
         summary: '结论 ***',
         reportResult: '完成 ***',
+        executor: 'mixed',
+        difficulty: 'high',
+        clarity: 'unclear',
+        assessmentNote: '涉及迁移 ***',
       })
       await reconcile({ ...s.options, executor })
       expect(finished).toBe(1)

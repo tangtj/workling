@@ -6,7 +6,16 @@ import { join } from 'node:path'
 import { openDatabase, type WorklingDatabase } from '../src/db/index.ts'
 import { issues, piSettings, repos, runs } from '../src/db/schema.ts'
 
+function removeExecutionMigration(db: WorklingDatabase) {
+  for (const column of ['executor', 'difficulty', 'clarity', 'assessment_note'])
+    db.run(sql.raw(`ALTER TABLE runs DROP COLUMN ${column}`))
+  db.run(
+    sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+  )
+}
+
 function removePlanMigration(db: WorklingDatabase) {
+  removeExecutionMigration(db)
   db.run(sql`DROP TABLE plan_children`)
   db.run(sql`ALTER TABLE pi_settings DROP COLUMN plan_model`)
   db.run(sql`ALTER TABLE pi_settings DROP COLUMN plan_effort`)
@@ -338,6 +347,55 @@ test('影子评审与拆解迁移保留已有仓库与模型，默认关闭评�
       })
       expect(upgraded.db.all(sql`SELECT * FROM reviews`)).toEqual([])
       expect(upgraded.db.all(sql`SELECT * FROM plan_children`)).toEqual([])
+    } finally {
+      upgraded.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('执行评估迁移为已有运行记录补上可空的执行方与评估列', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-execution-'))
+  try {
+    const first = await openDatabase(dir)
+    removeExecutionMigration(first.db)
+    first.db.run(sql`
+      INSERT INTO repos (ref, platform, host, path, token, created_at, updated_at)
+      VALUES ('github:a/b', 'github', 'github.com', 'a/b', 'secret', 1, 1)
+    `)
+    first.db.run(sql`
+      INSERT INTO issues (repo_id, number, status, created_at, updated_at)
+      VALUES (1, 1, 'done', 1, 1)
+    `)
+    first.db.run(sql`
+      INSERT INTO runs (issue_id, worker, started_at, report_result)
+      VALUES (1, 'worker', 1, '完成')
+    `)
+    first.close()
+    const upgraded = await openDatabase(dir)
+    try {
+      expect(upgraded.db.select().from(runs).get()).toMatchObject({
+        reportResult: '完成',
+        executor: null,
+        difficulty: null,
+        clarity: null,
+        assessmentNote: null,
+      })
+      expect(
+        upgraded.db
+          .all<{ name: string; notnull: number }>(sql`PRAGMA table_info(runs)`)
+          .filter(({ name }) =>
+            ['executor', 'difficulty', 'clarity', 'assessment_note'].includes(name),
+          ),
+      ).toEqual(
+        [
+          { name: 'executor', notnull: 0 },
+          { name: 'difficulty', notnull: 0 },
+          { name: 'clarity', notnull: 0 },
+          { name: 'assessment_note', notnull: 0 },
+        ].map((column) => expect.objectContaining(column)),
+      )
     } finally {
       upgraded.close()
     }

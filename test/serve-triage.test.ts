@@ -24,6 +24,15 @@ test('检查必需章节、代码围栏和指令格式', () => {
   expect(checkIssue('## 目标\n\n## 验收\n').missingSections).toEqual(['目标', '验收'])
 })
 
+test('执行指令只接受 pi 或 codex，代码块里的不算', () => {
+  const body = (line: string) => `## 目标\n实现\n## 验收\n通过\n${line}`
+  for (const value of ['pi', 'codex'])
+    expect(checkIssue(body(`执行：${value}`)).invalidDirectives).toEqual([])
+  for (const value of ['', 'claude', 'Pi'])
+    expect(checkIssue(body(`执行：${value}`)).invalidDirectives).toEqual(['执行：格式无效'])
+  expect(checkIssue(body('```\n执行：claude\n```')).invalidDirectives).toEqual([])
+})
+
 test('输出校验拒绝非法字段，提取 JSON 并限制长度', () => {
   expect(() => parseTriageResult('not json')).toThrow()
   expect(() => parseTriageResult('{"decision":"yes","missing":[],"note":""}')).toThrow()

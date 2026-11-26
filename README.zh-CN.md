@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-监听 GitHub Issue，自动交给 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 处理：Pi 组装提示词并调用 codex 改代码，在任务分支上本地提交并回复 Issue。workling 负责轮询、排队、拉起任务、校验提交、推送并建 PR、更新状态标签，并提供一个管理页。
+监听 GitHub Issue，自动交给 [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 处理：Pi 评估任务后组装提示词并调用 codex 改代码（简单且说明清楚的任务、合并冲突和小修补由 Pi 直接完成），在任务分支上本地提交并回复 Issue。workling 负责轮询、排队、拉起任务、校验提交、推送并建 PR、更新状态标签，并提供一个管理页。
 
 ```text
 Issue 打上 workling:ready → serve 入队 → 拉起 task → Pi 调用 codex 并本地提交 → serve 校验提交并建 PR，标签改为 workling:done / workling:failed
@@ -53,7 +53,7 @@ bun run start          # 或 workling serve
 1. 首次启动会在终端打印管理密码（只显示一次），打开 <http://127.0.0.1:7420> 登录。
 2. 在「设置」里填好 LLM 接入地址与 Key。
 3. 在「仓库」里添加仓库（如 `github:owner/repo`）和 token。token 需要能读写该仓库的 Issue、代码与 PR。添加后 workling 会在仓库里创建 `workling:*` 标签。
-4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值；设计文档较多时放在文档分支上，正文加 `分支：<名称>` 行，任务分支会从该分支切出。
+4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值，写 `执行：pi` 或 `执行：codex` 指定由谁实现；设计文档较多时放在文档分支上，正文加 `分支：<名称>` 行，任务分支会从该分支切出。
 5. 在管理页查看进度与日志。结果以标签呈现：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`；失败后重新打上 `workling:ready` 即可重试。失败、部分完成或 PR 仍开着时，可评论 `/workling <补充说明>` 或提及机器账号（由 Pi 设置的 `gitEmail` 推导，默认 `@workling-agent`），在同一分支上继续。
 
 要让 workling 把需求拆成设计文档和有序子 Issue，请在正文单独一行写 `模式：拆解` 并打上 `workling:ready`。审阅拆解结果后，再次打上该标签即可开始执行子 Issue。

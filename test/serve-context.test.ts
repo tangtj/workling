@@ -3,6 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { feedback, runs } from '../src/db/schema.ts'
 import { writeRunContext } from '../src/serve/context.ts'
+import { run } from '../src/runtime/process.ts'
+import type { Command } from '../src/runtime/types.ts'
 import { baseRef, clock, scenario } from './helpers/serve.ts'
 
 async function fixture() {
@@ -289,6 +291,120 @@ test('链条上下文区分堆叠、已合并与普通 Issue', async () => {
     expect(await s.read('chain.md')).toContain('#1，分支 `workling/1-first`')
     await writeRunContext({ ...s.context, chain: { ...chain, kind: 'base' } })
     expect(await s.read('chain.md')).toContain('上一个子任务已合并，本任务从 main 切出')
+  } finally {
+    await s.dispose()
+  }
+})
+
+// 在任务目录建一个真实仓库：任务分支与 origin/main 各自在分叉后提交了一次。
+async function divergedRepo(taskDir: string, mainFile: string) {
+  const cwd = join(taskDir, 'repo')
+  await mkdir(cwd, { recursive: true })
+  const env = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_AUTHOR_NAME: 'test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
+    GIT_COMMITTER_NAME: 'test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+  }
+  const git = (...args: string[]) => run(['git', ...args], { cwd, env, quietStderr: true })
+  const commit = async (file: string, content: string) => {
+    await writeFile(join(cwd, file), content)
+    await git('add', '--all')
+    await git('commit', '--quiet', '-m', content)
+  }
+  await git('init', '--quiet', '--initial-branch=main')
+  await commit('shared.txt', '起点\n')
+  await git('switch', '--quiet', '-c', 'workling/42-issue')
+  await commit('shared.txt', '任务分支的改动\n')
+  await git('switch', '--quiet', 'main')
+  await commit(mainFile, '合并目标的改动\n')
+  await git('update-ref', 'refs/remotes/origin/main', 'main')
+  await git('switch', '--quiet', 'workling/42-issue')
+  const command: Command = (args, options) => run(args, { ...options, env })
+  return command
+}
+
+test('接续分支与合并目标冲突时 branch.md 列出冲突文件', async () => {
+  const s = await fixture()
+  try {
+    const git = await divergedRepo(s.context.taskDir, 'shared.txt')
+    await writeRunContext({
+      ...s.context,
+      checkout: { ...s.context.checkout, continued: true, target: 'main' },
+      command: (args, options) =>
+        args[0] === 'git' ? git(args, options) : s.command(args, options),
+    })
+    const content = await s.read('branch.md')
+    expect(content).toContain('- 合并目标：main')
+    expect(content).toEndWith('## 与合并目标的冲突\n\n- shared.txt')
+    // 试合并不能改动工作副本。
+    expect(await readFile(join(s.context.taskDir, 'repo', 'shared.txt'), 'utf8')).toBe(
+      '任务分支的改动\n',
+    )
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('接续分支与合并目标没有冲突时 branch.md 写「无」', async () => {
+  const s = await fixture()
+  try {
+    const git = await divergedRepo(s.context.taskDir, 'other.txt')
+    await writeRunContext({
+      ...s.context,
+      checkout: { ...s.context.checkout, continued: true, target: 'main' },
+      command: (args, options) =>
+        args[0] === 'git' ? git(args, options) : s.command(args, options),
+    })
+    const content = await s.read('branch.md')
+    expect(content).toContain('起点分支在分叉后又前进了 1 个提交，未自动 rebase')
+    expect(content).toEndWith('## 与合并目标的冲突\n\n无')
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('堆叠运行的合并目标是上游任务分支，新建分支时不检测冲突', async () => {
+  const s = await fixture()
+  try {
+    const commands: string[][] = []
+    await writeRunContext({
+      ...s.context,
+      checkout: { ...s.context.checkout, start: 'workling/41-prev', target: 'workling/41-prev' },
+      command: async (args, options) => {
+        if (args[0] === 'git') commands.push(args)
+        return s.command(args, options)
+      },
+    })
+    const content = await s.read('branch.md')
+    expect(content).toContain('- 合并目标：workling/41-prev')
+    expect(content).toContain('本次从起点新建，暂无提交。')
+    expect(content).not.toContain('与合并目标的冲突')
+    expect(commands.filter((args) => args[1] === 'merge-tree')).toEqual([])
+  } finally {
+    await s.dispose()
+  }
+})
+
+test('冲突检测命令本身失败时 branch.md 写「未能检测」，其余上下文照常生成', async () => {
+  const s = await fixture()
+  try {
+    await writeRunContext({
+      ...s.context,
+      checkout: { ...s.context.checkout, continued: true, target: 'main' },
+      command: async (args, options) => {
+        if (args[0] !== 'git') return s.command(args, options)
+        if (args[1] === 'merge-tree') throw new Error('git 退出码 129\nunknown option')
+        return args[1] === 'rev-list' ? '0' : ''
+      },
+    })
+    expect(await s.read('branch.md')).toEndWith('## 与合并目标的冲突\n\n未能检测')
+    expect(await s.read('runs.md')).toBe('无此前运行。')
+    expect(await s.read('docs.md')).toBe('无文档分支。')
+    expect(s.logs).toEqual([])
   } finally {
     await s.dispose()
   }
