@@ -1,4 +1,4 @@
-import { desc, eq, isNotNull, and } from 'drizzle-orm'
+import { desc, eq, isNotNull, and, ne } from 'drizzle-orm'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import * as Type from 'typebox'
@@ -229,7 +229,7 @@ export async function syncPullRequests({
           const upstreamRun = db
             .select()
             .from(runs)
-            .where(eq(runs.issueId, issue.id))
+            .where(and(eq(runs.issueId, issue.id), ne(runs.kind, 'review')))
             .orderBy(desc(runs.id))
             .get()
           if (!upstreamRun?.branch) continue
@@ -238,7 +238,13 @@ export async function syncPullRequests({
             const run = db
               .select()
               .from(runs)
-              .where(and(eq(runs.issueId, downstream.id), isNotNull(runs.stackBranch)))
+              .where(
+                and(
+                  eq(runs.issueId, downstream.id),
+                  ne(runs.kind, 'review'),
+                  isNotNull(runs.stackBranch),
+                ),
+              )
               .orderBy(desc(runs.id))
               .get()
             if (run?.stackBranch !== upstreamRun.branch) continue

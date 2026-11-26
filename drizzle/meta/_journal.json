@@ -71,6 +71,13 @@
       "when": 1795291620822,
       "tag": "0009_brown_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795616861577,
+      "tag": "0010_great_tempest",
+      "breakpoints": true
     }
   ]
 }

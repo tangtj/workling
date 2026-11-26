@@ -1,12 +1,12 @@
 import { markComment, neutralizeMentions } from './comment.ts'
 import { type ExecutorSettings } from '../config/executor.ts'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { truncateComment } from '../contract/out.ts'
 import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
-import { feedback, issues as issueStates, repos, runs } from '../db/schema.ts'
+import { feedback, issues as issueStates, repos, reviews, runs } from '../db/schema.ts'
 import { createExecutor, type Executor } from '../executor/index.ts'
 import { readParent, readSubIssues } from '../issue/chain.ts'
 import * as Type from 'typebox'
@@ -41,6 +41,7 @@ export function recoverOrphanFeedback(db: WorklingDatabase): void {
     .where(
       and(
         eq(issueStates.status, 'queued'),
+        ne(runs.kind, 'review'),
         isNull(runs.endedAt),
         isNull(runs.pid),
         isNull(runs.container),
@@ -55,7 +56,7 @@ export function recoverOrphanFeedback(db: WorklingDatabase): void {
       .run()
 }
 
-async function cleanTaskDirs(
+export async function cleanTaskDirs(
   db: WorklingDatabase,
   workspace: string,
   repo: typeof repos.$inferSelect,
@@ -86,6 +87,17 @@ async function cleanTaskDirs(
   }
 }
 
+export type ReconcileOptions = {
+  db: WorklingDatabase
+  command: Command
+  log: Log
+  settings: Settings
+  pi: PiSettings
+  executorSettings: ExecutorSettings
+  now?: () => Date
+  executor?: Executor
+}
+
 export async function reconcile({
   db,
   command,
@@ -95,16 +107,7 @@ export async function reconcile({
   executorSettings,
   now = () => new Date(),
   executor = createExecutor(executorSettings, command, log),
-}: {
-  db: WorklingDatabase
-  command: Command
-  log: Log
-  settings: Settings
-  pi: PiSettings
-  executorSettings: ExecutorSettings
-  now?: () => Date
-  executor?: Executor
-}): Promise<void> {
+}: ReconcileOptions): Promise<void> {
   const rows = db
     .select({ issue: issueStates, repo: repos, run: runs })
     .from(issueStates)
@@ -251,6 +254,30 @@ export async function reconcile({
             })
             .where(eq(runs.id, run.id))
             .run()
+        if (delivery && run?.branch && repo.platform === 'github' && repo.host === 'github.com') {
+          const currentRepo = tx
+            .select({ level: repos.reviewLevel })
+            .from(repos)
+            .where(eq(repos.id, repo.id))
+            .get()
+          if (currentRepo?.level === 'shadow') {
+            const { prUrl, head, partial } = delivery.landed
+            tx.insert(reviews)
+              .values({
+                repoId: repo.id,
+                issueId: issue.id,
+                deliveryRunId: run.id,
+                prUrl,
+                branch: run.branch,
+                headSha: head,
+                partial,
+                status: 'queued',
+                createdAt: current,
+              })
+              .onConflictDoNothing({ target: reviews.deliveryRunId })
+              .run()
+          }
+        }
       })
       terminalSaved = true
       // 库是执行状态的事实来源；GitHub 同步失败不能回滚终态。

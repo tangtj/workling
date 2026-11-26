@@ -14,6 +14,8 @@ const piPatchSchema = Type.Object(
   {
     model: Type.Optional(Type.String()),
     effort: Type.Optional(Type.String()),
+    reviewModel: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    reviewEffort: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     piModel: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     llmBaseUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     llmApiKey: Type.Optional(Type.Union([Type.String(), Type.Null()])),

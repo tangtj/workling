@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { updateUpdateChannel } from '../src/config/update.ts'
 import { openDatabase } from '../src/db/index.ts'
-import { issues, repos, sessions } from '../src/db/schema.ts'
+import { issues, repos, runs, sessions } from '../src/db/schema.ts'
 import { hashToken } from '../src/web/auth.ts'
 import { createApp } from '../src/web/app.ts'
 import { run } from '../src/runtime/process.ts'
@@ -602,10 +602,20 @@ test('依赖安装合并更新代理与现有环境，保留 PATH', async () => 
 test('drain 等待任务归零后才备份切换退出，waiting 期间暂停拉起', async () => {
   const f = await fixture()
   const issue = await addRunning(f.db)
+  const reviewRun = f.db
+    .insert(runs)
+    .values({
+      issueId: issue.id,
+      kind: 'review',
+      worker: 'test',
+      startedAt: new Date(),
+    })
+    .returning()
+    .get()
   const active = await startUpdate({ target: 'v0.2.0', ...f.options, drainIntervalMs: 10 })
   await waiting()
   expect(launchPaused()).toBe(true)
-  expect(active.logs.at(-1)).toBe('等待 1 个运行中的任务结束')
+  expect(active.logs.at(-1)).toBe('等待 2 个运行中的任务结束')
   expect(f.calls[1]?.slice(0, 2)).toEqual(['bun', 'install'])
   await Bun.sleep(35)
   expect(active.logs.filter((line) => line.startsWith('等待'))).toHaveLength(1)
@@ -615,6 +625,10 @@ test('drain 等待任务归零后才备份切换退出，waiting 期间暂停拉
   expect(f.exits).toEqual([])
   f.db.$client.run("UPDATE sample SET value = 'finished task'")
   f.db.update(issues).set({ status: 'done' }).where(eq(issues.id, issue.id)).run()
+  await Bun.sleep(35)
+  expect(active.logs.at(-1)).toBe('等待 1 个运行中的任务结束')
+  expect(f.exits).toEqual([])
+  f.db.update(runs).set({ endedAt: new Date() }).where(eq(runs.id, reviewRun.id)).run()
   await settled(f.appHome)
   expect(active.status).toBe('done')
   const backup = new Database(readState(f.appHome)!.backup!, { readonly: true })

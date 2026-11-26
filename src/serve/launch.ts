@@ -1,6 +1,5 @@
 import { markComment } from './comment.ts'
-import { type ExecutorSettings } from '../config/executor.ts'
-import { and, count, desc, eq, ne, inArray } from 'drizzle-orm'
+import { and, desc, eq, ne, inArray } from 'drizzle-orm'
 import { join } from 'node:path'
 import { removeSecrets, writeLlmSecrets } from '../contract/secrets.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../contract/spec.ts'
@@ -16,7 +15,8 @@ import { writeResult } from '../contract/result.ts'
 import { createTaskDir } from './task-dir.ts'
 import { type PiSettings } from '../config/pi.ts'
 import type { Command } from '../runtime/types.ts'
-import type { Settings } from '../config/env.ts'
+import type { ReconcileOptions } from './reconcile.ts'
+import { countRunningTasks } from './slots.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
 import { writeRunContext } from './context.ts'
@@ -217,6 +217,30 @@ async function prepareCheckout({
     ['git', 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`],
     mirrorOptions,
   )
+  const options = await cloneCheckout({ taskDir, mirror, pi, command, signal })
+  await command(['git', 'switch', '-c', branch, baseRef], options)
+  return {
+    baseRef,
+    branch,
+    start,
+    ...(doc ? { docBranch: doc.name } : {}),
+    ...(continuedBranch ? { continued: true } : {}),
+  }
+}
+
+export async function cloneCheckout({
+  taskDir,
+  mirror,
+  pi,
+  command,
+  signal,
+}: {
+  taskDir: string
+  mirror: string
+  pi: PiSettings
+  command: Command
+  signal: AbortSignal
+}) {
   const cwd = join(taskDir, 'repo')
   await command(['git', 'clone', '--no-hardlinks', '--no-checkout', '--dissociate', mirror, cwd], {
     signal,
@@ -230,15 +254,10 @@ async function prepareCheckout({
   )
   await command(['git', 'config', '--local', 'user.name', pi.gitName], options)
   await command(['git', 'config', '--local', 'user.email', pi.gitEmail], options)
-  await command(['git', 'switch', '-c', branch, baseRef], options)
-  return {
-    baseRef,
-    branch,
-    start,
-    ...(doc ? { docBranch: doc.name } : {}),
-    ...(continuedBranch ? { continued: true } : {}),
-  }
+  return options
 }
+
+export type LaunchOptions = ReconcileOptions & { signal: AbortSignal }
 
 export async function launchQueued({
   db,
@@ -250,21 +269,8 @@ export async function launchQueued({
   signal,
   now = () => new Date(),
   executor = createExecutor(executorSettings, command, log),
-}: {
-  db: WorklingDatabase
-  command: Command
-  log: Log
-  settings: Settings
-  pi: PiSettings
-  executorSettings: ExecutorSettings
-  signal: AbortSignal
-  now?: () => Date
-  executor?: Executor
-}): Promise<void> {
-  let slots =
-    executorSettings.concurrency -
-    db.select({ count: count() }).from(issueStates).where(eq(issueStates.status, 'running')).get()!
-      .count
+}: LaunchOptions): Promise<void> {
+  let slots = executorSettings.concurrency - countRunningTasks(db)
   const rows = db
     .select({ issue: issueStates, repo: repos })
     .from(issueStates)
@@ -375,7 +381,14 @@ export async function launchQueued({
       const previous = db
         .select({ branch: runs.branch })
         .from(runs)
-        .where(and(eq(runs.issueId, issue.id), ne(runs.id, record.id), ne(runs.branch, '')))
+        .where(
+          and(
+            eq(runs.issueId, issue.id),
+            ne(runs.id, record.id),
+            ne(runs.kind, 'review'),
+            ne(runs.branch, ''),
+          ),
+        )
         .orderBy(desc(runs.id))
         .get()
       const { title, body } = await readIssue({

@@ -1,5 +1,8 @@
 import * as Type from 'typebox'
 
+export const reviewLevelSchema = Type.Union([Type.Literal('off'), Type.Literal('shadow')])
+export type ReviewLevel = Type.Static<typeof reviewLevelSchema>
+
 export const repoSchema = Type.Object(
   {
     id: Type.Integer(),
@@ -16,6 +19,8 @@ export const repoSchema = Type.Object(
       Type.Literal('auto'),
     ]),
     triageSince: Type.Union([Type.String(), Type.Null()]),
+    reviewLevel: reviewLevelSchema,
+    reviewSince: Type.Union([Type.String(), Type.Null()]),
     createdAt: Type.String(),
     updatedAt: Type.String(),
   },

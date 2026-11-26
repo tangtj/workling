@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeOutResult } from '../src/contract/out.ts'
 import { writeLlmSecrets } from '../src/contract/secrets.ts'
-import { issues, runs } from '../src/db/schema.ts'
+import { issues, repos, reviews, runs } from '../src/db/schema.ts'
 import { writeResult } from '../src/contract/result.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
 import { mirrorPath } from '../src/serve/mirror.ts'
@@ -69,10 +69,47 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
   }
 })
 
+test.each(['off', 'shadow'] as const)(
+  '部分完成的返工按 %s 级别决定是否排评审',
+  async (reviewLevel) => {
+    const s = await scenario()
+    try {
+      s.db.update(repos).set({ reviewLevel }).run()
+      const { issue, dir, run } = await s.running({ delivery: true })
+      s.db.update(runs).set({ kind: 'rework' }).where(eq(runs.id, run.id)).run()
+      await writeOutResult(join(dir, 'out'), {
+        contract: 2,
+        outcome: 'partial',
+        branch: run.branch!,
+        head: 'b'.repeat(40),
+        commits: 1,
+      })
+      await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
+      await reconcile(s.options)
+      expect(s.db.select().from(issues).get()?.status).toBe('done')
+      const rows = s.db.select().from(reviews).all()
+      if (reviewLevel === 'off') expect(rows).toEqual([])
+      else
+        expect(rows).toMatchObject([
+          {
+            issueId: issue.id,
+            deliveryRunId: run.id,
+            status: 'queued',
+            partial: true,
+            headSha: 'b'.repeat(40),
+          },
+        ])
+    } finally {
+      await s.dispose()
+    }
+  },
+)
+
 test('对账完成自动变基交付后同时记录新基点与 Issue 终态', async () => {
   const s = await scenario()
   try {
     const { dir, run } = await s.running({ delivery: true })
+    s.db.update(repos).set({ reviewLevel: 'shadow' }).run()
     const remote = await localRemote(s.workspace)
     const initial = await remote.commit('refs/heads/main', 'initial')
     const upstream = 'workling/12-upstream'
@@ -100,7 +137,7 @@ test('对账完成自动变基交付后同时记录新基点与 Issue 终态', a
     await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
     const prUrl = 'https://github.com/a/b/pull/1'
     let prBase: string | undefined
-    await reconcile({
+    const options: Parameters<typeof reconcile>[0] = {
       ...s.options,
       command: (args, options) => {
         if (args[0] === 'git') return remote.git(args, options)
@@ -112,6 +149,7 @@ test('对账完成自动变基交付后同时记录新基点与 Issue 终态', a
         }
         if (args.includes('workling:done')) {
           expect(s.db.select().from(issues).get()).toMatchObject({ status: 'done', prUrl })
+          expect(s.db.select().from(reviews).get()?.status).toBe('queued')
           expect(s.db.select().from(runs).get()).toMatchObject({
             stackBranch: null,
             baseRef: newBase,
@@ -119,11 +157,34 @@ test('对账完成自动变基交付后同时记录新基点与 Issue 终态', a
         }
         return s.command(args, options)
       },
-    })
+    }
+    await reconcile(options)
     expect(prBase).toBe('main')
     expect(await remote.write(['rev-parse', `${ref}^`])).toBe(newBase)
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'done', prUrl })
     expect(s.db.select().from(runs).get()).toMatchObject({ stackBranch: null, baseRef: newBase })
+    const headSha = await remote.write(['rev-parse', ref])
+    expect(headSha).not.toBe(tip)
+    expect(s.db.select().from(reviews).get()).toMatchObject({
+      deliveryRunId: run.id,
+      status: 'queued',
+      headSha,
+      partial: false,
+      prUrl,
+      branch: run.branch,
+    })
+    // 用同一次交付的原始运行数据重试，远端已经有变基后的提交和 PR。
+    s.db.update(runs).set({ baseRef, stackBranch: upstream }).where(eq(runs.id, run.id)).run()
+    s.db.update(issues).set({ status: 'running' }).run()
+    await reconcile({
+      ...options,
+      command: (args, opts) =>
+        args[1] === 'pr' && args[2] === 'list' && !args.includes('merged')
+          ? Promise.resolve(JSON.stringify([{ url: prUrl, state: 'OPEN', isDraft: false }]))
+          : options.command(args, opts),
+    })
+    expect(s.db.select().from(reviews).all()).toHaveLength(1)
+    expect(s.db.select().from(issues).get()?.status).toBe('done')
   } finally {
     await s.dispose()
   }
@@ -182,6 +243,7 @@ test('交付持续抛错超过 30 分钟后对账标记失败并发出脱敏评�
 test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复', async (commits) => {
   const s = await scenario()
   try {
+    s.db.update(repos).set({ reviewLevel: 'shadow' }).run()
     const { issue, dir, run } = await s.running({ delivery: true })
     const prUrl = 'https://github.com/a/b/pull/9'
     s.db.update(issues).set({ prUrl, prState: 'open' }).where(eq(issues.id, issue.id)).run()
@@ -211,6 +273,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
       prState: 'open',
     })
     expect(s.db.select().from(runs).get()?.error).toBeNull()
+    expect(s.db.select().from(reviews).all()).toEqual([])
     expect(commands).toEqual([
       [
         'gh',

@@ -8,6 +8,7 @@ import { issueDetailOptions, parseDetailId } from '../issue-detail.ts'
 import { Badge, PlatformIcon, PR, StageBadge } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
 import { NotFound } from '../not-found.tsx'
+import { issueReviewsOptions, ReviewCard } from '../issue-reviews.tsx'
 import { loadFeedback } from '../feedback.ts'
 import { RunTimeline } from '../run-timeline.tsx'
 
@@ -154,6 +155,8 @@ export function IssuePage() {
   const issueId = parseDetailId(useParams().id)
   const options = issueDetailOptions(issueId)
   const page = useQuery(options)
+  const reviews = useQuery(issueReviewsOptions(issueId))
+  const reviewTime = Math.max(page.data?.now ?? 0, reviews.dataUpdatedAt)
   const queryClient = useQueryClient()
   const { setActive } = usePageLayout()
   const data = page.data
@@ -175,6 +178,7 @@ export function IssuePage() {
     void queryClient.invalidateQueries({ queryKey: issueDetailOptions(issueId).queryKey })
     void queryClient.invalidateQueries({ queryKey: shellKey })
     void queryClient.invalidateQueries({ queryKey: ['feedback', issueId] })
+    void queryClient.invalidateQueries({ queryKey: issueReviewsOptions(issueId).queryKey })
   }, [queryClient, issueId])
 
   const error = page.isError && (
@@ -206,6 +210,14 @@ export function IssuePage() {
       id: item.id,
       item,
     })),
+    ...(reviews.data ?? [])
+      .filter((item) => item.status !== 'skipped')
+      .map((item) => ({
+        type: 'review' as const,
+        time: new Date(item.createdAt).getTime(),
+        id: item.id,
+        item,
+      })),
     ...items.map((item) => ({
       type: 'feedback' as const,
       time: new Date(item.createdAt).getTime(),
@@ -315,12 +327,13 @@ export function IssuePage() {
               ))}
             </div>
           </header>
+          {reviews.isError && <p className="error-box">加载评审失败</p>}
           {feedback.isError && <p className="error-box">加载反馈失败</p>}
           <ol className="timeline">
             {events
               .filter((event) =>
                 filter === 'runs'
-                  ? event.type === 'run'
+                  ? event.type === 'run' || event.type === 'review'
                   : filter !== 'commands' || event.type !== 'feedback' || event.item.isCommand,
               )
               .map((event) => {
@@ -387,6 +400,13 @@ export function IssuePage() {
                     </li>
                   )
                 }
+                if (event.type === 'review')
+                  return (
+                    <li className="tl-event tl-event--run" key={`review-${event.id}`}>
+                      <span className="tl-node tl-node--run" aria-hidden="true" />
+                      <ReviewCard review={event.item} now={reviewTime} />
+                    </li>
+                  )
                 const item = event.item
                 const round = item.runId === null ? undefined : rounds.get(item.runId)
                 const source =

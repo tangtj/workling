@@ -6,6 +6,8 @@ import type { Environment } from '../runtime/types.ts'
 export type PiSettings = {
   model: string
   effort: 'low' | 'medium' | 'high' | 'xhigh'
+  reviewModel: string | null
+  reviewEffort: PiSettings['effort'] | null
   piModel: string | null
   llmBaseUrl: string | null
   llmApiKey: string | null
@@ -34,6 +36,20 @@ export function parsePiSettings(input: Record<string, unknown>): PiSettings {
   const effort = text('effort', 'medium')
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh')
     throw new Error(`effort 的值无效：${effort}`)
+  const reviewModel = optionalReviewSetting('reviewModel')
+  const reviewEffort = optionalReviewSetting('reviewEffort')
+  if (
+    reviewEffort !== null &&
+    reviewEffort !== 'low' &&
+    reviewEffort !== 'medium' &&
+    reviewEffort !== 'high' &&
+    reviewEffort !== 'xhigh'
+  )
+    throw new Error(`reviewEffort 的值无效：${reviewEffort}`)
+  function optionalReviewSetting(field: string) {
+    const value = input[field]
+    return typeof value === 'string' && !value.trim() ? null : text(field, null)
+  }
   const piModel = text('piModel', null)
   const llmBaseUrl = text('llmBaseUrl', null)
   let llmApiKey: string | null = null
@@ -64,6 +80,8 @@ export function parsePiSettings(input: Record<string, unknown>): PiSettings {
   return {
     model,
     effort,
+    reviewModel,
+    reviewEffort,
     piModel,
     llmBaseUrl: llmBaseUrl?.replace(/\/+$/, '') ?? null,
     llmApiKey,
@@ -112,7 +130,7 @@ export function importPiSettings(
       throw new Error(
         error.message.replace(
           /\b(model|effort|piModel|llmBaseUrl|llmApiKey|llmApi|gitName|gitEmail)\b/g,
-          (field) => environmentFields[field as keyof PiSettings],
+          (field) => environmentFields[field as keyof typeof environmentFields],
         ),
       )
     }

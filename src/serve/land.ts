@@ -34,6 +34,8 @@ type Landed = {
   prUrl: string
   prState: 'open'
   commits: number
+  head: string
+  partial: boolean
   created: boolean
   restacked?: { baseRef: string }
 }
@@ -49,7 +51,7 @@ async function readMarkdown(dir: string, name: string): Promise<string> {
   return text
 }
 
-function preparePr(title: string, body: string, number: number, outcome: 'completed' | 'partial') {
+function preparePr(body: string, number: number, outcome: 'completed' | 'partial') {
   const closing = new RegExp(
     `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \\t]*:?[ \\t]+#${number}(?![\\w/-])`,
     'i',
@@ -62,11 +64,10 @@ function preparePr(title: string, body: string, number: number, outcome: 'comple
     body = body.replace(closingGlobal, `Refs #${number}`)
     if (!refs.test(body))
       body = `Refs #${number}\n> 部分完成：合入本 PR 不会关闭 #${number}，剩余工作见「未完成与存疑」。\n\n${body}`
-    if (!title.startsWith('[部分完成]')) title = `[部分完成] ${title}`
   } else if (!closing.test(body)) {
     body = `Closes #${number}\n\n${body}`
   }
-  return { title, body, partial }
+  return { body, partial }
 }
 
 export async function runOutDir(taskDir: string): Promise<string> {
@@ -426,8 +427,19 @@ export async function landRun({
     )
     if (!Value.Check(prsSchema, prs)) throw new Error('PR 列表格式无效')
     const existing = prs[0]
+    const prBody = neutralizeMentions(redactSecrets(body, secrets))
+    const prepared = preparePr(prBody, issue.number, outcome)
+    const { partial } = prepared
     if (existing && !pushed && !restacked)
-      return { status: 'done', prUrl: existing.url, prState: 'open', commits, created: false }
+      return {
+        status: 'done',
+        prUrl: existing.url,
+        prState: 'open',
+        commits,
+        head: tip,
+        partial,
+        created: false,
+      }
 
     const deliveryBody = (body: string) =>
       restacked
@@ -436,24 +448,25 @@ export async function landRun({
           ? `${body}\n\n堆叠于 #${run.stackBranch.match(/^workling\/(\d+)-/)?.[1] ?? '?'} 的分支 \`${run.stackBranch}\`，请先审阅并合并上游 PR。`
           : body
 
-    const prFields = async () =>
-      preparePr(
+    const prFields = async () => {
+      const title =
         issue.title ??
-          (await gh([
-            'issue',
-            'view',
-            String(issue.number),
-            '-R',
-            repo.path,
-            '--json',
-            'title',
-            '--jq',
-            '.title',
-          ])),
-        neutralizeMentions(redactSecrets(body, secrets)),
-        issue.number,
-        outcome,
-      )
+        (await gh([
+          'issue',
+          'view',
+          String(issue.number),
+          '-R',
+          repo.path,
+          '--json',
+          'title',
+          '--jq',
+          '.title',
+        ]))
+      return {
+        body: prepared.body,
+        title: partial && !title.startsWith('[部分完成]') ? `[部分完成] ${title}` : title,
+      }
+    }
     let prUrl: string
     if (existing) {
       prUrl = existing.url
@@ -487,7 +500,7 @@ export async function landRun({
       const base =
         restacked?.baseBranch ?? run.stackBranch ?? (await readDefaultBranch({ repo, command }))
       if (!base) throw new Error('无法读取仓库默认分支')
-      const { title, body, partial } = await prFields()
+      const { title, body } = await prFields()
       prUrl = await gh(
         [
           'pr',
@@ -523,6 +536,8 @@ export async function landRun({
       prUrl,
       prState: 'open',
       commits,
+      head: tip,
+      partial,
       created: !existing,
       ...(restacked ? { restacked: { baseRef: restacked.baseRef } } : {}),
     }

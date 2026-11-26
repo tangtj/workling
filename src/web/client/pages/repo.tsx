@@ -13,7 +13,8 @@ import { issueListOptions } from '../issue-list.ts'
 import { IssueTable, PlatformIcon, StatusChips } from '../issue-table.tsx'
 import { usePageLayout } from '../layout.tsx'
 import { loadTrustedUsers } from '../feedback.ts'
-import { repoRequest } from '../repos.ts'
+import type { ReviewLevel } from '../../repos.ts'
+import { repoRequest, reposOptions } from '../repos.ts'
 import { LevelButtons, rate } from './triage.tsx'
 import * as Value from 'typebox/value'
 import { triageSchema } from '../../triage-schema.ts'
@@ -115,6 +116,54 @@ function Triage({ id, refName, github }: { id: number; refName: string; github: 
   )
 }
 
+function ReviewSettings({ id, github }: { id: number; github: boolean }) {
+  const client = useQueryClient()
+  const repo = useQuery({ ...reposOptions, select: (rows) => rows.find((row) => row.id === id) })
+  const mutation = useMutation({
+    mutationFn: (level: ReviewLevel) => repoRequest(`/api/repos/${id}/review`, 'PUT', { level }),
+    onSuccess: () => client.invalidateQueries({ queryKey: reposOptions.queryKey }),
+  })
+  const level = repo.data?.reviewLevel
+  return (
+    <section className="card">
+      <header className="card-head">
+        <h2>评审级别</h2>
+      </header>
+      <div className="card-body">
+        <div className="level-control">
+          <div role="group" aria-label="评审级别" className="segmented">
+            {(
+              [
+                ['off', '关闭'],
+                ['shadow', '影子'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={level === value}
+                disabled={!github || level === undefined || mutation.isPending}
+                onClick={() => {
+                  if (value !== level) mutation.mutate(value)
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {!github && <small>暂只支持 github.com</small>}
+          {repo.data?.reviewSince && (
+            <small>最近设置于 {new Date(repo.data.reviewSince).toLocaleString()}</small>
+          )}
+          <p>影子：每次交付后自动评审，只记录结论，不在 GitHub 上发评论或触发返工。</p>
+          {repo.isError && <p className="error-box">加载评审级别失败</p>}
+          {mutation.error && <p className="error-box">{mutation.error.message}</p>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function RepoPage() {
   const page = useQuery(issueListOptions)
   const { id } = useParams()
@@ -163,6 +212,10 @@ export function RepoPage() {
         </div>
       </header>
       <Triage id={repo.id} refName={repo.ref} github={repo.platform === 'github'} />
+      <ReviewSettings
+        id={repo.id}
+        github={repo.platform === 'github' && repo.host === 'github.com'}
+      />
       <TrustedUsers id={repo.id} github={repo.platform === 'github'} />
       <section className="card">
         <div className="toolbar toolbar--stack">

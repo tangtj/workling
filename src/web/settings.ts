@@ -1,10 +1,18 @@
 import * as Type from 'typebox'
 
+const effort = Type.Union([
+  Type.Literal('low'),
+  Type.Literal('medium'),
+  Type.Literal('high'),
+  Type.Literal('xhigh'),
+])
 const nullableString = Type.Union([Type.String(), Type.Null()])
 export const piSettingsSchema = Type.Object(
   {
     model: Type.String(),
-    effort: Type.Union(['low', 'medium', 'high', 'xhigh'].map((v) => Type.Literal(v))),
+    effort,
+    reviewModel: nullableString,
+    reviewEffort: Type.Union([effort, Type.Null()]),
     piModel: nullableString,
     llmBaseUrl: nullableString,
     llmApiKey: nullableString,

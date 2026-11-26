@@ -74,7 +74,9 @@ export function RunLogPage() {
             {issue.title ?? <span className="muted">（未记录标题）</span>}
           </p>
           <div className="row">
-            <strong>第 {data.runs.length - runIndex} 次</strong>
+            <strong>
+              {run.kind === 'review' ? '评审' : `第 ${data.runs.length - runIndex} 次`}
+            </strong>
             <Badge status={status} text={run.error === '进程中断' ? '中断' : undefined} />
           </div>
           <p>

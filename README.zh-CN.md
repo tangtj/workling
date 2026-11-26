@@ -56,6 +56,12 @@ bun run start          # 或 workling serve
 4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值；设计文档较多时放在文档分支上，正文加 `分支：<名称>` 行，任务分支会从该分支切出。
 5. 在管理页查看进度与日志。结果以标签呈现：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`；失败后重新打上 `workling:ready` 即可重试。失败、部分完成或 PR 仍开着时，可评论 `/workling <补充说明>` 或提及机器账号（由 Pi 设置的 `gitEmail` 推导，默认 `@workling-agent`），在同一分支上继续。
 
+### 影子评审
+
+评审默认关闭。在 GitHub 仓库详情页将「评审级别」设为「影子」，之后每次完成或部分完成的交付都会自动评审。Issue 详情页会显示结论、发现和执行日志入口。影子评审不会在 GitHub 上发评论、改标签或触发返工。
+
+在「设置」的 Codex 卡片可单独指定「评审模型」和「评审强度」。留空时沿用实现模型，强度为 `high`。
+
 ## 在其他项目接入
 
 接入后，业务仓库的开发类任务改为：本地 AI 写需求与设计文档、建 Issue，人打上 `workling:ready`，由 workling 实现并发起 PR。业务仓库的开发者只需要已登录的 `gh`，不需要安装 workling。

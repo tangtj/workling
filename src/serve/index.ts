@@ -20,6 +20,7 @@ import { loadSteps, runUpgradeSteps, type UpgradeStep } from '../upgrade/index.t
 import { pollOnce } from './poll.ts'
 import { launchQueued } from './launch.ts'
 import { reconcile, recoverOrphanFeedback } from './reconcile.ts'
+import { launchReviews, reconcileReviews, recoverOrphanReviews } from './review.ts'
 import { syncPullRequests } from './pr-sync.ts'
 import { queueRework } from './rework.ts'
 import { ensureWorkerImage } from '../executor/worker-image.ts'
@@ -98,6 +99,7 @@ export async function serve({
       )
     try {
       recoverOrphanFeedback(db)
+      await recoverOrphanReviews(db, settings.workspace, log)
       await reconcile({
         db,
         command,
@@ -156,6 +158,11 @@ export async function serve({
         log(`对账失败：${errorMessage(error)}`)
       }
       try {
+        await reconcileReviews({ db, command, log, settings, pi, executorSettings })
+      } catch (error) {
+        log(`评审对账失败：${errorMessage(error)}`)
+      }
+      try {
         await syncPullRequests({ db, command, log, signal, workspace: settings.workspace })
       } catch (error) {
         if (!signal.aborted) log(`PR 同步失败：${errorMessage(error)}`)
@@ -212,16 +219,19 @@ export async function serve({
           if (workerError && workerError !== status.workerError)
             log(`暂停拉起新任务：${workerError}`)
           status.workerError = workerError
-          if (!paused && !workerError)
-            await launchQueued({
-              db,
-              command,
-              log,
-              settings,
-              pi,
-              executorSettings,
-              signal,
-            })
+          if (!paused && !workerError) {
+            const launch = { db, command, log, settings, pi, executorSettings, signal }
+            try {
+              await launchQueued(launch)
+            } catch (error) {
+              log(`拉起任务失败：${errorMessage(error)}`)
+            }
+            try {
+              await launchReviews(launch)
+            } catch (error) {
+              log(`拉起评审失败：${errorMessage(error)}`)
+            }
+          }
         } catch (error) {
           log(`拉起任务失败：${errorMessage(error)}`)
         }

@@ -23,7 +23,12 @@ export function cardDraft(data: SettingsData, card: Card): Draft {
     e = data.executor
   switch (card) {
     case 'codex':
-      return { model: p.model, effort: p.effort }
+      return {
+        model: p.model,
+        effort: p.effort,
+        reviewModel: p.reviewModel ?? '',
+        reviewEffort: p.reviewEffort ?? '',
+      }
     case 'pi':
       return {
         piModel: p.piModel ?? '',

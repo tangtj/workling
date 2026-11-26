@@ -1,9 +1,12 @@
+import type * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import { feedbackSchema } from '../feedback.ts'
 import { Hono } from 'hono'
-import { desc, eq } from 'drizzle-orm'
-import { repos, issues, runs, feedback } from '../../db/schema.ts'
+import { and, desc, eq, ne } from 'drizzle-orm'
+import { repos, issues, runs, feedback, reviews } from '../../db/schema.ts'
 import type { AppDeps } from '../app.ts'
+import { reviewSchema } from '../../contract/out.ts'
+import type { IssueReview } from '../review.ts'
 import { repoId } from '../response.ts'
 
 function responseRun(row: typeof runs.$inferSelect) {
@@ -18,6 +21,16 @@ function responseRun(row: typeof runs.$inferSelect) {
     summary: row.summary,
     reportResult: row.reportResult,
     logTail: row.logTail,
+  }
+}
+
+function parseArray<T extends Type.TSchema>(schema: T, text: string | null): Type.Static<T> | [] {
+  if (text === null) return []
+  try {
+    const value: unknown = JSON.parse(text)
+    return Value.Check(schema, value) ? value : []
+  } catch {
+    return []
   }
 }
 
@@ -76,11 +89,42 @@ export function issuesRoutes(deps: AppDeps): Hono {
       db
         .select()
         .from(runs)
-        .where(eq(runs.issueId, id))
+        .where(and(eq(runs.issueId, id), ne(runs.kind, 'review')))
         .orderBy(desc(runs.startedAt))
         .all()
         .map((row) => ({ ...responseRun(row), taskDir: row.taskDir })),
     )
+  })
+  app.get('/api/issues/:id/reviews', (c) => {
+    const id = repoId(c.req.param('id'))
+    if (!id || !db.select().from(issues).where(eq(issues.id, id)).get())
+      return c.json({ error: 'Issue 不存在' }, 404)
+    const { checks, acceptance, findings } = reviewSchema.properties
+    const rows: IssueReview[] = db
+      .select()
+      .from(reviews)
+      .where(eq(reviews.issueId, id))
+      .orderBy(desc(reviews.id))
+      .all()
+      .map((row) => ({
+        id: row.id,
+        status: row.status,
+        verdict: row.verdict,
+        summary: row.summary,
+        checks: parseArray(checks, row.checks),
+        acceptance: parseArray(acceptance, row.acceptance),
+        findings: parseArray(findings, row.findings),
+        error: row.error,
+        model: row.model,
+        effort: row.effort,
+        partial: row.partial,
+        headSha: row.headSha,
+        runId: row.runId,
+        deliveryRunId: row.deliveryRunId,
+        createdAt: row.createdAt.toISOString(),
+        endedAt: row.endedAt?.toISOString() ?? null,
+      }))
+    return c.json(rows)
   })
   return app
 }

@@ -16,6 +16,8 @@ import {
 const defaults: PiSettings = {
   model: 'gpt-6.1-terra',
   effort: 'medium',
+  reviewModel: null,
+  reviewEffort: null,
   piModel: null,
   llmBaseUrl: null,
   llmApiKey: null,
@@ -58,6 +60,8 @@ test.each([
   ['effort', 'max'],
   ['effort', null],
   ['effort', false],
+  ['reviewEffort', 'max'],
+  ['reviewModel', 1],
   ['piModel', ''],
   ['piModel', '  '],
   ['piModel', 1],
@@ -120,6 +124,8 @@ test('首次导入环境变量，之后不覆盖并返回仍设置的变量名�
     expect(readPiSettings(s.db)).toEqual({
       model: 'custom',
       effort: 'high',
+      reviewModel: null,
+      reviewEffort: null,
       piModel: 'pi-custom',
       llmBaseUrl: 'https://llm.example/v1',
       llmApiKey: 'secret',

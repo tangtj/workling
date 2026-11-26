@@ -7,7 +7,10 @@ import { openDatabase } from '../src/db/index.ts'
 import { issues, repos, runs } from '../src/db/schema.ts'
 import { waitForNext } from '../src/serve/wait.ts'
 
-async function setup(status: 'running' | 'done' = 'running') {
+async function setup(
+  status: 'running' | 'done' = 'running',
+  kind: 'implement' | 'review' = 'implement',
+) {
   const dir = await mkdtemp(join(tmpdir(), 'workling-wait-'))
   const { db, close } = await openDatabase(dir)
   const now = new Date()
@@ -31,10 +34,11 @@ async function setup(status: 'running' | 'done' = 'running') {
     .get()
   const run = db
     .insert(runs)
-    .values({ issueId: issue.id, worker: 'w', taskDir: dir, startedAt: now })
+    .values({ issueId: issue.id, worker: 'w', taskDir: dir, startedAt: now, kind })
     .returning()
     .get()
-  db.update(issues).set({ lastRunId: run.id }).where(eq(issues.id, issue.id)).run()
+  if (kind === 'implement')
+    db.update(issues).set({ lastRunId: run.id }).where(eq(issues.id, issue.id)).run()
   return {
     db,
     dir,
@@ -45,21 +49,25 @@ async function setup(status: 'running' | 'done' = 'running') {
   }
 }
 
-test('等待期间 running 任务出现结果时提前唤醒', async () => {
-  const s = await setup()
-  try {
-    const waiting = waitForNext({
-      db: s.db,
-      seconds: 6,
-      signal: new AbortController().signal,
-      immediate: false,
-    })
-    await writeFile(join(s.dir, 'result.json'), '{}')
-    expect(await waiting).toBe('finished')
-  } finally {
-    await s.dispose()
-  }
-}, 8000)
+test.each(['implement', 'review'] as const)(
+  '等待期间 %s 运行出现结果时提前唤醒',
+  async (kind) => {
+    const s = await setup(kind === 'review' ? 'done' : 'running', kind)
+    try {
+      const waiting = waitForNext({
+        db: s.db,
+        seconds: 6,
+        signal: new AbortController().signal,
+        immediate: false,
+      })
+      await writeFile(join(s.dir, 'result.json'), '{}')
+      expect(await waiting).toBe('finished')
+    } finally {
+      await s.dispose()
+    }
+  },
+  8000,
+)
 
 test('等待前已有结果时等到间隔结束', async () => {
   const s = await setup()

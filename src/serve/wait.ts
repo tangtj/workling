@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
 import { issues, runs } from '../db/schema.ts'
 
@@ -18,13 +18,19 @@ export function waitForNext({
   if (immediate) return Promise.resolve('immediate')
   if (signal.aborted) return Promise.resolve('aborted')
 
-  const running = () =>
-    db
+  const running = () => [
+    ...db
       .select({ id: runs.id, taskDir: runs.taskDir })
       .from(issues)
       .innerJoin(runs, eq(issues.lastRunId, runs.id))
       .where(eq(issues.status, 'running'))
-      .all()
+      .all(),
+    ...db
+      .select({ id: runs.id, taskDir: runs.taskDir })
+      .from(runs)
+      .where(and(eq(runs.kind, 'review'), isNull(runs.endedAt)))
+      .all(),
+  ]
   const hasResult = (taskDir: string | null) => {
     if (!taskDir) return false
     try {

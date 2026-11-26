@@ -4,7 +4,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/db/index.ts'
-import { issues, repos, runs } from '../src/db/schema.ts'
+import { issues, piSettings, repos, runs } from '../src/db/schema.ts'
 
 test('新库包含全部可空列（runs.pid/container 等、issues.title）并启用 WAL、busy_timeout，权限与重开数据保留', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-db-'))
@@ -136,8 +136,13 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
     first.db.run(sql`DROP TABLE feedback_cursors`)
     first.db.run(sql`DROP TABLE trusted_users`)
     first.db.run(sql`DROP TABLE update_settings`)
+    first.db.run(sql`DROP TABLE reviews`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN review_level`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN review_since`)
+    first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_model`)
+    first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_effort`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 7)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 8)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -186,8 +191,13 @@ test('建议级迁移保留仓库数据并为新旧库创建可空列', async ()
       first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
     first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
     first.db.run(sql`DROP TABLE update_settings`)
+    first.db.run(sql`DROP TABLE reviews`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN review_level`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN review_since`)
+    first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_model`)
+    first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_effort`)
     first.db.run(
-      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 4)`,
+      sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5)`,
     )
     first.close()
     const upgraded = await openDatabase(dir)
@@ -235,8 +245,13 @@ for (const existing of ['rework', 'triage'] as const) {
         first.db.run(sql.raw(`ALTER TABLE triage_records DROP COLUMN ${name}`))
       first.db.run(sql`ALTER TABLE repos DROP COLUMN triage_since`)
       first.db.run(sql`DROP TABLE update_settings`)
+      first.db.run(sql`DROP TABLE reviews`)
+      first.db.run(sql`ALTER TABLE repos DROP COLUMN review_level`)
+      first.db.run(sql`ALTER TABLE repos DROP COLUMN review_since`)
+      first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_model`)
+      first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_effort`)
       first.db.run(
-        sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 4)`,
+        sql`DELETE FROM __drizzle_migrations WHERE created_at IN (SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5)`,
       )
       if (existing === 'rework') {
         first.db.run(sql`DROP TABLE triage_records`)
@@ -272,3 +287,44 @@ for (const existing of ['rework', 'triage'] as const) {
     }
   })
 }
+
+test('影子评审迁移升级旧库，保留已有仓库与模型并默认关闭评审', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-review-'))
+  try {
+    const first = await openDatabase(dir)
+    first.db.run(sql`DROP TABLE reviews`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN review_level`)
+    first.db.run(sql`ALTER TABLE repos DROP COLUMN review_since`)
+    first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_model`)
+    first.db.run(sql`ALTER TABLE pi_settings DROP COLUMN review_effort`)
+    first.db.run(
+      sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+    )
+    first.db.run(sql`
+      INSERT INTO repos (ref, platform, host, path, token, created_at, updated_at)
+      VALUES ('github:a/b', 'github', 'github.com', 'a/b', 'secret', 1, 1)
+    `)
+    first.db.run(sql`
+      INSERT INTO pi_settings (id, model, effort, llm_api, git_name, git_email, updated_at)
+      VALUES (1, 'current-model', 'medium', 'openai-responses', 'test', 'test@example.com', 1)
+    `)
+    first.close()
+    const upgraded = await openDatabase(dir)
+    try {
+      expect(upgraded.db.select().from(repos).get()).toMatchObject({
+        reviewLevel: 'off',
+        reviewSince: null,
+      })
+      expect(upgraded.db.select().from(piSettings).get()).toMatchObject({
+        model: 'current-model',
+        reviewModel: null,
+        reviewEffort: null,
+      })
+      expect(upgraded.db.all(sql`SELECT * FROM reviews`)).toEqual([])
+    } finally {
+      upgraded.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
