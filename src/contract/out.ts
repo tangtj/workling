@@ -1,11 +1,13 @@
-import { constants } from 'node:fs'
-import { open, rename, writeFile } from 'node:fs/promises'
+import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
+import { missingOutput, readOutputFile } from './output-file.ts'
 import { CONTRACT_VERSION } from './spec.ts'
 import { reviewSchema, type Review } from './review.ts'
 
+export { missingOutput, readOutputFile } from './output-file.ts'
+export { planSchema, readPlan, type Plan } from './plan.ts'
 export { reviewSchema, type Review } from './review.ts'
 
 export const piOutcomeSchema = Type.Object({
@@ -15,6 +17,7 @@ export const piOutcomeSchema = Type.Object({
     Type.Literal('incomplete'),
     Type.Literal('answered'),
     Type.Literal('reviewed'),
+    Type.Literal('planned'),
   ]),
 })
 
@@ -27,7 +30,7 @@ export const outResultSchema = Type.Object({
 })
 
 export type OutResult = Type.Static<typeof outResultSchema>
-type TaskOutcome = Exclude<OutResult['outcome'], 'reviewed'>
+type TaskOutcome = Exclude<OutResult['outcome'], 'reviewed' | 'planned'>
 
 export const checklistSchema = Type.Array(
   Type.Object({
@@ -50,46 +53,13 @@ export const repliesSchema = Type.Array(
 
 export type Reply = Type.Static<typeof repliesSchema>[number]
 
-export function missingOutput(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
-}
-
-// out/ 对 worker 可写。只读取普通文件，拒绝符号链接和超出大小限制的内容。
-export async function readOutputFile(
-  dir: string,
-  name: string,
-  maxBytes: number,
-  truncate = false,
-): Promise<Buffer> {
-  const handle = await open(
-    join(dir, name),
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  )
-  try {
-    const stat = await handle.stat()
-    if (!stat.isFile()) throw new Error(`out/${name} 不是普通文件`)
-    if (!truncate && stat.size > maxBytes) throw new Error(`out/${name} 超出大小限制`)
-    const buffer = Buffer.allocUnsafe(Math.min(stat.size, maxBytes) + 1)
-    let offset = 0
-    while (offset < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset)
-      if (bytesRead === 0) return buffer.subarray(0, offset)
-      offset += bytesRead
-    }
-    if (truncate && stat.size >= maxBytes) return buffer
-    throw new Error(`读取时 out/${name} 大小发生变化`)
-  } finally {
-    await handle.close()
-  }
-}
-
-export async function readPiOutcome(dir: string): Promise<TaskOutcome | undefined> {
+export async function readPiOutcome(dir: string): Promise<OutResult['outcome'] | undefined> {
   try {
     const raw = await readOutputFile(dir, 'outcome.json', 4096)
     const value: unknown = JSON.parse(raw.toString('utf8'))
-    if (Value.Check(piOutcomeSchema, value) && value.outcome !== 'reviewed') return value.outcome
+    if (Value.Check(piOutcomeSchema, value)) return value.outcome
   } catch {
-    // Pi 的输出不可用时仍可从报告判定结果。
+    // 调用方决定产出不可用时是否回退到报告。
   }
 }
 
@@ -166,12 +136,19 @@ export async function writeOutResult(dir: string, value: OutResult): Promise<voi
   await rename(tmp, join(dir, 'result.json'))
 }
 
-// 交付流程仍只读取实现和返工产出。评审调用方需要显式启用 reviewed。
+// 交付流程默认只读取实现和返工产出。评审与拆解调用方显式启用各自的结果。
 export function readOutResult(dir: string): Promise<OutResult & { outcome: TaskOutcome }>
-export function readOutResult(dir: string, options: { allowReview: true }): Promise<OutResult>
+export function readOutResult(
+  dir: string,
+  options: { allowReview: true },
+): Promise<OutResult & { outcome: TaskOutcome | 'reviewed' }>
+export function readOutResult(
+  dir: string,
+  options: { allowPlan: true },
+): Promise<OutResult & { outcome: TaskOutcome | 'planned' }>
 export async function readOutResult(
   dir: string,
-  options?: { allowReview: true },
+  options?: { allowReview?: true; allowPlan?: true },
 ): Promise<OutResult> {
   let raw: string
   try {
@@ -195,7 +172,8 @@ export async function readOutResult(
     throw new Error(`out/result.json 的契约版本不受支持，需要版本 ${CONTRACT_VERSION}`)
   if (
     !Value.Check(outResultSchema, value) ||
-    (!options?.allowReview && value.outcome === 'reviewed')
+    (value.outcome === 'reviewed' && !options?.allowReview) ||
+    (value.outcome === 'planned' && !options?.allowPlan)
   )
     throw new Error('out/result.json 的结构无效')
   return value

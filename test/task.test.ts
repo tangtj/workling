@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseIssueRef } from '../src/issue/reference.ts'
-import { readOutResult } from '../src/contract/out.ts'
+import { readOutResult, type Plan } from '../src/contract/out.ts'
 import { writeLlmSecrets } from '../src/contract/secrets.ts'
 import { CONTRACT_VERSION, writeSpec, type Spec } from '../src/contract/spec.ts'
 import { ROOT } from '../src/runtime/paths.ts'
@@ -623,10 +623,10 @@ const validReview = JSON.stringify({
   findings: [],
 })
 
-async function setupReview() {
+async function setupSampleTask(sample = 'review-diff') {
   const dir = join(await temp(), 'run')
   const spec = await prepareSample({
-    sample: resolveSample('review-diff'),
+    sample: resolveSample(sample),
     dest: dir,
     command: run,
   })
@@ -652,7 +652,7 @@ test.each([
   ['workspace-write', 'read-only'],
   ['danger-full-access', 'danger-full-access'],
 ] as const)('review 使用评审提示词与沙箱配置 %s 并产出 reviewed', async (sandbox, expected) => {
-  const options = await setupReview()
+  const options = await setupSampleTask()
   if (sandbox !== undefined) options.env.WORKLING_CODEX_SANDBOX = sandbox
   options.env.WORKLING_TEST_REVIEW = validReview
   const { outDir, spec } = options
@@ -684,7 +684,7 @@ test.each([
   [undefined, '缺少 out/review.json'],
   ['{}', 'out/review.json 的结构无效'],
 ] as const)('review 缺少有效产出时返回 %s 对应的错误', async (raw, reason) => {
-  const options = await setupReview()
+  const options = await setupSampleTask()
   await mkdir(options.outDir)
   await writeFile(join(options.outDir, 'review.json'), validReview)
   if (raw !== undefined) options.env.WORKLING_TEST_REVIEW = raw
@@ -697,9 +697,115 @@ test.each([
 })
 
 test('review 拒绝 Pi 在评审分支上新增提交', async () => {
-  const options = await setupReview()
+  const options = await setupSampleTask()
   options.env.WORKLING_TEST_REVIEW = validReview
   options.env.WORKLING_TEST_REVIEW_COMMIT = '1'
   expect(await runTask(options)).toEqual({ code: 0, signal: null, error: '评审运行不应产生提交' })
   expect(await Bun.file(join(options.outDir, 'result.json')).exists()).toBe(false)
+})
+
+const planDoc = 'docs/tasks/001-tags/README.md'
+const planChildren = [
+  { title: '添加标签字段', body: '## 目标\n\n支持笔记标签。' },
+  { title: '按标签筛选', body: '## 目标\n\n按标签筛选笔记。' },
+]
+const validPlan = {
+  summary: '分两步支持标签与筛选。注意兼容旧导入格式。',
+  docs: [],
+  children: planChildren,
+} satisfies Plan
+
+test('plan 使用拆解提示并把本轮文档提交写入 bundle', async () => {
+  const options = await setupSampleTask('plan-notes')
+  const { dir, env, outDir, spec } = options
+  await writeSpec(dir, { ...spec, repo: { ...spec.repo, continued: true, docBranch: 'ignored' } })
+  env.WORKLING_TEST_PLAN_DOC = planDoc
+  env.WORKLING_TEST_PLAN = JSON.stringify({ ...validPlan, docs: [planDoc] })
+  env.WORKLING_TEST_OUTCOME = 'planned'
+
+  expect(await runTask(options)).toEqual({ code: 0, signal: null })
+  const repo = join(dir, 'repo')
+  const { args } = (await Bun.file(options.record).json()) as { args: string[] }
+  expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(
+    join(ROOT, 'worker/configs/PLAN.md'),
+  )
+  expect(args.at(-1))
+    .toBe(`Issue：https://github.com/example/notes/issues/3（github:example/notes#3）
+仓库目录：${repo}
+任务分支：${spec.repo.branch}（已检出，接续此前运行的工作分支，当前末端 ${spec.repo.baseRef}）
+运行类型：plan
+任务目录：${dir}
+Issue 内容：${join(dir, 'input', 'issue.md')}
+上下文：${join(dir, 'input', 'runs.md')}、branch.md、docs.md（workling 生成：历次运行、工作分支、文档清单）
+拆解用 codex 模型：${spec.model.codex}
+拆解用 codex 推理强度：${spec.model.effort}
+codex 沙箱模式：workspace-write
+按系统提示中的拆解约定拆解这个需求。`)
+  const bundle = join(outDir, 'commits.bundle')
+  const git = (...args: string[]) => run(['git', ...args], { cwd: repo })
+  const head = await git('rev-parse', 'HEAD')
+  expect(await readOutResult(outDir, { allowPlan: true })).toEqual({
+    contract: 2,
+    outcome: 'planned',
+    branch: spec.repo.branch,
+    head,
+    commits: 1,
+  })
+  await expect(readOutResult(outDir)).rejects.toThrow('out/result.json 的结构无效')
+  await expect(readOutResult(outDir, { allowReview: true })).rejects.toThrow(
+    'out/result.json 的结构无效',
+  )
+  expect(await git('bundle', 'list-heads', bundle)).toBe(`${head} refs/heads/${spec.repo.branch}`)
+})
+
+test.each(['planned', 'answered'] as const)(
+  'plan 在无提交的 %s 运行后移除旧 bundle',
+  async (outcome) => {
+    const options = await setupSampleTask('plan-notes')
+    const { env, outDir, spec } = options
+    env.WORKLING_TEST_OUTCOME = outcome
+    if (outcome === 'planned') env.WORKLING_TEST_PLAN = JSON.stringify(validPlan)
+    await mkdir(outDir)
+    await writeFile(join(outDir, 'commits.bundle'), 'stale')
+    await writeFile(join(outDir, 'plan.json'), 'stale')
+
+    expect(await runTask(options)).toEqual({ code: 0, signal: null })
+    expect(await readOutResult(outDir, { allowPlan: true })).toEqual({
+      contract: 2,
+      outcome,
+      branch: spec.repo.branch,
+      head: null,
+      commits: 0,
+    })
+    expect(await Bun.file(join(outDir, 'commits.bundle')).exists()).toBe(false)
+    if (outcome === 'answered')
+      expect(await Bun.file(join(outDir, 'plan.json')).exists()).toBe(false)
+  },
+)
+
+test.each([
+  [undefined, undefined, '拆解运行缺少 out/outcome.json'],
+  ['completed', undefined, '拆解运行的结果无效：completed'],
+  ['reviewed', undefined, '拆解运行的结果无效：reviewed'],
+  ['planned', undefined, '缺少 out/plan.json'],
+  ['planned', '{}', 'out/plan.json 的结构无效'],
+] as const)('plan 拒绝结果为 %s、清单为 %s 的无效产出', async (outcome, raw, reason) => {
+  const options = await setupSampleTask('plan-notes')
+  const { dir, env, outDir } = options
+  if (outcome !== undefined) env.WORKLING_TEST_OUTCOME = outcome
+  if (raw !== undefined) env.WORKLING_TEST_PLAN = raw
+  await mkdir(outDir)
+  await writeFile(join(dir, 'report.md'), '结果：完成')
+  await writeFile(join(outDir, 'result.json'), 'stale')
+  await writeFile(join(outDir, 'plan.json'), JSON.stringify(validPlan))
+  await writeFile(join(outDir, 'outcome.json'), '{"outcome":"answered"}')
+  await writeFile(join(outDir, 'commits.bundle'), 'stale')
+
+  expect(await runTask(options)).toEqual({
+    code: 0,
+    signal: null,
+    error: `生成拆解产出失败：${reason}`,
+  })
+  expect(await Bun.file(join(outDir, 'result.json')).exists()).toBe(false)
+  expect(await Bun.file(join(outDir, 'commits.bundle')).exists()).toBe(false)
 })

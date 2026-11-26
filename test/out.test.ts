@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   readOutResult,
+  readPlan,
   readReview,
   writeOutResult,
   type OutResult,
+  type Plan,
   type Review,
 } from '../src/contract/out.ts'
 
@@ -77,6 +79,34 @@ test('readReview 校验评审内容并拒绝符号链接和超出大小限制的
     await writeFile(join(dir, 'valid.json'), JSON.stringify(review))
     await symlink('valid.json', path)
     await expect(readReview(dir)).rejects.toMatchObject({ code: 'ELOOP' })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('readPlan 保留子 Issue 顺序并分别报告缺失、无效 JSON、错误结构和大小超限', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-plan-'))
+  const path = join(dir, 'plan.json')
+  const plan: Plan = {
+    summary: '先添加标签，再支持筛选。',
+    docs: [],
+    children: [
+      { title: '标签', body: '添加标签。' },
+      { title: '筛选', body: '按标签筛选。' },
+    ],
+  }
+  try {
+    await expect(readPlan(dir)).rejects.toThrow('缺少 out/plan.json')
+    await writeFile(path, JSON.stringify(plan))
+    expect(await readPlan(dir)).toEqual(plan)
+    for (const [raw, error] of [
+      ['{', 'out/plan.json 不是有效的 JSON'],
+      [JSON.stringify({ ...plan, children: [] }), 'out/plan.json 的结构无效'],
+      [' '.repeat(1024 * 1024 + 1), 'out/plan.json 超出大小限制'],
+    ] as const) {
+      await writeFile(path, raw)
+      await expect(readPlan(dir)).rejects.toThrow(error)
+    }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
