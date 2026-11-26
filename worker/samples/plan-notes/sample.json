@@ -1,0 +1,7 @@
+{
+  "kind": "plan",
+  "issue": { "ref": "github:example/notes#3", "title": "为笔记添加标签" },
+  "branch": "workling/3-tags",
+  "model": { "codex": "gpt-6.1-terra", "effort": "high" },
+  "git": { "name": "Workling", "email": "workling@example.invalid" }
+}

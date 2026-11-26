@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const record = process.env.WORKLING_TEST_RECORD!
@@ -30,7 +30,22 @@ writeFileSync(
 if (process.env.WORKLING_TEST_EVENTS) process.stdout.write(process.env.WORKLING_TEST_EVENTS)
 if (process.env.WORKLING_TEST_REVIEW !== undefined)
   writeFileSync(join(dirname(record), 'out/review.json'), process.env.WORKLING_TEST_REVIEW)
-if (process.env.WORKLING_TEST_REVIEW_COMMIT)
+const out = join(dirname(record), 'out')
+if (process.env.WORKLING_TEST_PLAN !== undefined)
+  writeFileSync(join(out, 'plan.json'), process.env.WORKLING_TEST_PLAN)
+if (process.env.WORKLING_TEST_OUTCOME !== undefined)
+  writeFileSync(
+    join(out, 'outcome.json'),
+    JSON.stringify({ outcome: process.env.WORKLING_TEST_OUTCOME }),
+  )
+
+const planDoc = process.env.WORKLING_TEST_PLAN_DOC
+if (planDoc) {
+  mkdirSync(dirname(planDoc), { recursive: true })
+  writeFileSync(planDoc, '# Design\n')
+  execFileSync('git', ['add', '--', planDoc])
+}
+if (planDoc || process.env.WORKLING_TEST_REVIEW_COMMIT)
   execFileSync('git', [
     '-c',
     'user.name=Pi fixture',
@@ -41,7 +56,7 @@ if (process.env.WORKLING_TEST_REVIEW_COMMIT)
     'commit',
     '--allow-empty',
     '--message',
-    'Unexpected review commit',
+    planDoc ? 'Add design document' : 'Unexpected review commit',
   ])
 if (child) setInterval(() => {}, 1000)
 else process.exit(Number(process.env.WORKLING_TEST_EXIT ?? 0))

@@ -199,6 +199,7 @@ workling-worker run /tmp/run-a                                 # run it; outputs
 ```
 
 The [`review-diff`](worker/samples/review-diff/README.md) sample runs a review and writes its conclusion to `out/review.json`.
+The [`plan-notes`](worker/samples/plan-notes/README.md) sample writes an ordered list of child issues to `out/plan.json` and commits the design documents to the task branch.
 
 Without `bun link`, replace `workling-worker` with `bun worker/cli.ts`. To use a custom model endpoint, write `secrets/llm.json` (`{ baseUrl, apiKey, api }`) into the run directory; otherwise the local codex / Pi login is used.
 

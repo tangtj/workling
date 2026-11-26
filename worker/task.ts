@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs'
 import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { readPiOutcome, readReview, writeOutResult } from '../src/contract/out.ts'
+import { readPiOutcome, readPlan, readReview, writeOutResult } from '../src/contract/out.ts'
 import { readLlmSecrets } from '../src/contract/secrets.ts'
 import { CONTRACT_VERSION, readSpec } from '../src/contract/spec.ts'
 import { createPiEventFormatter, duration, time } from './pi-events.ts'
@@ -113,6 +113,8 @@ export async function runTask(options: {
     ? `接续此前运行的工作分支，当前末端 ${spec.repo.baseRef}`
     : `基于 ${spec.repo.baseRef}`
   const review = spec.kind === 'review'
+  const plan = spec.kind === 'plan'
+  const config = review ? 'REVIEW.md' : plan ? 'PLAN.md' : 'AGENTS.md'
   const sandbox = env.WORKLING_CODEX_SANDBOX ?? 'workspace-write'
   const docBranch = spec.repo.docBranch ? `\n文档分支：${spec.repo.docBranch}` : ''
   const instruction = review
@@ -128,7 +130,19 @@ Issue 内容：${issuePath}
 评审用 codex 推理强度：${spec.model.effort}
 codex 沙箱模式：${sandbox === 'workspace-write' ? 'read-only' : sandbox}
 按系统提示中的评审约定评审这个改动。`
-    : `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
+    : plan
+      ? `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
+仓库目录：${repo}
+任务分支：${spec.repo.branch}（已检出，${branchStatus}）
+运行类型：plan
+任务目录：${dir}
+Issue 内容：${issuePath}
+上下文：${join(dir, 'input', 'runs.md')}、branch.md、docs.md（workling 生成：历次运行、工作分支、文档清单）
+拆解用 codex 模型：${spec.model.codex}
+拆解用 codex 推理强度：${spec.model.effort}
+codex 沙箱模式：${sandbox}
+按系统提示中的拆解约定拆解这个需求。`
+      : `Issue：https://github.com/${project}/issues/${iid}（${issueRef}）
 仓库目录：${repo}
 任务分支：${spec.repo.branch}（已检出，${branchStatus}）${docBranch}
 运行类型：${spec.kind}
@@ -143,10 +157,12 @@ codex 沙箱模式：${sandbox}
   const branchRef = `refs/heads/${branch}`
   const headArgs = ['rev-parse', '--verify', branchRef]
   const reviewHead = review ? await git(headArgs) : undefined
-  if (review) {
-    // 单独运行时可复用目录，上一轮的结论不能充当本轮的产出。
-    await rm(join(outDir, 'result.json'), { force: true })
-    await rm(join(outDir, 'review.json'), { force: true })
+  // 单独运行时可复用目录，上一轮的结论不能充当本轮的产出。
+  if (review || plan) await rm(join(outDir, 'result.json'), { force: true })
+  if (review) await rm(join(outDir, 'review.json'), { force: true })
+  if (plan) {
+    for (const name of ['plan.json', 'outcome.json', 'commits.bundle'])
+      await rm(join(outDir, name), { force: true })
   }
   // watch 对 task 进程组发出的信号需要同时到达 Pi。
   log('拉起 Pi')
@@ -162,7 +178,7 @@ codex 沙箱模式：${sandbox}
       '--session-dir',
       join(dir, 'pi-session'),
       '--append-system-prompt',
-      join(import.meta.dirname, 'configs', review ? 'REVIEW.md' : 'AGENTS.md'),
+      join(import.meta.dirname, 'configs', config),
       '--extension',
       join(import.meta.dirname, 'configs/extensions/no-bash-timeout.ts'),
       ...modelArgs,
@@ -220,8 +236,16 @@ codex 沙箱模式：${sandbox}
     const commits = Number(count)
     if (!/^\d+$/.test(count) || !Number.isSafeInteger(commits)) throw new Error('提交数量无效')
     const head = await outputGit(headArgs)
-    const report = await readFile(join(dir, 'report.md'), 'utf8').catch(() => '')
-    const outcome = (await readPiOutcome(outDir)) ?? reportOutcome(report)
+    let outcome = await readPiOutcome(outDir)
+    if (plan) {
+      if (!outcome) throw new Error('拆解运行缺少 out/outcome.json')
+      if (outcome !== 'planned' && outcome !== 'answered')
+        throw new Error(`拆解运行的结果无效：${outcome}`)
+      if (outcome === 'planned') await readPlan(outDir)
+    } else if (!outcome || outcome === 'planned' || outcome === 'reviewed') {
+      const report = await readFile(join(dir, 'report.md'), 'utf8').catch(() => '')
+      outcome = reportOutcome(report)
+    }
     if (commits > 0 && outcome !== 'answered') await outputGit(['bundle', 'create', bundle, range])
     else await rm(bundle, { force: true })
     await writeOutResult(outDir, {
@@ -232,7 +256,7 @@ codex 沙箱模式：${sandbox}
       commits,
     })
   } catch (cause) {
-    const error = `生成${review ? '评审' : '任务'}产出失败：${redact(errorMessage(cause), secrets)}`
+    const error = `生成${review ? '评审' : plan ? '拆解' : '任务'}产出失败：${redact(errorMessage(cause), secrets)}`
     log(error)
     return { ...status, error }
   }
