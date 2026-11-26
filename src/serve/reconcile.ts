@@ -3,7 +3,13 @@ import { type ExecutorSettings } from '../config/executor.ts'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { maxCommentLength, readPlan, truncateComment } from '../contract/out.ts'
+import {
+  maxCommentLength,
+  readExecution,
+  readPlan,
+  truncateComment,
+  type Execution,
+} from '../contract/out.ts'
 import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { feedback, issues as issueStates, repos, reviews, runs } from '../db/schema.ts'
@@ -246,6 +252,14 @@ export async function reconcile({
         ? await extractSummary(run.taskDir, [repo.token, pi.llmApiKey ?? ''])
         : { summary: null, reportResult: null, logTail: null }
       const secrets = [repo.token, pi.llmApiKey ?? '']
+      let execution: Execution = { executor: null, assessment: null }
+      if (run?.taskDir && (run.kind === 'implement' || run.kind === 'rework')) {
+        try {
+          execution = await readExecution(await runOutDir(run.taskDir))
+        } catch {
+          // 任务目录已清理或不是普通目录时不记录。
+        }
+      }
       if (answer?.planned) {
         try {
           const plan = await readPlan(await runOutDir(answer.taskDir))
@@ -266,6 +280,12 @@ export async function reconcile({
               exitCode,
               error,
               ...summary,
+              executor: execution.executor,
+              difficulty: execution.assessment?.difficulty ?? null,
+              clarity: execution.assessment?.clarity ?? null,
+              assessmentNote: execution.assessment
+                ? redactSecrets(execution.assessment.reason, secrets)
+                : null,
               ...(delivery?.landed.restacked
                 ? { stackBranch: null, baseRef: delivery.landed.restacked.baseRef }
                 : {}),

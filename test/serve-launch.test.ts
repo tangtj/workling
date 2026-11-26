@@ -85,6 +85,9 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
             git: { name: pi.gitName, email: pi.gitEmail },
           })
           expect(await readFile(join(dir, 'input', 'issue.md'), 'utf8')).toContain('测试正文')
+          expect(await readFile(join(dir, 'input', 'branch.md'), 'utf8')).toContain(
+            '- 合并目标：main',
+          )
           expect((await readdir(join(dir, 'input'))).sort()).toEqual([
             'branch.md',
             'docs.md',

@@ -146,7 +146,7 @@ async function prepareCheckout({
   command: Command
   log: Log
   signal: AbortSignal
-}): Promise<(Spec['repo'] & { start: string }) | { error: string }> {
+}): Promise<(Spec['repo'] & { start: string; target: string }) | { error: string }> {
   const mirror = await syncMirror({ workspace, repo, command, signal })
   const doc = docBranch(issue.body)
   if (doc && 'error' in doc) return doc
@@ -229,6 +229,8 @@ async function prepareCheckout({
     baseRef,
     branch,
     start,
+    // PR 合入的分支：堆叠时是上游任务分支，否则是默认分支（文档分支任务也合入默认分支）。
+    target: stackOn?.branch ?? (await defaultBranch()),
     ...(doc ? { docBranch: doc.name } : {}),
     ...(continuedBranch ? { continued: true } : {}),
   }
@@ -449,7 +451,7 @@ export async function launchQueued({
           error: checkout.error,
         })
       } else {
-        const { start, ...specRepo } = checkout
+        const { start, target, ...specRepo } = checkout
         db.update(runs)
           .set({
             branch: checkout.branch,
@@ -465,7 +467,7 @@ export async function launchQueued({
           issue,
           runId: record.id,
           kind,
-          checkout: { ...specRepo, start },
+          checkout: { ...specRepo, start, target },
           ...(gate.kind !== 'error' && 'chain' in gate && gate.chain
             ? {
                 chain: {

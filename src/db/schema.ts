@@ -76,6 +76,11 @@ export const runs = sqliteTable('runs', {
   error: text('error'),
   summary: text('summary'),
   reportResult: text('report_result'),
+  // Pi 在 out/outcome.json 中自报的执行方与实现前评估，只用于展示和统计。
+  executor: text('executor', { enum: ['pi', 'codex', 'mixed'] }),
+  difficulty: text('difficulty', { enum: ['low', 'medium', 'high'] }),
+  clarity: text('clarity', { enum: ['clear', 'unclear'] }),
+  assessmentNote: text('assessment_note'),
   logTail: text('log_tail'),
   branch: text('branch'),
   baseRef: text('base_ref'),

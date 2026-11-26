@@ -1,5 +1,5 @@
 import * as Type from 'typebox'
-import { taskRunKind } from './run-kind.ts'
+import { runClarity, runDifficulty, runExecutor, taskRunKind } from './run-kind.ts'
 
 const obj = <T extends Type.TProperties>(properties: T) =>
   Type.Object(properties, { additionalProperties: false })
@@ -95,6 +95,10 @@ export const issueDetailSchema = obj({
       error: nullableString,
       summary: nullableString,
       reportResult: nullableString,
+      executor: Type.Union([runExecutor, Type.Null()]),
+      difficulty: Type.Union([runDifficulty, Type.Null()]),
+      clarity: Type.Union([runClarity, Type.Null()]),
+      assessmentNote: nullableString,
       logTail: nullableString,
       taskDir: nullableString,
       pid: nullableInteger,

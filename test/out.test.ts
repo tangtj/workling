@@ -3,7 +3,9 @@ import { mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  readExecution,
   readOutResult,
+  readPiOutcome,
   readPlan,
   readReview,
   writeOutResult,
@@ -107,6 +109,34 @@ test('readPlan 保留子 Issue 顺序并分别报告缺失、无效 JSON、错�
       await writeFile(path, raw)
       await expect(readPlan(dir)).rejects.toThrow(error)
     }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('readExecution 读出合法的执行方与评估，逐项忽略不合法的字段且不影响 outcome', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-execution-'))
+  try {
+    const none = { executor: null, assessment: null }
+    expect(await readExecution(dir)).toEqual(none)
+    const write = (value: unknown) => writeFile(join(dir, 'outcome.json'), JSON.stringify(value))
+    const assessment = { difficulty: 'low', clarity: 'clear', reason: '只改一个函数' } as const
+    await write({ outcome: 'completed', executor: 'pi', assessment: { ...assessment, extra: 1 } })
+    expect(await readExecution(dir)).toEqual({ executor: 'pi', assessment })
+    expect(await readPiOutcome(dir)).toBe('completed')
+    await write({ outcome: 'partial', executor: 'human', assessment })
+    expect(await readExecution(dir)).toEqual({ executor: null, assessment })
+    await write({
+      outcome: 'partial',
+      executor: 'mixed',
+      assessment: { ...assessment, reason: '长'.repeat(501) },
+    })
+    expect(await readExecution(dir)).toEqual({ executor: 'mixed', assessment: null })
+    expect(await readPiOutcome(dir)).toBe('partial')
+    await write({ outcome: 'completed' })
+    expect(await readExecution(dir)).toEqual(none)
+    await writeFile(join(dir, 'outcome.json'), '{')
+    expect(await readExecution(dir)).toEqual(none)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

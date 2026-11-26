@@ -81,7 +81,8 @@ export async function writeRunContext({
   runId: number
   kind?: Spec['kind']
   prUrl?: string
-  checkout: Spec['repo'] & { start: string }
+  // target 是 PR 最终合入的分支：堆叠时为上游任务分支，否则为默认分支。
+  checkout: Spec['repo'] & { start: string; target?: string }
   chain?: {
     parent: number
     title: string
@@ -131,6 +132,21 @@ export async function writeRunContext({
         : content
     } catch {
       return ''
+    }
+  }
+
+  // 只在对象库里试合并，不改动工作副本；检测不了时不影响其余上下文。
+  async function conflicts(ref: string) {
+    try {
+      await git('merge-tree', '--write-tree', '--name-only', '--no-messages', 'HEAD', ref)
+      return '无'
+    } catch (error) {
+      // 有冲突时退出码为 1，输出第一行是合并结果的 tree，其后每行一个冲突文件。
+      const [status, tree, ...files] = errorMessage(error).split('\n')
+      const paths = files.filter(Boolean)
+      if (status !== 'git 退出码 1' || !/^[0-9a-f]{40,64}$/.test(tree ?? '') || !paths.length)
+        return '未能检测'
+      return paths.map((path) => `- ${path}`).join('\n')
     }
   }
 
@@ -218,11 +234,12 @@ export async function writeRunContext({
   })
 
   await write('branch.md', async () => {
-    const { branch, continued, start } = checkout
+    const { branch, continued, start, target } = checkout
     const lines = [
       `- 工作分支：${branch}`,
       `- 是否接续：${continued ? '是' : '否'}`,
       `- 起点分支：${start}`,
+      ...(target ? [`- 合并目标：${target}`] : []),
     ]
     if (kind === 'review')
       return [...lines, '', `评审范围：git diff ${checkout.baseRef} HEAD`].join('\n')
@@ -234,6 +251,7 @@ export async function writeRunContext({
     const ahead = Number(await git('rev-list', '--count', `HEAD..${ref}`))
     lines.push('', '## 提交', '', commits || '无', '', '## 改动统计', '', stat || '无')
     if (ahead > 0) lines.push('', `起点分支在分叉后又前进了 ${ahead} 个提交，未自动 rebase`)
+    if (target) lines.push('', '## 与合并目标的冲突', '', await conflicts(origin(target)))
     return lines.join('\n')
   })
 

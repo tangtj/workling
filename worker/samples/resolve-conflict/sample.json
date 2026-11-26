@@ -1,0 +1,7 @@
+{
+  "kind": "implement",
+  "issue": { "ref": "github:example/greeter#4", "title": "greet 支持自定义问候语" },
+  "branch": "workling/4-greeting",
+  "model": { "codex": "gpt-6.1-terra", "effort": "medium" },
+  "git": { "name": "Workling", "email": "workling@example.invalid" }
+}

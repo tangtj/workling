@@ -54,14 +54,16 @@ export function checkIssue(body: string) {
   if (mode === true && branch) invalidDirectives.push('拆解需求不支持「分支：」行')
   if (branch && 'error' in branch) invalidDirectives.push(branch.error)
   for (const line of lines) {
-    const directive = /^\s*(强度|模型)：(.*)$/.exec(line)
-    if (
-      directive &&
-      (directive[1] === '模型'
-        ? !directive[2]!.trim()
-        : !['low', 'medium', 'high', 'xhigh'].includes(directive[2]!.trim()))
-    )
-      invalidDirectives.push(`${directive[1]}：格式无效`)
+    const directive = /^\s*(强度|模型|执行)：(.*)$/.exec(line)
+    if (!directive) continue
+    const value = directive[2]!.trim()
+    const valid =
+      directive[1] === '模型'
+        ? Boolean(value)
+        : (directive[1] === '强度' ? ['low', 'medium', 'high', 'xhigh'] : ['pi', 'codex']).includes(
+            value,
+          )
+    if (!valid) invalidDirectives.push(`${directive[1]}：格式无效`)
   }
   return { missingSections, invalidDirectives }
 }

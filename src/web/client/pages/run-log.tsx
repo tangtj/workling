@@ -8,7 +8,7 @@ import { Badge } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
 import { NotFound } from '../not-found.tsx'
 import { RunTimeline, useSecondClock } from '../run-timeline.tsx'
-import { runKindLabels } from '../../run-kind.ts'
+import { assessmentText, executorLabels, runKindLabels } from '../../run-kind.ts'
 
 function RunDuration({ startedAt, endedAt }: { startedAt: Date; endedAt: Date | null }) {
   const now = useSecondClock(endedAt === null)
@@ -89,9 +89,16 @@ export function RunLogPage() {
           </p>
         </div>
       </header>
-      {(run.summary || run.reportResult) && (
+      {(run.summary || run.reportResult || run.executor || assessmentText(run)) && (
         <section className="card">
-          {run.reportResult && <p>codex：{run.reportResult}</p>}
+          {run.reportResult && <p>回报结论：{run.reportResult}</p>}
+          {run.executor && <p>执行方：{executorLabels[run.executor]}</p>}
+          {assessmentText(run) && (
+            <p>
+              执行评估：{assessmentText(run)}
+              {run.assessmentNote && `（${run.assessmentNote}）`}
+            </p>
+          )}
           {run.summary && (
             <>
               <h2>Pi 结论</h2>

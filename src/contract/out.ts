@@ -21,6 +21,23 @@ export const piOutcomeSchema = Type.Object({
   ]),
 })
 
+export const executorSchema = Type.Union([
+  Type.Literal('pi'),
+  Type.Literal('codex'),
+  Type.Literal('mixed'),
+])
+
+export const assessmentSchema = Type.Object({
+  difficulty: Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')]),
+  clarity: Type.Union([Type.Literal('clear'), Type.Literal('unclear')]),
+  reason: Type.String({ maxLength: 500 }),
+})
+
+export type Execution = {
+  executor: Type.Static<typeof executorSchema> | null
+  assessment: Type.Static<typeof assessmentSchema> | null
+}
+
 export const outResultSchema = Type.Object({
   contract: Type.Literal(CONTRACT_VERSION),
   ...piOutcomeSchema.properties,
@@ -61,6 +78,25 @@ export async function readPiOutcome(dir: string): Promise<OutResult['outcome'] |
   } catch {
     // 调用方决定产出不可用时是否回退到报告。
   }
+}
+
+// 谁改了代码、评估结论如何只用于记录与展示；缺失或不合法时逐项忽略，不影响 outcome。
+export async function readExecution(dir: string): Promise<Execution> {
+  const execution: Execution = { executor: null, assessment: null }
+  try {
+    const raw = await readOutputFile(dir, 'outcome.json', 4096)
+    const value: unknown = JSON.parse(raw.toString('utf8'))
+    if (value === null || typeof value !== 'object') return execution
+    if ('executor' in value && Value.Check(executorSchema, value.executor))
+      execution.executor = value.executor
+    if ('assessment' in value && Value.Check(assessmentSchema, value.assessment)) {
+      const { difficulty, clarity, reason } = value.assessment
+      execution.assessment = { difficulty, clarity, reason }
+    }
+  } catch {
+    // 产出不可用时不记录。
+  }
+  return execution
 }
 
 export async function readChecklist(dir: string): Promise<ChecklistItem[]> {
