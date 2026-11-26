@@ -10,6 +10,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { markComment, neutralizeMentions } from './comment.ts'
 import { mirrorPath } from './mirror.ts'
+import { syncProgress } from './progress.ts'
 import { setStatusLabel } from './status-label.ts'
 
 async function rebaseDownstream({
@@ -199,6 +200,7 @@ export async function syncPullRequests({
         )
           best.set(number, pr)
       }
+      const changed = new Map<number, typeof issues.$inferSelect>()
       for (const issue of rows) {
         if (signal.aborted) return
         if (issue.status === 'running' || issue.status === 'queued') continue
@@ -207,7 +209,8 @@ export async function syncPullRequests({
         const prState = pr.state.toLowerCase() as NonNullable<typeof issue.prState>
         const complete =
           prState === 'merged' && (issue.status === 'failed' || issue.status === 'canceled')
-        if (issue.prUrl !== pr.url || issue.prState !== prState || complete)
+        const statusChanged = issue.prState !== prState || complete
+        if (issue.prUrl !== pr.url || statusChanged)
           db.update(issues)
             .set({
               prUrl: pr.url,
@@ -216,6 +219,7 @@ export async function syncPullRequests({
             })
             .where(eq(issues.id, issue.id))
             .run()
+        if (statusChanged) changed.set(issue.id, issue)
         if (complete) {
           log(`${repo.ref} #${issue.number} PR 已合并，状态由 ${issue.status} 改为 done`)
           try {
@@ -298,6 +302,7 @@ export async function syncPullRequests({
             .set({ status: 'canceled', updatedAt: new Date() })
             .where(eq(issues.id, issue.id))
             .run()
+          changed.set(current.id, current)
           log(`${repo.ref} #${issue.number} Issue 已关闭，状态由 failed 改为 canceled`)
           try {
             await setStatusLabel({ repo, number: issue.number, target: null, command, signal })
@@ -309,6 +314,20 @@ export async function syncPullRequests({
       } catch (error) {
         if (signal.aborted) return
         log(`${repo.ref} 已关闭 Issue 同步失败：${errorMessage(error)}`)
+      }
+      for (const issue of changed.values()) {
+        if (signal.aborted) return
+        // 已结束的旧 Issue 不补建评论。已有 outcome 的新交付可以重试之前失败的创建。
+        const tracked =
+          issue.progressCommentId !== null ||
+          db
+            .select({ id: runs.id })
+            .from(runs)
+            .where(
+              and(eq(runs.issueId, issue.id), ne(runs.kind, 'review'), isNotNull(runs.outcome)),
+            )
+            .get()
+        if (tracked) await syncProgress({ db, repo, issue, command, log, signal })
       }
     } catch (error) {
       if (signal.aborted) return

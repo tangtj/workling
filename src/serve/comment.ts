@@ -94,3 +94,8 @@ export function formatDuration(startedAt: Date, endedAt: Date): string {
   const remainder = minutes % 60
   return `用时 ${hours} 小时${remainder ? ` ${remainder} 分钟` : ''}`
 }
+
+export function formatPrLink(url: string): string {
+  const pr = /\/pull\/(\d+)$/.exec(url)
+  return pr ? `[PR #${pr[1]}](${url})` : url
+}

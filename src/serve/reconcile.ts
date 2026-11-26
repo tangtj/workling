@@ -29,6 +29,7 @@ import type { Settings } from '../config/env.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import { landRun, publishIssueResult, readRunIssueComment, runOutDir } from './land.ts'
 import { mirrorPath } from './mirror.ts'
+import { syncProgress } from './progress.ts'
 import { setStatusLabel } from './status-label.ts'
 import { publishReplies } from './replies.ts'
 import { redactSecrets } from './secret-scan.ts'
@@ -281,6 +282,15 @@ export async function reconcile({
               endedAt,
               exitCode,
               error,
+              outcome: delivery
+                ? delivery.landed.partial
+                  ? 'partial'
+                  : 'completed'
+                : answer?.planned
+                  ? 'planned'
+                  : answer
+                    ? 'answered'
+                    : null,
               ...summary,
               executor: execution.executor,
               difficulty: execution.assessment?.difficulty ?? null,
@@ -401,6 +411,7 @@ export async function reconcile({
         } catch (error) {
           log(`${repo.ref} #${issue.number} 汇总主 Issue 失败：${errorMessage(error)}`)
         }
+        await syncProgress({ db, repo, issue, command, log })
         const round = run ? runRound(db, issue.id, run.id) : 0
         const facts = run ? [formatDuration(run.startedAt, endedAt), `运行 #${run.id}`] : []
         const postRunComment = (parts: Parameters<typeof runComment>[0]) =>

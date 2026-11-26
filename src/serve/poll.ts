@@ -6,6 +6,7 @@ import { issues as issueStates, repos, runs } from '../db/schema.ts'
 import { canPlan, readSubIssues } from '../issue/chain.ts'
 import { ghEnv } from '../platform/github.ts'
 import type { Command } from '../runtime/types.ts'
+import { syncProgress } from './progress.ts'
 import { setStatusLabel } from './status-label.ts'
 const issuesSchema = Type.Array(
   Type.Object({
@@ -206,6 +207,7 @@ export async function pollOnce({
           .where(and(eq(issueStates.repoId, row.id), eq(issueStates.number, issue.number)))
           .get()
         const now = new Date()
+        const requeued = existing && ['done', 'failed', 'canceled'].includes(existing.status)
         if (!existing) {
           db.insert(issueStates)
             .values({
@@ -218,7 +220,7 @@ export async function pollOnce({
             })
             .run()
           log(`${row.ref} #${issue.number} 已入队`)
-        } else if (['done', 'failed', 'canceled'].includes(existing.status)) {
+        } else if (requeued) {
           db.update(issueStates)
             .set({ status: 'queued', updatedAt: now, title: issue.title })
             .where(eq(issueStates.id, existing.id))
@@ -252,6 +254,8 @@ export async function pollOnce({
             )
           }
         }
+        if (requeued && existing.progressCommentId !== null)
+          await syncProgress({ db, repo: row, issue: existing, command, log, signal })
       }
     } catch (error) {
       if (signal.aborted) break

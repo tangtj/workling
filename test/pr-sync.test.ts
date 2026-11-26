@@ -295,3 +295,80 @@ test('标签更新失败保留合并状态，关闭 Issue 列表无效不影响 
     await s.dispose()
   }
 })
+
+test('PR 同步只更新状态有变化且已启用进度的 Issue', async () => {
+  const s = await scenario()
+  try {
+    for (const [number, status, prState, progressCommentId] of [
+      [1, 'done', 'open', 71],
+      [2, 'done', 'open', 72],
+      [3, 'done', 'open', 73],
+      [4, 'done', 'open', null],
+      [5, 'failed', 'merged', 75],
+      [6, 'failed', 'open', 76],
+      [7, 'done', 'open', null],
+    ] as const) {
+      const row = await s.issue(number, status)
+      const run = s.db
+        .insert(runs)
+        .values({
+          issueId: row.id,
+          worker: 'worker',
+          startedAt: clock,
+          endedAt: clock,
+          outcome: number === 7 ? 'completed' : null,
+        })
+        .returning()
+        .get()
+      s.db
+        .update(issues)
+        .set({ prUrl: 'old', prState, progressCommentId, lastRunId: run.id })
+        .where(eq(issues.id, row.id))
+        .run()
+    }
+    const options: Parameters<typeof syncPullRequests>[0] = {
+      ...s.options,
+      command: async (args, opts) => {
+        if (args[1] === 'pr')
+          return JSON.stringify([
+            pr(1, 'MERGED', recent),
+            pr(2, 'CLOSED', recent),
+            pr(3, 'OPEN', recent),
+            pr(4, 'MERGED', recent),
+            pr(5, 'MERGED', recent),
+            pr(6, 'CLOSED', recent),
+            pr(7, 'MERGED', recent),
+          ])
+        if (args[2] === 'list') return '[{"number":6,"stateReason":"COMPLETED"}]'
+        return s.command(args, opts)
+      },
+    }
+    await syncPullRequests(options)
+    const comments = s.calls.filter(({ args }) => args[2] === '--method')
+    expect(
+      comments.map(({ args, options }) => [
+        args[3],
+        args[4],
+        JSON.parse(options!.input!).body.split('\n')[0],
+      ]),
+    ).toEqual([
+      ['PATCH', 'repos/a/b/issues/comments/71', '### 进度 · ✅ 已合并'],
+      ['PATCH', 'repos/a/b/issues/comments/72', '### 进度 · PR 已关闭'],
+      ['PATCH', 'repos/a/b/issues/comments/75', '### 进度 · ✅ 已合并'],
+      ['PATCH', 'repos/a/b/issues/comments/76', '### 进度 · 已取消'],
+      ['POST', 'repos/a/b/issues/7/comments', '### 进度 · ✅ 已合并'],
+    ])
+    expect(s.db.select().from(issues).where(eq(issues.number, 4)).get()).toMatchObject({
+      prState: 'merged',
+      progressCommentId: null,
+    })
+    expect(s.db.select().from(issues).where(eq(issues.number, 7)).get()?.progressCommentId).toBe(
+      1007,
+    )
+    s.calls.length = 0
+    await syncPullRequests(options)
+    expect(s.calls).toEqual([])
+  } finally {
+    await s.dispose()
+  }
+})

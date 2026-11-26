@@ -50,6 +50,7 @@ export const issues = sqliteTable(
     status: text('status', { enum: ['queued', 'running', 'done', 'failed', 'canceled'] }).notNull(),
     prUrl: text('pr_url'),
     prState: text('pr_state', { enum: ['open', 'merged', 'closed'] }),
+    progressCommentId: integer('progress_comment_id'),
     // 不设外键，避免 issues 与 runs 循环引用。
     lastRunId: integer('last_run_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
@@ -74,6 +75,7 @@ export const runs = sqliteTable('runs', {
   endedAt: integer('ended_at', { mode: 'timestamp' }),
   exitCode: integer('exit_code'),
   error: text('error'),
+  outcome: text('outcome', { enum: ['completed', 'partial', 'answered', 'planned'] }),
   summary: text('summary'),
   reportResult: text('report_result'),
   // Pi 在 out/outcome.json 中自报的执行方与实现前评估，只用于展示和统计。

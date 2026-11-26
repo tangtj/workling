@@ -1,4 +1,3 @@
-import { markComment, runComment, runKindLabel, runRound } from './comment.ts'
 import { and, desc, eq, ne, inArray } from 'drizzle-orm'
 import { join } from 'node:path'
 import { removeSecrets, writeLlmSecrets } from '../contract/secrets.ts'
@@ -28,7 +27,7 @@ import { errorMessage } from '../runtime/errors.ts'
 import { writeRunContext } from './context.ts'
 import { syncMirror } from './mirror.ts'
 import { selectBatch } from './rework.ts'
-import { redactSecrets } from './secret-scan.ts'
+import { syncProgress } from './progress.ts'
 type Log = (message: string) => void
 
 const waiting = new Map<number, string>()
@@ -561,43 +560,6 @@ export async function launchQueued({
     } catch (error) {
       log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
     }
-    try {
-      const included = db
-        .select()
-        .from(feedback)
-        .where(eq(feedback.runId, record!.id))
-        .orderBy(feedback.createdAt, feedback.id)
-        .all()
-      const names = {
-        issue_comment: 'Issue 评论',
-        pr_comment: 'PR 评论',
-        review_comment: '行内评论',
-        review: 'Review',
-      }
-      const lines = included
-        .slice(0, 10)
-        .map((row) => `- ${names[row.source]} · @${row.authorLogin} · ${row.url}`)
-      if (included.length > 10) lines.push(`等 ${included.length} 条`)
-      const runId = record!.id
-      const branch = db
-        .select({ branch: runs.branch })
-        .from(runs)
-        .where(eq(runs.id, runId))
-        .get()?.branch
-      const body = runComment({
-        title: `▶️ 第 ${runRound(db, issue.id, runId)} 轮 · ${runKindLabel[kind]} · 开始`,
-        facts: [...(branch ? [`分支 \`${branch}\``] : []), `运行 #${runId}`],
-        tail: lines.length ? `**触发反馈**\n\n${lines.join('\n')}` : undefined,
-      })
-      await command(
-        ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-        {
-          env: ghEnv(repo.token, repo.host),
-          input: markComment(redactSecrets(body, [repo.token, pi.llmApiKey ?? ''])),
-        },
-      )
-    } catch (error) {
-      log(`${repo.ref} #${issue.number} 发送领取评论失败：${errorMessage(error)}`)
-    }
+    await syncProgress({ db, repo, issue, command, log, signal })
   }
 }

@@ -6,7 +6,16 @@ import { join } from 'node:path'
 import { openDatabase, type WorklingDatabase } from '../src/db/index.ts'
 import { issues, piSettings, repos, runs } from '../src/db/schema.ts'
 
+function removeProgressMigration(db: WorklingDatabase) {
+  db.run(sql`ALTER TABLE issues DROP COLUMN progress_comment_id`)
+  db.run(sql`ALTER TABLE runs DROP COLUMN outcome`)
+  db.run(
+    sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+  )
+}
+
 function removeExecutionMigration(db: WorklingDatabase) {
+  removeProgressMigration(db)
   for (const column of ['executor', 'difficulty', 'clarity', 'assessment_note'])
     db.run(sql.raw(`ALTER TABLE runs DROP COLUMN ${column}`))
   db.run(
@@ -395,6 +404,54 @@ test('执行评估迁移为已有运行记录补上可空的执行方与评估�
           { name: 'clarity', notnull: 0 },
           { name: 'assessment_note', notnull: 0 },
         ].map((column) => expect.objectContaining(column)),
+      )
+    } finally {
+      upgraded.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('进度评论迁移保留旧 Issue 和运行，两列没有回填', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-progress-'))
+  try {
+    const first = await openDatabase(dir)
+    try {
+      removeProgressMigration(first.db)
+      first.db.run(sql`
+        INSERT INTO repos (ref, platform, host, path, token, created_at, updated_at)
+        VALUES ('github:a/b', 'github', 'github.com', 'a/b', 'secret', 1, 1)
+      `)
+      first.db.run(sql`
+        INSERT INTO issues (repo_id, number, status, last_run_id, created_at, updated_at)
+        VALUES (1, 42, 'done', 1, 1, 1)
+      `)
+      first.db.run(sql`
+        INSERT INTO runs (issue_id, worker, started_at, ended_at, report_result)
+        VALUES (1, 'worker', 1, 2, '完成')
+      `)
+    } finally {
+      first.close()
+    }
+    const upgraded = await openDatabase(dir)
+    try {
+      expect(upgraded.db.select().from(issues).get()).toMatchObject({
+        number: 42,
+        status: 'done',
+        lastRunId: 1,
+        progressCommentId: null,
+      })
+      expect(upgraded.db.select().from(runs).get()).toMatchObject({
+        endedAt: new Date(2000),
+        reportResult: '完成',
+        outcome: null,
+      })
+      expect(upgraded.db.all(sql`PRAGMA table_info(issues)`)).toContainEqual(
+        expect.objectContaining({ name: 'progress_comment_id', type: 'INTEGER', notnull: 0 }),
+      )
+      expect(upgraded.db.all(sql`PRAGMA table_info(runs)`)).toContainEqual(
+        expect.objectContaining({ name: 'outcome', type: 'TEXT', notnull: 0 }),
       )
     } finally {
       upgraded.close()
