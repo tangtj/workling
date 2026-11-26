@@ -1,9 +1,12 @@
 import { AI_NOTICE } from '../src/serve/comment.ts'
+import { eq } from 'drizzle-orm'
 import { afterEach, expect, test } from 'bun:test'
 import { chmod, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeOutResult } from '../src/contract/out.ts'
+import { writeOutResult, type Plan } from '../src/contract/out.ts'
+import { openDatabase } from '../src/db/index.ts'
+import { issues, planChildren, repos, runs } from '../src/db/schema.ts'
 import type { Command, RunOptions } from '../src/runtime/types.ts'
 import { landRun, publishIssueResult } from '../src/serve/land.ts'
 import { localRemote } from './helpers/git.ts'
@@ -16,13 +19,17 @@ const landed = (head: string, partial = false) =>
 const updated = (head: string) => ({ ...landed(head), created: false })
 const branch = 'workling/42-task'
 const dirs: string[] = []
+const dbCleanups: (() => void)[] = []
 afterEach(async () => {
+  for (const close of dbCleanups.splice(0)) close()
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true })
 })
 
 async function scenario(taskBranch = branch, draft?: boolean) {
   const workspace = await mkdtemp(join(tmpdir(), 'workling-land-'))
   dirs.push(workspace)
+  const { db, close } = await openDatabase(workspace)
+  dbCleanups.push(close)
   const remote = await localRemote(workspace)
   const base = await remote.commit('refs/heads/main', 'base')
   const mirror = join(workspace, 'mirror.git')
@@ -71,13 +78,14 @@ async function scenario(taskBranch = branch, draft?: boolean) {
     return ''
   }
   const options = {
+    db,
     workspace,
     repo,
     issue,
     mirror,
     command,
     remoteUrl: remote.path,
-    run: { id: 1, taskDir, branch: taskBranch, baseRef: base },
+    run: { id: 1, kind: 'implement' as const, taskDir, branch: taskBranch, baseRef: base },
     llmApiKey: 'configured-model-secret',
     log: (line: string) => logs.push(line),
   }
@@ -533,4 +541,230 @@ test('变基交付时远端已被他人更新，拒绝覆盖', async () => {
   })
   expect(await s.remote.write(['rev-parse', s.ref])).toBe(other)
   expect(s.calls.some(({ args }) => args.includes('push'))).toBe(false)
+})
+
+const planBody = '## 目标\n完成一部分\n\n## 验收\n- [ ] 检查结果'
+const planExample: Plan = {
+  summary: '分三步完成',
+  docs: [],
+  children: ['甲', '乙', '丙'].map((title) => ({ title, body: planBody })),
+}
+
+async function planScenario(docPath?: string, contents = '# Design') {
+  const s = await scenario()
+  const { db } = s.options
+  const now = new Date()
+  const project = db
+    .insert(repos)
+    .values({
+      ...repo,
+      ref: 'github:a/b',
+      platform: 'github',
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get()
+  const parent = db
+    .insert(issues)
+    .values({
+      repoId: project.id,
+      number: issue.number,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get()
+  const record = db
+    .insert(runs)
+    .values({
+      ...s.options.run,
+      issueId: parent.id,
+      kind: 'plan',
+      worker: 'worker',
+      startedAt: now,
+    })
+    .returning()
+    .get()
+  const plan: Plan = { ...structuredClone(planExample), docs: docPath ? [docPath] : [] }
+  if (docPath) {
+    await writeFile(join(s.cwd, docPath), contents)
+    await s.git('add', '--', docPath)
+    await s.git('commit', '-m', 'Write design')
+    await s.git('bundle', 'create', s.bundle, `${s.base}..${s.ref}`)
+  }
+  const tip = await s.git('rev-parse', 'HEAD')
+  const savePlan = () => writeFile(join(s.out, 'plan.json'), JSON.stringify(plan))
+  const saveResult = (outcome: Parameters<typeof writeOutResult>[1]['outcome'] = 'planned') =>
+    writeOutResult(s.out, { contract: 2, branch, head: tip, commits: docPath ? 1 : 0, outcome })
+  await savePlan()
+  await saveResult()
+  const posts: { path: string; body: Record<string, unknown> }[] = []
+  let failCreate = false
+  let linkError: string | undefined
+  const command: Command = async (args, opts) => {
+    if (args[0] === 'git') return s.options.command(args, opts)
+    const path = args[4]!
+    expect(args).toEqual(['gh', 'api', '-X', 'POST', path, '--input', '-'])
+    expect(opts?.env?.GH_TOKEN).toBe(repo.token)
+    const body = JSON.parse(opts!.input!)
+    posts.push({ path, body })
+    if (path === 'repos/a/b/issues') {
+      const i = plan.children.findIndex(({ title }) => title === body.title)
+      expect(i).toBeGreaterThanOrEqual(0)
+      if (failCreate && i === 1) {
+        failCreate = false
+        throw new Error('HTTP 503')
+      }
+      return JSON.stringify({ number: 101 + i, id: 1001 + i })
+    }
+    expect(path).toBe('repos/a/b/issues/42/sub_issues')
+    if (linkError) {
+      const message = linkError
+      linkError = undefined
+      throw new Error(message)
+    }
+    return ''
+  }
+  return {
+    ...s,
+    db,
+    plan,
+    posts,
+    tip,
+    savePlan,
+    saveResult,
+    land: () => landRun({ ...s.options, run: record, command }),
+    failSecondCreate: () => {
+      failCreate = true
+    },
+    failNextLink: (error: string) => {
+      linkError = error
+    },
+  }
+}
+
+test.each([true, false])('拆解有文档提交=%s 时按顺序创建并挂上子 Issue', async (hasDocs) => {
+  const s = await planScenario(hasDocs ? 'Design.MD' : undefined)
+  const result = await s.land()
+  expect(result).toEqual({
+    status: 'planned',
+    branch: hasDocs ? branch : null,
+    children: [
+      { number: 101, title: '甲' },
+      { number: 102, title: '乙' },
+      { number: 103, title: '丙' },
+    ],
+  })
+  expect(s.posts).toEqual(
+    s.plan.children.flatMap(({ title, body }, i) => [
+      {
+        path: 'repos/a/b/issues',
+        body: {
+          title,
+          body: `${body}${hasDocs ? `\n\n分支：${branch}` : ''}\n\n<!-- workling:plan parent=#42 run=1 -->`,
+        },
+      },
+      { path: 'repos/a/b/issues/42/sub_issues', body: { sub_issue_id: 1001 + i } },
+    ]),
+  )
+  expect(s.db.select().from(planChildren).orderBy(planChildren.position).all()).toMatchObject([
+    { position: 1, githubId: 1001, linkedAt: expect.any(Date) },
+    { position: 2, githubId: 1002, linkedAt: expect.any(Date) },
+    { position: 3, githubId: 1003, linkedAt: expect.any(Date) },
+  ])
+  expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(hasDocs ? 1 : 0)
+  expect(await s.remote.write(['for-each-ref', '--format=%(objectname)', s.ref])).toBe(
+    hasDocs ? s.tip : '',
+  )
+})
+
+test.each([
+  ['非文档文件', 'code.ts', '拆解运行只能提交文档：code.ts'],
+  ['文档路径不存在', 'design.md', 'plan.json 列出的文档不存在：missing.md'],
+  ['无提交但清单列文档', undefined, '没有文档提交，但 plan.json 列出了文档'],
+  ['子 Issue 缺少验收', undefined, '缺少「验收」'],
+  ['子 Issue 有分支指令', undefined, '不能包含「分支：」行'],
+  ['子 Issue 有模式指令', undefined, '不能包含「模式：」行'],
+  ['子 Issue 末尾围栏未闭合', 'design.md', '正文末尾有未闭合的代码块'],
+  ['拆解摘要命中密钥', undefined, '拆解产出命中密钥规则：API key'],
+  ['子 Issue 标题命中密钥', undefined, '拆解产出命中密钥规则：API key'],
+  ['子 Issue 正文命中密钥', undefined, '拆解产出命中密钥规则：API key'],
+  ['拆解评论尾部命中密钥', undefined, '拆解产出命中密钥规则：API key'],
+  ['文档提交命中密钥', 'design.md', '新增内容命中密钥规则：API key'],
+] as const)('%s 时整批落地失败，无推送或子 Issue', async (name, path, reason) => {
+  const secret = `sk-${'a'.repeat(24)}`
+  const s = await planScenario(path, name === '文档提交命中密钥' ? secret : undefined)
+  const second = s.plan.children[1]!
+  if (name === '文档路径不存在' || name === '无提交但清单列文档') s.plan.docs = ['missing.md']
+  if (name === '子 Issue 缺少验收') second.body = '## 目标\n单一目标'
+  if (name === '子 Issue 有分支指令') second.body += '\n分支：docs/custom'
+  if (name === '子 Issue 有模式指令') second.body += '\n模式：拆解'
+  if (name === '子 Issue 末尾围栏未闭合') second.body += '\n```'
+  if (name === '拆解摘要命中密钥') s.plan.summary = secret
+  if (name === '子 Issue 标题命中密钥') second.title = secret
+  if (name === '子 Issue 正文命中密钥') second.body += `\n${secret}`
+  if (name === '拆解评论尾部命中密钥')
+    await writeFile(join(s.out, 'issue-comment.md'), `${'x'.repeat(60_010)}\n${secret}`)
+  await s.savePlan()
+  const result = await s.land()
+  expect(result.status).toBe('failed')
+  expect(JSON.stringify(result)).toContain(reason)
+  expect(JSON.stringify(result)).not.toContain(secret)
+  expect(s.posts).toEqual([])
+  expect(s.db.select().from(planChildren).all()).toEqual([])
+  expect(s.calls.some(({ args }) => args.includes('push'))).toBe(false)
+})
+
+test('第二个子 Issue 创建失败后，从失败位置重新落地，保留挂载顺序', async () => {
+  const s = await planScenario('design.md')
+  s.failSecondCreate()
+  await expect(s.land()).rejects.toThrow('HTTP 503')
+  expect(s.db.select().from(planChildren).all()).toMatchObject([
+    { position: 1, linkedAt: expect.any(Date) },
+  ])
+  await expect(s.land()).resolves.toMatchObject({ status: 'planned' })
+  expect(s.posts.map(({ body }) => body.title ?? body.sub_issue_id)).toEqual([
+    '甲',
+    1001,
+    '乙',
+    '乙',
+    1002,
+    '丙',
+    1003,
+  ])
+  expect(s.calls.filter(({ args }) => args.includes('push'))).toHaveLength(1)
+})
+
+test('挂载失败保留已创建的子 Issue，仅将明确挂在同一父 Issue 的 422 视为成功', async () => {
+  const s = await planScenario()
+  s.failNextLink('gh: Sub-issue is already added to another parent issue (HTTP 422)')
+  await expect(s.land()).rejects.toThrow('HTTP 422')
+  expect(s.db.select().from(planChildren).all()).toMatchObject([{ position: 1, linkedAt: null }])
+  s.failNextLink('gh: The sub-issue is already a sub-issue of this issue (HTTP 422)')
+  await expect(s.land()).resolves.toMatchObject({ status: 'planned' })
+  expect(s.posts.map(({ body }) => body.title ?? body.sub_issue_id)).toEqual([
+    '甲',
+    1001,
+    1001,
+    '乙',
+    1002,
+    '丙',
+    1003,
+  ])
+  expect(
+    s.db.select().from(planChildren).where(eq(planChildren.position, 1)).get()?.linkedAt,
+  ).toBeInstanceOf(Date)
+})
+
+test('拆解运行接受答复，拒绝其他运行类型的结果', async () => {
+  const s = await planScenario()
+  await s.saveResult('answered')
+  expect(await s.land()).toEqual({ status: 'answered' })
+  for (const outcome of ['completed', 'partial', 'incomplete', 'reviewed'] as const) {
+    await s.saveResult(outcome)
+    expect(await s.land()).toEqual({ status: 'failed', error: `拆解运行的结果无效：${outcome}` })
+  }
+  expect(s.posts).toEqual([])
 })

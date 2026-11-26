@@ -1,5 +1,6 @@
 import { repoTriage, triageOverview } from '../triage.ts'
-import { feedback, runs, triageRecords } from '../../db/schema.ts'
+import { feedback, planChildren, runs, triageRecords } from '../../db/schema.ts'
+import { runKindLabels } from '../run-kind.ts'
 import { and, eq, asc } from 'drizzle-orm'
 import { countAutoRounds, prNumberOf } from '../../serve/rework.ts'
 import { failureReason } from '../issue-view.ts'
@@ -167,6 +168,22 @@ export function pagesRoutes(deps: AppDeps): Hono {
       worker: run.worker,
       branch: run.branch,
       kind: run.kind,
+      ...(run.kind === 'plan'
+        ? {
+            children: db
+              .select()
+              .from(planChildren)
+              .where(eq(planChildren.runId, run.id))
+              .orderBy(planChildren.position)
+              .all()
+              .map(({ number, title, linkedAt }) => ({
+                number,
+                title,
+                linked: linkedAt !== null,
+                url: `https://${issue.repo.host}/${issue.repo.path}/issues/${number}`,
+              })),
+          }
+        : {}),
       startedAt: run.startedAt.toISOString(),
       endedAt: run.endedAt?.toISOString() ?? null,
       exitCode: run.exitCode,
@@ -219,8 +236,37 @@ export function pagesRoutes(deps: AppDeps): Hono {
       error: run.error,
     })
     const rows = db.select().from(feedback).all()
+    const plansWithChildren = new Set(
+      db
+        .selectDistinct({ runId: planChildren.runId })
+        .from(planChildren)
+        .all()
+        .map(({ runId }) => runId),
+    )
     const attention: OverviewData['attention'] = []
     for (const issue of page.issues) {
+      const run = issue.lastRun
+      if (
+        issue.status === 'done' &&
+        run?.kind === 'plan' &&
+        !run.planReleasedAt &&
+        plansWithChildren.has(run.id)
+      ) {
+        attention.push({
+          kind: 'plan_pending',
+          repoId: issue.repoId,
+          repoRef: issue.repo.ref,
+          number: issue.number,
+          title: issue.title,
+          issueId: issue.id,
+          url: `https://${issue.repo.host}/${issue.repo.path}/issues/${issue.number}`,
+          prUrl: null,
+          logRunId: null,
+          since: (run.endedAt ?? issue.updatedAt).toISOString(),
+          reason: '审阅拆解结果后，给需求 Issue 重新打上 workling:ready',
+        })
+        continue
+      }
       if (issue.stage !== 'failed' && issue.stage !== 'capped' && issue.stage !== 'review') continue
       const issueRows = rows.filter((row) => row.issueId === issue.id)
       const cappedAt = issueRows
@@ -255,7 +301,7 @@ export function pagesRoutes(deps: AppDeps): Hono {
         ).toISOString(),
         reason:
           issue.stage === 'failed'
-            ? `第 ${round} 轮${issue.lastRun?.kind === 'rework' ? '返工' : '实现'} · ${failureReason(issue).label}`
+            ? `第 ${round} 轮${runKindLabels[run?.kind ?? 'implement']} · ${failureReason(issue).label}`
             : issue.stage === 'capped'
               ? `已自动返工 ${count} / ${page.status?.reworkLimit ?? '—'} 轮，PR 上的 Request changes 不再自动处理`
               : 'PR 已打开，等待 review',

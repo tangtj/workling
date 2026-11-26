@@ -1,4 +1,5 @@
 import * as Type from 'typebox'
+import { taskRunKind } from './run-kind.ts'
 
 const obj = <T extends Type.TProperties>(properties: T) =>
   Type.Object(properties, { additionalProperties: false })
@@ -77,7 +78,17 @@ export const issueDetailSchema = obj({
       id: Type.Integer(),
       worker: Type.String(),
       branch: nullableString,
-      kind: Type.Union([Type.Literal('implement'), Type.Literal('rework'), Type.Literal('review')]),
+      kind: Type.Union([taskRunKind, Type.Literal('review')]),
+      children: Type.Optional(
+        Type.Array(
+          obj({
+            number: Type.Integer(),
+            title: Type.String(),
+            url: Type.String(),
+            linked: Type.Boolean(),
+          }),
+        ),
+      ),
       startedAt: Type.String(),
       endedAt: nullableString,
       exitCode: nullableInteger,

@@ -11,6 +11,7 @@ import { NotFound } from '../not-found.tsx'
 import { issueReviewsOptions, ReviewCard } from '../issue-reviews.tsx'
 import { loadFeedback } from '../feedback.ts'
 import { RunTimeline } from '../run-timeline.tsx'
+import { runKindLabels } from '../../run-kind.ts'
 
 type Detail = NonNullable<Awaited<ReturnType<ReturnType<typeof issueDetailOptions>['queryFn']>>>
 
@@ -55,7 +56,7 @@ function RunCard({
   // 执行过程单独折叠：只有展开时才拉取事件流，最新一轮默认展开以便实时刷新。
   const [processOpen, setProcessOpen] = useState(defaultOpen)
   const status = runResult(run)
-  const kind = run.kind === 'rework' ? '返工' : '实现'
+  const kind = runKindLabels[run.kind]
   return (
     <div className="run-card">
       <button
@@ -98,6 +99,21 @@ function RunCard({
           </dl>
           {run.error && <p className="run-error">{run.error}</p>}
           {run.summary && <p className="run-summary">Pi 结论：{run.summary}</p>}
+          {!!run.children?.length && (
+            <div>
+              <strong>子 Issue</strong>
+              <ol>
+                {run.children.map(({ number, title, url, linked }) => (
+                  <li key={number}>
+                    <a href={url} target="_blank" rel="noopener noreferrer">
+                      #{number} {title}
+                    </a>
+                    {!linked && <span className="muted"> · 未挂到父 Issue</span>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
           <details
             className="run-process"
             open={processOpen}
@@ -107,6 +123,7 @@ function RunCard({
             <RunTimeline
               variant="compact"
               runId={run.id}
+              kind={run.kind}
               ended={run.endedAt !== null}
               status={status}
               enabled={processOpen}

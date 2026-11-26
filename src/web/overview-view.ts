@@ -1,8 +1,9 @@
 import type { IssueRow } from './issue-view.ts'
+import type { TaskRunKind } from './run-kind.ts'
 
 export type OverviewRun = {
   id: number
-  kind?: 'implement' | 'rework'
+  kind?: TaskRunKind
   startedAt: Date
   endedAt: Date | null
   exitCode: number | null

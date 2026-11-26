@@ -175,17 +175,25 @@ function RunPhases({
   state,
   ended,
   status,
+  kind,
 }: {
   state: TimelineState
   ended: boolean
   status: RunStatus
+  kind: RunTimelineProps['kind']
 }) {
   const phase = phaseOf(state)
   const failed =
     ended && (status === 'failed' || status === 'canceled' || state.items.some(hasFailedExit))
   return (
     <ol className="run-phases" aria-label="执行阶段">
-      {['准备', '读取 Issue', 'codex 实现', '核对', '交付 PR'].map((label, index) => {
+      {[
+        '准备',
+        '读取 Issue',
+        kind === 'plan' ? 'codex 拆解' : 'codex 实现',
+        '核对',
+        kind === 'plan' ? '交付拆解结果' : '交付 PR',
+      ].map((label, index) => {
         const current = index === phase
         const complete = index < phase || (current && ended && !failed)
         const badge = complete ? 'done' : current ? (failed ? 'failed' : 'running') : ''
@@ -207,6 +215,7 @@ function RunPhases({
 
 type RunTimelineProps = {
   runId: number
+  kind: 'implement' | 'rework' | 'review' | 'plan'
   ended: boolean
   status: RunStatus
   onFinished?: () => void
@@ -260,6 +269,7 @@ function FallbackNotice() {
 
 function CompactTimeline({
   runId,
+  kind,
   ended,
   status,
   enabled,
@@ -284,7 +294,7 @@ function CompactTimeline({
       data-limit={limit}
     >
       {events.fallback && <FallbackNotice />}
-      <RunPhases state={events.state} ended={finished} status={status} />
+      <RunPhases state={events.state} ended={finished} status={status} kind={kind} />
       <p className="error-box" role="alert" hidden={!events.error}>
         {events.error}
       </p>
@@ -301,6 +311,7 @@ function CompactTimeline({
 
 function FullTimeline({
   runId,
+  kind,
   ended,
   status,
   onFinished,
@@ -340,7 +351,7 @@ function FullTimeline({
 
   return (
     <>
-      <RunPhases state={events.state} ended={finished} status={status} />
+      <RunPhases state={events.state} ended={finished} status={status} kind={kind} />
       <section className="card">
         <div className="row log-toolbar">
           <div className="row" role="group" aria-label="筛选步骤">

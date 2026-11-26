@@ -8,6 +8,7 @@ import { Badge } from '../issue-table.tsx'
 import { shellKey, usePageLayout } from '../layout.tsx'
 import { NotFound } from '../not-found.tsx'
 import { RunTimeline, useSecondClock } from '../run-timeline.tsx'
+import { runKindLabels } from '../../run-kind.ts'
 
 function RunDuration({ startedAt, endedAt }: { startedAt: Date; endedAt: Date | null }) {
   const now = useSecondClock(endedAt === null)
@@ -75,7 +76,9 @@ export function RunLogPage() {
           </p>
           <div className="row">
             <strong>
-              {run.kind === 'review' ? '评审' : `第 ${data.runs.length - runIndex} 次`}
+              {run.kind === 'review' || run.kind === 'plan'
+                ? runKindLabels[run.kind]
+                : `第 ${data.runs.length - runIndex} 次`}
             </strong>
             <Badge status={status} text={run.error === '进程中断' ? '中断' : undefined} />
           </div>
@@ -101,6 +104,7 @@ export function RunLogPage() {
         key={run.id}
         variant="full"
         runId={run.id}
+        kind={run.kind}
         ended={run.endedAt !== null}
         status={status}
         onFinished={onFinished}

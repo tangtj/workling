@@ -2,8 +2,8 @@ import { and, eq } from 'drizzle-orm'
 import * as Type from 'typebox'
 import * as Value from 'typebox/value'
 import { type WorklingDatabase } from '../db/index.ts'
-import { issues as issueStates, repos } from '../db/schema.ts'
-import { readSubIssues } from '../issue/chain.ts'
+import { issues as issueStates, repos, runs } from '../db/schema.ts'
+import { canPlan, readSubIssues } from '../issue/chain.ts'
 import { ghEnv } from '../platform/github.ts'
 import type { Command } from '../runtime/types.ts'
 import { setStatusLabel } from './status-label.ts'
@@ -121,7 +121,7 @@ export async function pollOnce({
         let subs
         try {
           subs = await readSubIssues({ repo: row, number: issue.number, command, signal })
-          if (subs.length) {
+          if (subs.length > 0 && !canPlan(subs)) {
             for (const sub of subs) {
               if (!sub.sameRepo || sub.state !== 'open') continue
               const existingSub = db
@@ -144,21 +144,50 @@ export async function pollOnce({
                 { env: ghEnv(row.token, row.host), signal },
               )
             }
-            await command(
-              [
-                'gh',
-                'issue',
-                'edit',
-                String(issue.number),
-                '-R',
-                row.path,
-                '--remove-label',
-                'workling:ready',
-                '--add-label',
-                'workling:running',
-              ],
-              { env: ghEnv(row.token, row.host), signal },
-            )
+            const parentRun = db
+              .select({ id: runs.id })
+              .from(issueStates)
+              .innerJoin(runs, eq(issueStates.lastRunId, runs.id))
+              .where(
+                and(
+                  eq(issueStates.repoId, row.id),
+                  eq(issueStates.number, issue.number),
+                  eq(issueStates.status, 'done'),
+                  eq(runs.kind, 'plan'),
+                ),
+              )
+              .get()
+            if (parentRun) {
+              await setStatusLabel({
+                repo: row,
+                number: issue.number,
+                target: 'running',
+                command,
+                signal,
+                removeReady: true,
+                labels: issue.labels.map((label) => label.name),
+              })
+              // 主 Issue 展开时没有新的 worker；用放行时间区分历史拆解与待确认的结果。
+              db.update(runs)
+                .set({ planReleasedAt: new Date() })
+                .where(eq(runs.id, parentRun.id))
+                .run()
+            } else
+              await command(
+                [
+                  'gh',
+                  'issue',
+                  'edit',
+                  String(issue.number),
+                  '-R',
+                  row.path,
+                  '--remove-label',
+                  'workling:ready',
+                  '--add-label',
+                  'workling:running',
+                ],
+                { env: ghEnv(row.token, row.host), signal },
+              )
             expanded++
             log(
               `${row.ref} #${issue.number} 主 Issue：展开 ${subs.length} 个子 Issue（${subs.map((sub) => `#${sub.number}`).join(' ')}）`,

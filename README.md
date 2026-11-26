@@ -56,6 +56,8 @@ bun run start          # or: workling serve
 4. Label an Issue `workling:ready`. The Issue body is the prompt for codex and may include images and documents; optional `模型：` / `强度：` lines override the default model and reasoning effort. For larger designs, keep the documents on a branch and add a `分支：<name>` line; the task branch is created from it.
 5. Follow progress and logs in the admin UI. Results show up as labels: `workling:queued` → `workling:running` → `workling:done` / `workling:failed`. To retry a failed Issue, add `workling:ready` again. When a task fails, is partially completed, or its PR remains open, comment `/workling <additional instructions>` or mention the machine account (derived from Pi’s `gitEmail` setting, `@workling-agent` by default) to continue on the same branch.
 
+To have workling turn a requirement into design docs and ordered sub-issues, add `模式：拆解` on its own line and label the issue `workling:ready`. Review the result and apply the label again when the sub-issues are ready to run.
+
 ### Shadow review
 
 Review is off by default. Set **Review level** to **Shadow** in a GitHub repository's settings to review each new completed or partially completed delivery. The Issue detail page shows the verdict, findings, and a link to the review log. Shadow review leaves GitHub comments and labels untouched and does not start rework.

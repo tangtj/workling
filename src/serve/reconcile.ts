@@ -3,7 +3,7 @@ import { type ExecutorSettings } from '../config/executor.ts'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { truncateComment } from '../contract/out.ts'
+import { maxCommentLength, readPlan, truncateComment } from '../contract/out.ts'
 import { removeSecrets } from '../contract/secrets.ts'
 import { type WorklingDatabase } from '../db/index.ts'
 import { feedback, issues as issueStates, repos, reviews, runs } from '../db/schema.ts'
@@ -19,7 +19,7 @@ import { extractSummary, reportExcerpt } from '../contract/report.ts'
 import type { Settings } from '../config/env.ts'
 
 import { errorMessage } from '../runtime/errors.ts'
-import { landRun, publishIssueResult, readRunIssueComment } from './land.ts'
+import { landRun, publishIssueResult, readRunIssueComment, runOutDir } from './land.ts'
 import { mirrorPath } from './mirror.ts'
 import { setStatusLabel } from './status-label.ts'
 import { publishReplies } from './replies.ts'
@@ -123,10 +123,15 @@ export async function reconcile({
     let error: string | null = null
     let endedAt = current
     let exitCode: number | null = null
-    let prUrl: string | undefined
+    let prUrl: string | null | undefined
     let prState: typeof issue.prState | undefined
     let readyToLand = false
-    let answerDir: string | undefined
+    let answer:
+      | {
+          taskDir: string
+          planned?: Extract<Awaited<ReturnType<typeof landRun>>, { status: 'planned' }>
+        }
+      | undefined
     let delivery:
       | {
           taskDir: string
@@ -184,6 +189,7 @@ export async function reconcile({
         if (readyToLand) {
           // 落地遇到暂时错误时保留 running，下轮重试；此时 worker 已不再需要密钥。
           const landed = await landRun({
+            db,
             workspace: settings.workspace,
             repo,
             issue,
@@ -196,9 +202,12 @@ export async function reconcile({
           if (landed.status === 'done') {
             ;({ status, prUrl, prState } = landed)
             delivery = { taskDir, landed }
-          } else if (landed.status === 'answered') {
+          } else if (landed.status === 'planned' || landed.status === 'answered') {
             status = 'done'
-            answerDir = taskDir
+            if (landed.status === 'planned') {
+              prUrl = prState = null
+              answer = { taskDir, planned: landed }
+            } else answer = { taskDir }
           } else error = landed.error
         }
       }
@@ -218,7 +227,7 @@ export async function reconcile({
         error = message
         endedAt = failedAt
         delivery = undefined
-        answerDir = undefined
+        answer = undefined
         prUrl = undefined
         prState = undefined
         sustainedFailure = true
@@ -236,6 +245,15 @@ export async function reconcile({
       const summary = run?.taskDir
         ? await extractSummary(run.taskDir, [repo.token, pi.llmApiKey ?? ''])
         : { summary: null, reportResult: null, logTail: null }
+      const secrets = [repo.token, pi.llmApiKey ?? '']
+      if (answer?.planned) {
+        try {
+          const plan = await readPlan(await runOutDir(answer.taskDir))
+          summary.summary = redactSecrets(plan.summary, secrets)
+        } catch {
+          log(`${repo.ref} #${issue.number} 读取拆解摘要失败`)
+        }
+      }
       db.transaction((tx) => {
         tx.update(issueStates)
           .set({ status, updatedAt: current, prUrl, prState })
@@ -381,26 +399,47 @@ export async function reconcile({
             llmApiKey: pi.llmApiKey,
             log,
           })
-        } else if (answerDir) {
-          const explanation = await readRunIssueComment(answerDir, (step) =>
+        } else if (answer) {
+          const explanation = await readRunIssueComment(answer.taskDir, (step) =>
             log(`${repo.ref} #${issue.number} ${step}失败`),
           )
-          const body = `workling：已答复。\n\n${explanation.trim() || '（Pi 未写说明）'}`
+          const clean = (body: string) => neutralizeMentions(redactSecrets(body, secrets))
+          let body: string
+          if (answer.planned) {
+            const list = answer.planned.children.map(
+              ({ number, title }, i) => `${i + 1}. #${number} ${clean(title.replace(/\s+/g, ' '))}`,
+            )
+            const docs = answer.planned.branch
+              ? `\n\n设计文档：<https://${repo.host}/${repo.path}/tree/${answer.planned.branch}>`
+              : ''
+            const suffix = `\n\n### 子 Issue\n\n${list.join('\n')}${docs}\n\n审阅文档与子 Issue 后，给本 Issue 重新打上 \`workling:ready\`，子 Issue 会按上面的顺序执行。要调整可以直接编辑子 Issue；要整体重新拆解，请把子 Issue 全部关闭为「不计划」，再评论 \`/workling <说明>\`。`
+            const intro = clean(
+              ['workling：已完成拆解。', summary.summary, explanation.trim()]
+                .filter(Boolean)
+                .join('\n\n'),
+            )
+            const limit = maxCommentLength - suffix.length
+            const truncated = '\n\n（已截断）'
+            body =
+              (intro.length > limit
+                ? intro.slice(0, limit - truncated.length).replace(/[\uD800-\uDBFF]$/, '') +
+                  truncated
+                : intro) + suffix
+          } else
+            body = truncateComment(
+              clean(`workling：已答复。\n\n${explanation.trim() || '（Pi 未写说明）'}`),
+            )
           await sync(
             ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
-            markComment(
-              truncateComment(
-                neutralizeMentions(redactSecrets(body, [repo.token, pi.llmApiKey ?? ''])),
-              ),
-            ),
+            markComment(body),
           )
           await publishReplies({
             db,
             repo,
             issue,
             runId: run!.id,
-            taskDir: answerDir,
-            prUrl: issue.prState === 'open' ? issue.prUrl : null,
+            taskDir: answer.taskDir,
+            prUrl: !answer.planned && issue.prState === 'open' ? issue.prUrl : null,
             command,
             llmApiKey: pi.llmApiKey,
             log,
@@ -408,7 +447,6 @@ export async function reconcile({
         } else if (status !== 'done') {
           let report = ''
           let explanation = ''
-          const secrets = [repo.token, pi.llmApiKey ?? '']
           if (run?.taskDir) {
             const warn = (step: string) => log(`${repo.ref} #${issue.number} ${step}失败`)
             try {

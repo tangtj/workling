@@ -8,6 +8,8 @@ export type PiSettings = {
   effort: 'low' | 'medium' | 'high' | 'xhigh'
   reviewModel: string | null
   reviewEffort: PiSettings['effort'] | null
+  planModel: string | null
+  planEffort: PiSettings['effort'] | null
   piModel: string | null
   llmBaseUrl: string | null
   llmApiKey: string | null
@@ -36,20 +38,26 @@ export function parsePiSettings(input: Record<string, unknown>): PiSettings {
   const effort = text('effort', 'medium')
   if (effort !== 'low' && effort !== 'medium' && effort !== 'high' && effort !== 'xhigh')
     throw new Error(`effort 的值无效：${effort}`)
-  const reviewModel = optionalReviewSetting('reviewModel')
-  const reviewEffort = optionalReviewSetting('reviewEffort')
-  if (
-    reviewEffort !== null &&
-    reviewEffort !== 'low' &&
-    reviewEffort !== 'medium' &&
-    reviewEffort !== 'high' &&
-    reviewEffort !== 'xhigh'
-  )
-    throw new Error(`reviewEffort 的值无效：${reviewEffort}`)
-  function optionalReviewSetting(field: string) {
+  function optionalSetting(field: string) {
     const value = input[field]
     return typeof value === 'string' && !value.trim() ? null : text(field, null)
   }
+  function optionalEffort(field: string): PiSettings['effort'] | null {
+    const value = optionalSetting(field)
+    if (
+      value !== null &&
+      value !== 'low' &&
+      value !== 'medium' &&
+      value !== 'high' &&
+      value !== 'xhigh'
+    )
+      throw new Error(`${field} 的值无效：${value}`)
+    return value
+  }
+  const reviewModel = optionalSetting('reviewModel')
+  const reviewEffort = optionalEffort('reviewEffort')
+  const planModel = optionalSetting('planModel')
+  const planEffort = optionalEffort('planEffort')
   const piModel = text('piModel', null)
   const llmBaseUrl = text('llmBaseUrl', null)
   let llmApiKey: string | null = null
@@ -82,6 +90,8 @@ export function parsePiSettings(input: Record<string, unknown>): PiSettings {
     effort,
     reviewModel,
     reviewEffort,
+    planModel,
+    planEffort,
     piModel,
     llmBaseUrl: llmBaseUrl?.replace(/\/+$/, '') ?? null,
     llmApiKey,

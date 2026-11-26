@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { WorklingDatabase } from '../db/index.ts'
 import { feedback, issues, repos, runs } from '../db/schema.ts'
+import { canPlan, readSubIssues } from '../issue/chain.ts'
 import { ghEnv } from '../platform/github.ts'
 import { markComment } from './comment.ts'
 import { errorMessage } from '../runtime/errors.ts'
@@ -79,6 +80,43 @@ export async function queueRework({
     const rows = db.select().from(feedback).where(eq(feedback.issueId, issue.id)).all()
     const batch = selectBatch(candidate, rows)
     if (!batch.length) continue
+    if (candidate.run.kind === 'plan') {
+      let subs
+      try {
+        subs = await readSubIssues({ repo, number: issue.number, command, signal })
+      } catch (error) {
+        if (!signal.aborted)
+          log(`${repo.ref} #${issue.number} 读取子 Issue 失败：${errorMessage(error)}`)
+        continue
+      }
+      if (!canPlan(subs)) {
+        db.update(feedback)
+          .set({ status: 'ignored' })
+          .where(
+            inArray(
+              feedback.id,
+              batch.map((row) => row.id),
+            ),
+          )
+          .run()
+        try {
+          await command(
+            ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],
+            {
+              env: ghEnv(repo.token, repo.host),
+              input: markComment(
+                'workling：已经拆出子 Issue，不再重新拆解。要调整请直接编辑子 Issue；要整体重来，请把子 Issue 全部关闭为「不计划」，再评论 `/workling <说明>`。',
+              ),
+              signal,
+            },
+          )
+        } catch (error) {
+          if (!signal.aborted)
+            log(`${repo.ref} #${issue.number} 发送拆解说明失败：${errorMessage(error)}`)
+        }
+        continue
+      }
+    }
     const prNumber = prNumberOf(issue.prUrl)
     if (issue.prState === 'open' && prNumber && isAutoBatch(batch)) {
       const reworkRunIds = new Set(

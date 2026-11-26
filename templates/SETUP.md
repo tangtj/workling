@@ -15,6 +15,9 @@
 3. 网页手写 Issue 的模板，写入 `.github/ISSUE_TEMPLATE/workling.md`：
    https://raw.githubusercontent.com/tangtj/workling/main/templates/repo/.github/ISSUE_TEMPLATE/workling.md
 
+4. 网页手写需求的模板，写入 `.github/ISSUE_TEMPLATE/workling-plan.md`：
+   https://raw.githubusercontent.com/tangtj/workling/main/templates/repo/.github/ISSUE_TEMPLATE/workling-plan.md
+
 ## 步骤
 
 1. **检查状态**：workling 目前只支持 GitHub，`git remote get-url origin` 不是 github.com 仓库时告诉用户并停止。在业务仓库根目录确认工作区干净（`git status`），记下默认分支。若 `docs/workling.md` 已存在，读出首行的 `v<数字>` 版本标记，按「更新」处理。

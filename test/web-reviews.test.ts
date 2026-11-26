@@ -5,7 +5,7 @@ import { createApp } from '../src/web/app.ts'
 import { hashToken } from '../src/web/auth.ts'
 import { clock, scenario } from './helpers/serve.ts'
 
-test('评审配置通过管理接口保存，空字符串清除覆盖值', async () => {
+test('评审和拆解配置通过管理接口分别保存，空字符串清除覆盖值', async () => {
   const s = await scenario()
   try {
     const app = createApp(s.db, { workspace: s.workspace })
@@ -52,9 +52,26 @@ test('评审配置通过管理接口保存，空字符串清除覆盖值', async
       reviewModel: 'model-review',
       reviewEffort: 'xhigh',
     })
+    const patchPlan = (planModel: string | null, planEffort: string | null) =>
+      request('/api/settings/pi', 'PATCH', { planModel, planEffort })
+    expect((await patchPlan('model-plan', 'extra')).status).toBe(400)
+    const saved = await patchPlan('model-plan', 'medium')
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toMatchObject({
+      reviewModel: 'model-review',
+      reviewEffort: 'xhigh',
+      planModel: 'model-plan',
+      planEffort: 'medium',
+    })
     expect(await (await patch('', '')).json()).toMatchObject({
       reviewModel: null,
       reviewEffort: null,
+      planModel: 'model-plan',
+      planEffort: 'medium',
+    })
+    expect(await (await patchPlan('', null)).json()).toMatchObject({
+      planModel: null,
+      planEffort: null,
     })
   } finally {
     await s.dispose()

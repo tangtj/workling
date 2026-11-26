@@ -1,4 +1,5 @@
 import * as Type from 'typebox'
+import { taskRunKind } from './run-kind.ts'
 const nullableString = Type.Union([Type.String(), Type.Null()])
 const obj = <T extends Type.TProperties>(properties: T) =>
   Type.Object(properties, { additionalProperties: false })
@@ -50,7 +51,7 @@ export const issueListSchema = obj({
       lastRun: Type.Union([
         Type.Null(),
         obj({
-          kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
+          kind: taskRunKind,
           startedAt: Type.String(),
           endedAt: nullableString,
           exitCode: Type.Union([Type.Integer(), Type.Null()]),

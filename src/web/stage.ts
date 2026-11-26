@@ -1,3 +1,5 @@
+import type { TaskRunKind } from './run-kind.ts'
+
 export type Stage =
   | 'queued'
   | 'running'
@@ -23,7 +25,7 @@ export const attentionStages: Stage[] = ['failed', 'capped']
 export function issueStage(input: {
   status: 'queued' | 'running' | 'done' | 'failed' | 'canceled'
   prState: 'open' | 'merged' | 'closed' | null
-  lastRun: { kind: 'implement' | 'rework'; endedAt: Date | null } | null
+  lastRun: { kind: TaskRunKind; endedAt: Date | null } | null
   cappedFeedbackAt: Date[]
 }): Stage {
   if (input.status === 'running') return input.lastRun?.kind === 'rework' ? 'rework' : 'running'

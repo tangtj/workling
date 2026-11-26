@@ -20,7 +20,7 @@ const sections = [
   ['labels', '标签与命令'],
 ]
 const descriptions: Record<Card, [string, string, string]> = {
-  codex: ['Codex', '实现与评审使用的模型与推理强度', ''],
+  codex: ['Codex', '实现、评审与拆解使用的模型与推理强度', ''],
   pi: ['Pi 与 LLM 接入', 'Pi 负责组装提示词、核对和交付 PR', '留空 Key 表示不修改'],
   git: ['提交身份', 'Pi 提交代码时的作者信息', 'PR 作者仍是仓库 token 对应的账号'],
   executor: ['执行器', '切换只影响之后拉起的任务', '本机进程模式下容器参数不生效'],
@@ -316,6 +316,25 @@ function SettingsCard({
           <select
             value={draft.reviewEffort}
             onChange={(event) => update('reviewEffort', event.target.value)}
+          >
+            <option value="">high</option>
+            {['low', 'medium', 'high', 'xhigh'].map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="field span-2">
+          <strong>拆解</strong>
+          <span className="muted">拆解需求 Issue 时使用；未设置时用默认 codex 模型与 high。</span>
+        </div>
+        {input('planModel', '拆解模型', { placeholder: '与实现相同' })}
+        <label className="field">
+          拆解强度
+          <select
+            value={draft.planEffort}
+            onChange={(event) => update('planEffort', event.target.value)}
           >
             <option value="">high</option>
             {['low', 'medium', 'high', 'xhigh'].map((value) => (

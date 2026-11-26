@@ -8,6 +8,7 @@ import { Badge, IssueRef, PR } from '../issue-table.tsx'
 import { overviewOptions } from '../overview.ts'
 import { usePageLayout } from '../layout.tsx'
 import { useRefreshPaused } from '../refresh-pause.ts'
+import { runKindLabels } from '../../run-kind.ts'
 
 const Title = ({ issue }: { issue: OverviewIssue }) => (
   <>{issue.title ?? <span className="muted">（未记录标题）</span>}</>
@@ -17,6 +18,7 @@ const attentionLabels = {
   capped: '返工到上限',
   review: 'PR 待审',
   needs_info: '信息不全',
+  plan_pending: '拆解待确认',
 } as const
 export function OverviewPage() {
   const page = useQuery(overviewOptions)
@@ -173,7 +175,7 @@ export function OverviewPage() {
                     <span
                       className={`dot dot--${run?.kind === 'rework' ? 'rework' : 'running'}`}
                     ></span>
-                    {run?.kind === 'rework' ? '返工' : '实现'} · 第 {issue.round} 轮
+                    {runKindLabels[run?.kind ?? 'implement']} · 第 {issue.round} 轮
                   </span>
                   {run && <span>{formatDuration(Math.max(0, now - run.startedAt.getTime()))}</span>}
                 </div>
