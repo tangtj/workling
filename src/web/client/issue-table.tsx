@@ -167,7 +167,10 @@ export function IssueTable({
                     </div>
                   )}
                 </td>
-                <td className="num">{issue.rounds}</td>
+                <td className="num">
+                  {issue.rounds}
+                  {issue.lastRun?.kind === 'plan' && ' · 拆解'}
+                </td>
                 <td className="nowrap muted" title={issue.updatedAt.toLocaleString()}>
                   {relativeTime(issue.updatedAt, now)}
                 </td>

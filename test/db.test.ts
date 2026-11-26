@@ -3,8 +3,18 @@ import { sql } from 'drizzle-orm'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type WorklingDatabase } from '../src/db/index.ts'
 import { issues, piSettings, repos, runs } from '../src/db/schema.ts'
+
+function removePlanMigration(db: WorklingDatabase) {
+  db.run(sql`DROP TABLE plan_children`)
+  db.run(sql`ALTER TABLE pi_settings DROP COLUMN plan_model`)
+  db.run(sql`ALTER TABLE pi_settings DROP COLUMN plan_effort`)
+  db.run(sql`ALTER TABLE runs DROP COLUMN plan_released_at`)
+  db.run(
+    sql`DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)`,
+  )
+}
 
 test('新库包含全部可空列（runs.pid/container 等、issues.title）并启用 WAL、busy_timeout，权限与重开数据保留', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-db-'))
@@ -113,6 +123,7 @@ test('已有数据库升级反馈表时保留仓库数据', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-feedback-'))
   try {
     const first = await openDatabase(dir)
+    removePlanMigration(first.db)
     const now = new Date()
     first.db
       .insert(repos)
@@ -164,6 +175,7 @@ test('建议级迁移保留仓库数据并为新旧库创建可空列', async ()
   const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-suggest-'))
   try {
     const first = await openDatabase(dir)
+    removePlanMigration(first.db)
     const repoColumns = first.db.all<{ name: string }>(sql`PRAGMA table_info(repos)`)
     expect(repoColumns.some((c) => c.name === 'triage_since')).toBe(true)
     const columns = ['suggested_at', 'suggest_comment_url', 'suggest_error', 'label_removed_at']
@@ -221,6 +233,7 @@ for (const existing of ['rework', 'triage'] as const) {
     const dir = await mkdtemp(join(tmpdir(), 'workling-merge-migrations-'))
     try {
       const first = await openDatabase(dir)
+      removePlanMigration(first.db)
       const now = new Date()
       first.db
         .insert(repos)
@@ -288,10 +301,11 @@ for (const existing of ['rework', 'triage'] as const) {
   })
 }
 
-test('影子评审迁移升级旧库，保留已有仓库与模型并默认关闭评审', async () => {
+test('影子评审与拆解迁移保留已有仓库与模型，默认关闭评审并使用默认拆解配置', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workling-upgrade-review-'))
   try {
     const first = await openDatabase(dir)
+    removePlanMigration(first.db)
     first.db.run(sql`DROP TABLE reviews`)
     first.db.run(sql`ALTER TABLE repos DROP COLUMN review_level`)
     first.db.run(sql`ALTER TABLE repos DROP COLUMN review_since`)
@@ -319,8 +333,11 @@ test('影子评审迁移升级旧库，保留已有仓库与模型并默认关�
         model: 'current-model',
         reviewModel: null,
         reviewEffort: null,
+        planModel: null,
+        planEffort: null,
       })
       expect(upgraded.db.all(sql`SELECT * FROM reviews`)).toEqual([])
+      expect(upgraded.db.all(sql`SELECT * FROM plan_children`)).toEqual([])
     } finally {
       upgraded.close()
     }

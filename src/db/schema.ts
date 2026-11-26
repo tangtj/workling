@@ -63,7 +63,7 @@ export const runs = sqliteTable('runs', {
   issueId: integer('issue_id')
     .notNull()
     .references(() => issues.id, { onDelete: 'cascade' }),
-  kind: text('kind', { enum: ['implement', 'rework', 'review'] })
+  kind: text('kind', { enum: ['implement', 'rework', 'review', 'plan'] })
     .notNull()
     .default('implement'),
   worker: text('worker').notNull(),
@@ -80,7 +80,25 @@ export const runs = sqliteTable('runs', {
   branch: text('branch'),
   baseRef: text('base_ref'),
   stackBranch: text('stack_branch'),
+  planReleasedAt: integer('plan_released_at', { mode: 'timestamp' }),
 })
+
+export const planChildren = sqliteTable(
+  'plan_children',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    number: integer('number').notNull(),
+    githubId: integer('github_id').notNull(),
+    title: text('title').notNull(),
+    linkedAt: integer('linked_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [uniqueIndex('plan_children_run_position_unique').on(table.runId, table.position)],
+)
 
 export const reviews = sqliteTable(
   'reviews',
@@ -119,6 +137,8 @@ export const piSettings = sqliteTable('pi_settings', {
   effort: text('effort', { enum: ['low', 'medium', 'high', 'xhigh'] }).notNull(),
   reviewModel: text('review_model'),
   reviewEffort: text('review_effort', { enum: ['low', 'medium', 'high', 'xhigh'] }),
+  planModel: text('plan_model'),
+  planEffort: text('plan_effort', { enum: ['low', 'medium', 'high', 'xhigh'] }),
   piModel: text('pi_model'),
   llmBaseUrl: text('llm_base_url'),
   llmApiKey: text('llm_api_key'),

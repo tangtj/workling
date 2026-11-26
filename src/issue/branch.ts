@@ -21,7 +21,8 @@ function validDocBranch(name: string): boolean {
   )
 }
 
-export function docBranch(body: string): { name: string } | { error: string } | undefined {
+export function findDirective(body: string, name: string): string | undefined {
+  const prefix = `${name}：`
   let fence: string | undefined
   let inComment = false
   for (const line of body.split(/\r?\n/)) {
@@ -36,12 +37,7 @@ export function docBranch(body: string): { name: string } | { error: string } | 
         continue
       }
       const trimmed = line.trim()
-      if (trimmed.startsWith('分支：')) {
-        const name = trimmed.slice('分支：'.length).trim()
-        return validDocBranch(name)
-          ? { name }
-          : { error: 'Issue 正文的「分支：」行未填写有效的文档分支名' }
-      }
+      if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length).trim()
     }
     let cursor = 0
     while (cursor < line.length) {
@@ -52,4 +48,18 @@ export function docBranch(body: string): { name: string } | { error: string } | 
       cursor = next + delimiter.length
     }
   }
+}
+
+export function docBranch(body: string): { name: string } | { error: string } | undefined {
+  const name = findDirective(body, '分支')
+  if (name === undefined) return undefined
+  return validDocBranch(name)
+    ? { name }
+    : { error: 'Issue 正文的「分支：」行未填写有效的文档分支名' }
+}
+
+export function planMode(body: string): boolean | { error: string } {
+  const mode = findDirective(body, '模式')
+  if (mode === undefined) return false
+  return mode === '拆解' ? true : { error: 'Issue 正文的「模式：」行只支持「拆解」' }
 }

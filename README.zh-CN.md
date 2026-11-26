@@ -56,6 +56,8 @@ bun run start          # 或 workling serve
 4. 给 Issue 打上 `workling:ready`。正文就是给 codex 的提示词，可附图片与文档；可选写 `模型：`、`强度：` 行覆盖默认值；设计文档较多时放在文档分支上，正文加 `分支：<名称>` 行，任务分支会从该分支切出。
 5. 在管理页查看进度与日志。结果以标签呈现：`workling:queued` → `workling:running` → `workling:done` / `workling:failed`；失败后重新打上 `workling:ready` 即可重试。失败、部分完成或 PR 仍开着时，可评论 `/workling <补充说明>` 或提及机器账号（由 Pi 设置的 `gitEmail` 推导，默认 `@workling-agent`），在同一分支上继续。
 
+要让 workling 把需求拆成设计文档和有序子 Issue，请在正文单独一行写 `模式：拆解` 并打上 `workling:ready`。审阅拆解结果后，再次打上该标签即可开始执行子 Issue。
+
 ### 影子评审
 
 评审默认关闭。在 GitHub 仓库详情页将「评审级别」设为「影子」，之后每次完成或部分完成的交付都会自动评审。Issue 详情页会显示结论、发现和执行日志入口。影子评审不会在 GitHub 上发评论、改标签或触发返工。

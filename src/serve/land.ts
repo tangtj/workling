@@ -11,12 +11,16 @@ import {
   readOutResult,
   truncateComment,
   type OutResult,
+  type Plan,
 } from '../contract/out.ts'
+import type { WorklingDatabase } from '../db/index.ts'
+import type { runs } from '../db/schema.ts'
 import { applyChecklist, planChecklist } from '../issue/checklist.ts'
 import { defaultBranch as readDefaultBranch, ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
 import { findSecrets, redactSecrets } from './secret-scan.ts'
+import { createPlanChildren, preparePlan } from './land-plan.ts'
 
 const maxBundleBytes = 100_000_000
 const maxTextLength = 60_000
@@ -39,7 +43,12 @@ type Landed = {
   created: boolean
   restacked?: { baseRef: string }
 }
-type LandResult = Landed | { status: 'answered' } | { status: 'failed'; error: string }
+type Planned = {
+  status: 'planned'
+  branch: string | null
+  children: { number: number; title: string }[]
+}
+type LandResult = Landed | Planned | { status: 'answered' } | { status: 'failed'; error: string }
 
 function failed(error: string): LandResult {
   return { status: 'failed', error }
@@ -162,6 +171,7 @@ export async function publishIssueResult({
 }
 
 export async function landRun({
+  db,
   workspace,
   repo,
   issue,
@@ -172,11 +182,13 @@ export async function landRun({
   llmApiKey = '',
   log = console.warn,
 }: {
+  db: WorklingDatabase
   workspace: string
   repo: { host: string; path: string; token: string }
   issue: { number: number; title: string | null }
   run: {
     id: number
+    kind: typeof runs.$inferSelect.kind
     taskDir: string | null
     branch: string | null
     baseRef: string | null
@@ -216,37 +228,84 @@ export async function landRun({
     if (!baseRef || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(baseRef))
       return failed('缺少有效的基点记录')
 
-    let bundle: Buffer
-    let body: string
+    let bundle: Buffer | undefined
+    let plan: Plan | undefined
+    let pr:
+      | { body: string; outcome: Extract<OutResult['outcome'], 'completed' | 'partial'> }
+      | undefined
     let comment: string | undefined
-    let outcome: Extract<OutResult['outcome'], 'completed' | 'partial'>
     try {
       const out = await runOutDir(run.taskDir)
-      const result = await readOutResult(out)
+      const result =
+        run.kind === 'plan'
+          ? await readOutResult(out, { allowPlan: true }).catch(async (error: unknown) => {
+              // 评审结果结构有效，但不属于拆解运行。
+              try {
+                return await readOutResult(out, { allowReview: true })
+              } catch {
+                throw error
+              }
+            })
+          : await readOutResult(out)
       if (result.outcome === 'answered') {
         if (result.commits > 0) log(`${repo.path} #${issue.number} 答复模式下存在提交，已忽略`)
         return { status: 'answered' }
       }
-      if (result.commits === 0) return failed(`没有可交付的提交（outcome: ${result.outcome}）`)
-      outcome = result.outcome === 'incomplete' ? 'partial' : result.outcome
-      bundle = await readOutputFile(out, 'commits.bundle', maxBundleBytes).catch(
-        (error: unknown) => {
-          if (missingOutput(error)) throw new Error('缺少 out/commits.bundle')
+      if (run.kind === 'plan') {
+        if (result.outcome !== 'planned') return failed(`拆解运行的结果无效：${result.outcome}`)
+        plan = await preparePlan(
+          out,
+          issue.number,
+          run.id,
+          result.commits > 0 ? branch : null,
+          secrets,
+        )
+      } else {
+        if (result.commits === 0) return failed(`没有可交付的提交（outcome: ${result.outcome}）`)
+      }
+      if (result.commits > 0)
+        bundle = await readOutputFile(out, 'commits.bundle', maxBundleBytes).catch(
+          (error: unknown) => {
+            if (missingOutput(error)) throw new Error('缺少 out/commits.bundle')
+            throw error
+          },
+        )
+      if (run.kind !== 'plan') {
+        if (
+          result.outcome !== 'completed' &&
+          result.outcome !== 'partial' &&
+          result.outcome !== 'incomplete'
+        )
+          return failed('out/result.json 的结构无效')
+        const body = await readMarkdown(out, 'pr-body.md').catch((error: unknown) => {
+          if (missingOutput(error)) throw new Error('缺少 out/pr-body.md')
           throw error
-        },
-      )
-      body = await readMarkdown(out, 'pr-body.md').catch((error: unknown) => {
-        if (missingOutput(error)) throw new Error('缺少 out/pr-body.md')
-        throw error
-      })
-      try {
-        comment = await readMarkdown(out, 'pr-comment.md')
-      } catch (error) {
-        if (!missingOutput(error)) warn('读取 PR 评论')
+        })
+        pr = { body, outcome: result.outcome === 'incomplete' ? 'partial' : result.outcome }
+        try {
+          comment = await readMarkdown(out, 'pr-comment.md')
+        } catch (error) {
+          if (!missingOutput(error)) warn('读取 PR 评论')
+        }
       }
     } catch (error) {
       return failed(redactSecrets(errorMessage(error), secrets))
     }
+
+    const publishPlan = async (plan: Plan, branch: string | null): Promise<Planned> => ({
+      status: 'planned',
+      branch,
+      children: await createPlanChildren({
+        db,
+        gh,
+        path: repo.path,
+        parent: issue.number,
+        runId: run.id,
+        plan,
+      }),
+    })
+    if (plan && !bundle) return await publishPlan(plan, null)
+    if (!bundle) return failed('缺少 out/commits.bundle')
 
     const ref = `refs/heads/${branch}`
     if (!branch.startsWith(`workling/${issue.number}-`))
@@ -320,6 +379,29 @@ export async function landRun({
         `新增内容命中密钥规则：${hits.map(({ rule, file }) => `${rule}（${file}）`).join('、')}`,
       )
 
+    if (plan) {
+      const changed = await git(
+        'log',
+        '-m',
+        '--no-renames',
+        '--format=',
+        '--name-only',
+        '-z',
+        range,
+      )
+      const nonDocs = [
+        ...new Set(
+          changed
+            .split('\0')
+            .filter((path) => path && !/\.(md|png|jpe?g|gif|svg|webp)$/i.test(path)),
+        ),
+      ]
+      if (nonDocs.length)
+        return failed(
+          `拆解运行只能提交文档：${redactSecrets(nonDocs.slice(0, 10).join('、'), secrets)}`,
+        )
+    }
+
     const oldTip = tip
     let restacked: { baseRef: string; baseBranch: string; upstreamNumber: number } | undefined
     if (run.stackBranch) {
@@ -390,6 +472,15 @@ export async function landRun({
       }
     }
 
+    if (plan)
+      for (const path of plan.docs) {
+        try {
+          await git('cat-file', '-e', `${tip}:${path}`)
+        } catch {
+          return failed(`plan.json 列出的文档不存在：${redactSecrets(path, secrets)}`)
+        }
+      }
+
     const remote = (await remoteGit('ls-remote', '--heads', '--', remoteUrl, ref))
       .split('\n')
       .find((line) => line.endsWith(`\t${ref}`))
@@ -410,6 +501,8 @@ export async function landRun({
       )
       pushed = true
     }
+    if (plan) return await publishPlan(plan, branch)
+    if (!pr) return failed('缺少 out/pr-body.md')
 
     const prs: unknown = JSON.parse(
       await gh([
@@ -427,8 +520,8 @@ export async function landRun({
     )
     if (!Value.Check(prsSchema, prs)) throw new Error('PR 列表格式无效')
     const existing = prs[0]
-    const prBody = neutralizeMentions(redactSecrets(body, secrets))
-    const prepared = preparePr(prBody, issue.number, outcome)
+    const prBody = neutralizeMentions(redactSecrets(pr.body, secrets))
+    const prepared = preparePr(prBody, issue.number, pr.outcome)
     const { partial } = prepared
     if (existing && !pushed && !restacked)
       return {
@@ -489,7 +582,7 @@ export async function landRun({
         if (restacked) throw error
         warn('更新 PR')
       }
-      if (outcome === 'completed' && existing.isDraft) {
+      if (pr.outcome === 'completed' && existing.isDraft) {
         try {
           await gh(['pr', 'ready', prUrl])
         } catch {

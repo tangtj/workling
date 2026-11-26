@@ -13,6 +13,8 @@ export const piSettingsSchema = Type.Object(
     effort,
     reviewModel: nullableString,
     reviewEffort: Type.Union([effort, Type.Null()]),
+    planModel: nullableString,
+    planEffort: Type.Union([effort, Type.Null()]),
     piModel: nullableString,
     llmBaseUrl: nullableString,
     llmApiKey: nullableString,

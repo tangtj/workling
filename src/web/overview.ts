@@ -1,10 +1,11 @@
 import * as Type from 'typebox'
+import { taskRunKind } from './run-kind.ts'
 const obj = <T extends Type.TProperties>(properties: T) =>
   Type.Object(properties, { additionalProperties: false })
 const nullableString = Type.Union([Type.String(), Type.Null()])
 const run = obj({
   id: Type.Integer(),
-  kind: Type.Union([Type.Literal('implement'), Type.Literal('rework')]),
+  kind: taskRunKind,
   startedAt: Type.String(),
   endedAt: nullableString,
   exitCode: Type.Union([Type.Integer(), Type.Null()]),
@@ -37,6 +38,7 @@ export const overviewSchema = obj({
         Type.Literal('capped'),
         Type.Literal('review'),
         Type.Literal('needs_info'),
+        Type.Literal('plan_pending'),
       ]),
       repoId: Type.Integer(),
       repoRef: Type.String(),

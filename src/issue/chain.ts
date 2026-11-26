@@ -23,6 +23,10 @@ export type SubIssue = {
   sameRepo: boolean
 }
 
+export function canPlan(subs: SubIssue[]): boolean {
+  return subs.every((sub) => sub.state === 'closed' && sub.stateReason === 'not_planned')
+}
+
 export async function readSubIssues({
   repo,
   number,

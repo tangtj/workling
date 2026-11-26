@@ -6,7 +6,7 @@ import { complete } from '@earendil-works/pi-ai/compat'
 import { machineLogin, readPiSettings, type PiSettings } from '../config/pi.ts'
 import type { WorklingDatabase } from '../db/index.ts'
 import { issues, repos, triageRecords } from '../db/schema.ts'
-import { docBranch } from '../issue/branch.ts'
+import { docBranch, planMode } from '../issue/branch.ts'
 import { ghEnv } from '../platform/github.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
@@ -18,11 +18,14 @@ import { TRIAGE_PROMPT } from './triage-prompt.ts'
 // LLM 调用串行执行，每仓库每轮最坏耗时 5 × 60 秒，会推迟主循环的其他步骤。
 
 export function checkIssue(body: string) {
+  const mode = planMode(body)
+  // 拆解模板的 HTML 占位注释和模式行都不是目标内容。
+  const sectionBody = mode === true ? body.replace(/<!--[\s\S]*?(?:-->|$)/g, '') : body
   const sections = new Map<string, string>()
   let section = '',
     fence = ''
   const lines: string[] = []
-  for (const line of body.split(/\r?\n/)) {
+  for (const line of sectionBody.split(/\r?\n/)) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)
     if (marker) {
       if (!fence) fence = marker[1]!
@@ -38,11 +41,17 @@ export function checkIssue(body: string) {
     if (heading) {
       section = heading[1]!
       if (!sections.has(section)) sections.set(section, '')
-    } else if (section) sections.set(section, (sections.get(section) ?? '') + line.trim())
+    } else if (section && !(mode === true && /^\s*(模式|分支|模型|强度)：/.test(line))) {
+      sections.set(section, (sections.get(section) ?? '') + line.trim())
+    }
   }
-  const missingSections = ['目标', '验收'].filter((name) => !sections.get(name)?.trim())
+  const missingSections = (mode === true ? ['目标'] : ['目标', '验收']).filter(
+    (name) => !sections.get(name)?.trim(),
+  )
   const invalidDirectives: string[] = []
   const branch = docBranch(body)
+  if (typeof mode === 'object') invalidDirectives.push(mode.error)
+  if (mode === true && branch) invalidDirectives.push('拆解需求不支持「分支：」行')
   if (branch && 'error' in branch) invalidDirectives.push(branch.error)
   for (const line of lines) {
     const directive = /^\s*(强度|模型)：(.*)$/.exec(line)

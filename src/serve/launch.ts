@@ -7,8 +7,14 @@ import { type WorklingDatabase } from '../db/index.ts'
 import { issues as issueStates, repos, runs, feedback } from '../db/schema.ts'
 import { createExecutor, workerEnv, type Executor } from '../executor/index.ts'
 import { defaultBranch as readDefaultBranch, ghEnv } from '../platform/github.ts'
-import { readParent, readSubIssues, previousSibling, type SubIssue } from '../issue/chain.ts'
-import { docBranch, taskBranch } from '../issue/branch.ts'
+import {
+  canPlan,
+  readParent,
+  readSubIssues,
+  previousSibling,
+  type SubIssue,
+} from '../issue/chain.ts'
+import { docBranch, findDirective, planMode, taskBranch } from '../issue/branch.ts'
 import { readIssue } from '../issue/read.ts'
 import { parseIssueRef } from '../issue/reference.ts'
 import { writeResult } from '../contract/result.ts'
@@ -397,12 +403,31 @@ export async function launchQueued({
         command,
         env: ghEnv(repo.token, repo.host),
       })
+      let planError: { error: string } | undefined
+      if (kind === 'implement') {
+        const mode = planMode(body)
+        if (typeof mode === 'object') planError = mode
+        else if (mode) {
+          if (findDirective(body, '分支') !== undefined)
+            planError = { error: '拆解需求不支持「分支：」行' }
+          else if (!canPlan(await readSubIssues({ repo, number: issue.number, command, signal })))
+            planError = {
+              error:
+                '已有未关闭或已完成的子 Issue，不再拆解；请直接编辑子 Issue，或把子 Issue 全部关闭为「不计划」后重试',
+            }
+          else {
+            kind = 'plan'
+            db.update(runs).set({ kind }).where(eq(runs.id, record.id)).run()
+          }
+        }
+      }
       const checkout =
         gate.kind === 'error'
           ? { error: gate.error }
           : included.length && (issue.prState === 'merged' || issue.prState === 'closed')
             ? { error: 'PR 已合入或关闭，不再返工；新需求请另开 Issue' }
-            : await prepareCheckout({
+            : (planError ??
+              (await prepareCheckout({
                 workspace: settings.workspace,
                 taskDir,
                 repo,
@@ -415,7 +440,7 @@ export async function launchQueued({
                 command,
                 log,
                 signal,
-              })
+              })))
       if ('error' in checkout) {
         await writeResult(taskDir, {
           exitCode: null,
@@ -460,8 +485,8 @@ export async function launchQueued({
           issue: { ref: issueRef, title },
           repo: specRepo,
           model: {
-            codex: pi.model,
-            effort: pi.effort,
+            codex: kind === 'plan' ? (pi.planModel ?? pi.model) : pi.model,
+            effort: kind === 'plan' ? (pi.planEffort ?? 'high') : pi.effort,
             ...(pi.piModel !== null ? { pi: pi.piModel } : {}),
           },
           git: { name: pi.gitName, email: pi.gitEmail },
@@ -551,7 +576,11 @@ export async function launchQueued({
         .map((row) => `- ${names[row.source]} · @${row.authorLogin} · ${row.url}`)
       if (included.length > 10) lines.push(`等 ${included.length} 条`)
       const first =
-        kind === 'rework' ? 'workling：收到 PR 反馈，开始返工。' : 'workling：已领取，开始执行。'
+        kind === 'plan'
+          ? 'workling：已领取，开始拆解需求。'
+          : kind === 'rework'
+            ? 'workling：收到 PR 反馈，开始返工。'
+            : 'workling：已领取，开始执行。'
       const body = `${first}\n\n- 机器：${settings.worker}\n- 开始时间：${record!.startedAt.toISOString()}\n- 任务目录：${record!.taskDir}${lines.length ? `\n\n触发反馈：\n${lines.join('\n')}` : ''}`
       await command(
         ['gh', 'issue', 'comment', String(issue.number), '-R', repo.path, '--body-file', '-'],

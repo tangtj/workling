@@ -28,6 +28,8 @@ export function cardDraft(data: SettingsData, card: Card): Draft {
         effort: p.effort,
         reviewModel: p.reviewModel ?? '',
         reviewEffort: p.reviewEffort ?? '',
+        planModel: p.planModel ?? '',
+        planEffort: p.planEffort ?? '',
       }
     case 'pi':
       return {
