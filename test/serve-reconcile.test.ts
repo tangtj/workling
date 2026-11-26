@@ -17,7 +17,8 @@ import { fakeExecutor, clock, scenario } from './helpers/serve.ts'
 test('对账退出码 0 落地成功后标记 done，保存链接与结果时间并安全删除 repo', async () => {
   const s = await scenario()
   try {
-    const { dir } = await s.running({ delivery: true })
+    const { issue, dir } = await s.running({ delivery: true })
+    s.db.update(issues).set({ progressCommentId: 77 }).where(eq(issues.id, issue.id)).run()
     await mkdir(join(dir, 'repo'))
     await writeFile(join(dir, 'report.md'), '保留')
     await writeFile(join(dir, 'out', 'outcome.json'), '{"outcome":"completed","executor":"pi"}')
@@ -33,6 +34,7 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
       exitCode: 0,
       executor: 'pi',
       error: null,
+      outcome: 'completed',
     })
     expect((await readdir(dir)).sort()).toEqual(['out', 'report.md', 'result.json'])
     expect(s.calls.map((call) => call.args)).toEqual([
@@ -61,8 +63,12 @@ test('对账退出码 0 落地成功后标记 done，保存链接与结果时间
         '--add-label',
         'workling:done',
       ],
+      ['gh', 'api', '--method', 'PATCH', 'repos/a/b/issues/comments/77', '--input', '-'],
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
+    const progress = JSON.parse(s.calls[2]!.options!.input!).body
+    expect(progress).toStartWith('### 进度 · 👀 等待评审与合并')
+    expect(progress).toContain('| 1 | 实现 | ✅ 完成 | 1 分钟 | 11-14 10:28 UTC |')
     expect(s.calls.at(-1)?.options?.input).toBe(
       `### ✅ 第 1 轮 · 实现 · 完成\n\n[PR #1](https://github.com/a/b/pull/1) · 更新 · 1 个提交 · 用时 1 分钟 · Pi 实现 · 运行 #1\n\n**下一步**：评审并合并 PR。需要修改时在 PR 或本 Issue 评论 \`/workling <说明>\`。\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
     )
@@ -89,6 +95,7 @@ test.each(['off', 'shadow'] as const)(
       await writeResult(dir, { exitCode: 0, signal: null, finishedAt: clock.toISOString() })
       await reconcile(s.options)
       expect(s.db.select().from(issues).get()?.status).toBe('done')
+      expect(s.db.select().from(runs).get()?.outcome).toBe('partial')
       const rows = s.db.select().from(reviews).all()
       if (reviewLevel === 'off') expect(rows).toEqual([])
       else
@@ -224,19 +231,20 @@ test('交付持续抛错超过 30 分钟后对账标记失败并发出脱敏评�
       endedAt: now,
       exitCode: 0,
       error: 'GitHub 拒绝请求 ***',
+      outcome: null,
     })
-    expect(s.calls).toHaveLength(2)
+    expect(s.calls).toHaveLength(3)
     expect(s.calls[0]?.args).toContain('workling:failed')
-    expect(s.calls[1]?.options?.input).toStartWith(
+    expect(s.calls.at(-1)?.options?.input).toStartWith(
       '### ❌ 第 1 轮 · 实现 · 对账失败，已停止重试\n\n用时 33 分钟 · 运行 #1\n\n**原因**：GitHub 拒绝请求 ***',
     )
-    expect(s.calls[1]?.options?.input).toContain(
+    expect(s.calls.at(-1)?.options?.input).toContain(
       '**下一步**：重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。',
     )
     expect(s.logs.join('\n')).not.toContain('repo-secret')
     await reconcile(options)
     expect(attempts).toBe(4)
-    expect(s.calls).toHaveLength(2)
+    expect(s.calls).toHaveLength(3)
   } finally {
     await s.dispose()
   }
@@ -278,7 +286,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
       prUrl,
       prState: 'open',
     })
-    expect(s.db.select().from(runs).get()?.error).toBeNull()
+    expect(s.db.select().from(runs).get()).toMatchObject({ error: null, outcome: 'answered' })
     expect(s.db.select().from(reviews).all()).toEqual([])
     expect(commands).toEqual([
       [
@@ -293,6 +301,7 @@ test.each([0, 1])('答复模式有 %i 个提交时只标记 done 并发布答复
         '--add-label',
         'workling:done',
       ],
+      ['gh', 'api', '--method', 'POST', 'repos/a/b/issues/42/comments', '--input', '-'],
       ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
     ])
     expect(s.calls.at(-1)?.options?.input).toBe(
@@ -604,7 +613,8 @@ test.each(['有结果', '无结果', '仍存活'])(
       )
       expect(s.calls.some((call) => call.args[1] === 'pr')).toBe(false)
       expect(kills).toEqual(kind === '仍存活' ? ['SIGKILL'] : [])
-      if (kind !== '仍存活') expect(s.db.select().from(runs).get()?.error).toBe('已取消')
+      if (kind !== '仍存活')
+        expect(s.db.select().from(runs).get()).toMatchObject({ error: '已取消', outcome: null })
     } finally {
       await s.dispose()
     }
@@ -628,7 +638,7 @@ test.each(['无 run', 'run 不存在', '无目录'])(
         kind === '无目录'
           ? '### ❌ 第 1 轮 · 实现 · 未完成\n\n用时 2 分钟 · 运行 #1'
           : '### ❌ 执行未完成'
-      expect(s.calls[1]!.options!.input).toBe(
+      expect(s.calls.at(-1)?.options?.input).toBe(
         `${header}\n\n**原因**：缺少任务目录\n\n` +
           '**下一步**：重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。' +
           `\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
@@ -645,7 +655,8 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
   async (kind) => {
     const s = await scenario()
     try {
-      const { dir } = await s.running()
+      const { issue, dir } = await s.running()
+      s.db.update(issues).set({ progressCommentId: 77 }).where(eq(issues.id, issue.id)).run()
       if (kind !== '无报告')
         await writeFile(
           join(dir, 'report.md'),
@@ -666,6 +677,7 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
           expect(s.db.select().from(runs).get()).toMatchObject({
             endedAt: clock,
             error: '进程丢失',
+            outcome: null,
           })
           if (args[2]?.endsWith('/parent')) throw new Error('HTTP 404')
           if (args[2] === 'view' && args.at(-1) === 'labels')
@@ -687,6 +699,7 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
           '--add-label',
           'workling:failed',
         ],
+        ['gh', 'api', '--method', 'PATCH', 'repos/a/b/issues/comments/77', '--input', '-'],
         ['gh', 'issue', 'comment', '42', '-R', 'a/b', '--body-file', '-'],
       ])
       for (const call of s.calls)
@@ -705,12 +718,13 @@ test.each(['有报告', '无报告', '有报告和 Pi 说明'])(
         kind === '有报告和 Pi 说明'
           ? '\n\n未找到错误前的步骤。\n\n**检查**\n\n<code>&#64;someone</code> 检查未通过'
           : ''
-      expect(s.calls[1]!.options!.input).toBe(
+      expect(s.calls.at(-1)?.options?.input).toBe(
         `### ❌ 第 1 轮 · 实现 · 未完成\n\n用时 2 分钟 · 运行 #1\n\n**原因**：进程丢失${explanation}${report}\n\n` +
           '**下一步**：重新打上 `workling:ready`，或评论 `/workling <补充说明>` 重试。' +
           `\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
       )
       expect(s.logs.filter((line) => line.includes('更新 GitHub 失败'))).toHaveLength(2)
+      expect(s.logs).toContain('github:a/b #42 更新进度评论失败：API failed')
       expect(s.db.select().from(issues).get()?.status).toBe('failed')
     } finally {
       await s.dispose()

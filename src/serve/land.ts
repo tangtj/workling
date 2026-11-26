@@ -1,6 +1,7 @@
 import {
   AI_NOTICE,
   formatDuration,
+  formatPrLink,
   markComment,
   neutralizeMentions,
   normalizeBody,
@@ -175,7 +176,6 @@ export async function publishIssueResult({
     if (step !== '读取待办变更' || !missingOutput(error)) warn(step)
   }
 
-  const pr = /\/pull\/(\d+)$/.exec(landed.prUrl)
   const executors = { pi: 'Pi 实现', codex: 'codex 实现', mixed: 'Pi + codex 实现' }
   const { partial } = landed
   try {
@@ -183,7 +183,7 @@ export async function publishIssueResult({
       runComment({
         title: `${partial ? '🟡' : '✅'} 第 ${run.round} 轮 · ${runKindLabel[run.kind]} · ${partial ? '部分完成' : '完成'}`,
         facts: [
-          pr ? `[PR #${pr[1]}](${landed.prUrl})` : landed.prUrl,
+          formatPrLink(landed.prUrl),
           landed.created ? '新建' : '更新',
           `${landed.commits} 个提交`,
           formatDuration(run.startedAt, run.endedAt),

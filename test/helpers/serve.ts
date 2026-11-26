@@ -67,6 +67,10 @@ export async function scenario({ body = '测试正文' }: { body?: string } = {}
     if (args[1] === 'issue' && args[2] === 'view' && args.at(-1) === 'labels')
       return JSON.stringify({ labels: [{ name: 'workling:running' }] })
     calls.push({ args, options })
+    if (args[1] === 'api' && args[2] === '--method' && args[3] === 'POST') {
+      const number = /\/issues\/(\d+)\/comments$/.exec(args[4] ?? '')?.[1]
+      if (number) return JSON.stringify({ id: 1000 + Number(number) })
+    }
     if (args[0] === 'gh' && args[1] === 'issue' && args[2] === 'view')
       return JSON.stringify({
         number: Number(args[3]),

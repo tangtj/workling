@@ -105,6 +105,7 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
     expect(s.db.select().from(issues).where(eq(issues.id, first.id)).get()).toMatchObject({
       status: 'running',
       lastRunId: 1,
+      progressCommentId: 1002,
     })
     expect(s.db.select().from(runs).get()).toMatchObject({
       pid: 876,
@@ -131,17 +132,18 @@ test('拉起按空闲名额与 Issue、仓库顺序调度，跳过 GHES 不占�
     ])
     expect(s.calls[3]!.args).toEqual([
       'gh',
-      'issue',
-      'comment',
-      '2',
-      '-R',
-      'a/b',
-      '--body-file',
+      'api',
+      '--method',
+      'POST',
+      'repos/a/b/issues/2/comments',
+      '--input',
       '-',
     ])
-    expect(s.calls[3]!.options?.input).toBe(
-      `### ▶️ 第 1 轮 · 实现 · 开始\n\n分支 \`workling/2-issue\` · 运行 #1\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
-    )
+    const body = JSON.parse(s.calls[3]!.options!.input!).body
+    expect(body).toStartWith('### 进度 · ▶️ 第 1 轮进行中')
+    expect(body).toContain('| 1 | 实现 | ▶️ 进行中 |  | 11-14 10:30 UTC |')
+    expect(body).toEndWith(`${AI_NOTICE}\n\n<!-- workling -->`)
+    expect(s.calls.some(({ args }) => args[2] === 'comment')).toBe(false)
     expect(s.logs.some((line) => line.includes('跳过'))).toBe(true)
     await launchQueued({
       ...s.options,
@@ -294,13 +296,19 @@ test('拉起失败记录原因和结束时间且保持 queued，下轮重试，�
     })
     expect(s.db.select().from(issues).get()).toMatchObject({ status: 'running', lastRunId: 2 })
     expect(s.logs.some((line) => line.includes('标签失败'))).toBe(true)
-    expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'list', 'view', 'list', 'comment'])
+    expect(s.calls.map((call) => call.args[2])).toEqual([
+      'view',
+      'list',
+      'view',
+      'list',
+      '--method',
+    ])
   } finally {
     await s.dispose()
   }
 })
 
-test('领取评论发送失败只记录日志，任务保持 running', async () => {
+test('创建进度评论失败只记录日志，任务和标签保持 running', async () => {
   const s = await scenario()
   try {
     await s.issue(42, 'queued')
@@ -308,13 +316,17 @@ test('领取评论发送失败只记录日志，任务保持 running', async () 
       ...s.options,
       executor: fakeExecutor(),
       command: async (args, options) => {
-        if (args[2] === 'comment') throw new Error('评论失败')
+        if (args[3] === 'POST') throw new Error('评论失败')
         return s.options.command(args, options)
       },
     })
     expect(s.calls.map((call) => call.args[2])).toEqual(['view', 'list', 'edit'])
-    expect(s.db.select().from(issues).get()?.status).toBe('running')
-    expect(s.logs).toContain('github:a/b #42 发送领取评论失败：评论失败')
+    expect(s.calls.at(-1)?.args.at(-1)).toBe('workling:running')
+    expect(s.db.select().from(issues).get()).toMatchObject({
+      status: 'running',
+      progressCommentId: null,
+    })
+    expect(s.logs).toContain('github:a/b #42 更新进度评论失败：评论失败')
   } finally {
     await s.dispose()
   }
@@ -461,8 +473,7 @@ test.each([
       ...s.options,
       command: (args, options) => {
         if (args[0] === 'git') return remote.git(args, options)
-        if (args[1] === 'api' && args[2]?.endsWith('/parent')) return s.command(args, options)
-        if (args[1] === 'api') {
+        if (args[1] === 'api' && args.at(-1) === '.default_branch') {
           baseRequests.push(args)
           return Promise.resolve('trunk')
         }
@@ -691,13 +702,13 @@ test.each([
   }
 })
 
-test('返工领取展示已保存的分支及触发反馈，保留原始提及', async () => {
+test('返工拉起时编辑原进度评论并新增一轮，不发领取评论', async () => {
   const s = await scenario()
   try {
     const { issue, run } = await s.running({ delivery: true })
     s.db
       .update(issues)
-      .set({ status: 'queued', prState: 'open' })
+      .set({ status: 'queued', prState: 'open', progressCommentId: 73 })
       .where(eq(issues.id, issue.id))
       .run()
     s.db.update(runs).set({ endedAt: clock }).where(eq(runs.id, run.id)).run()
@@ -730,9 +741,15 @@ test('返工领取展示已保存的分支及触发反馈，保留原始提及',
           ? Promise.resolve(args.at(-1) ?? '')
           : s.command(args, options),
     })
-    expect(s.calls.find(({ args }) => args[2] === 'comment')?.options?.input).toBe(
-      `### ▶️ 第 2 轮 · 返工 · 开始\n\n分支 \`workling/42-issue\` · 运行 #2\n\n**触发反馈**\n\n- Issue 评论 · @alice · ${url}\n\n\n${AI_NOTICE}\n\n<!-- workling -->`,
-    )
+    const patch = s.calls.find(({ args }) => args[3] === 'PATCH')!
+    expect(patch.args[4]).toBe('repos/a/b/issues/comments/73')
+    const body = JSON.parse(patch.options!.input!).body
+    expect(body).toStartWith('### 进度 · ▶️ 第 2 轮进行中')
+    expect(body).toContain('| 1 | 实现 | 已结束 | 2 分钟 | 11-14 10:28 UTC |')
+    expect(body).toContain('| 2 | 返工 | ▶️ 进行中 |  | 11-14 10:30 UTC |')
+    expect(body).not.toContain(url)
+    expect(s.calls.some(({ args }) => args[2] === 'comment' || args[3] === 'POST')).toBe(false)
+    expect(s.db.select().from(feedback).get()?.status).toBe('included')
   } finally {
     await s.dispose()
   }

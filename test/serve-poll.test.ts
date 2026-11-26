@@ -190,13 +190,22 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
     const states = ['done', 'failed', 'canceled', 'queued', 'running', 'done'] as const
     for (const [i, status] of states.entries())
       db.insert(issues)
-        .values({ repoId: project.id, number: i + 1, status, createdAt: old, updatedAt: old })
+        .values({
+          repoId: project.id,
+          number: i + 1,
+          status,
+          progressCommentId: i === 0 || i === 3 ? 70 + i : null,
+          createdAt: old,
+          updatedAt: old,
+        })
         .run()
     const logs: string[] = []
     const calls: string[][] = []
-    const command: Command = async (args) => {
+    const commentBodies: string[] = []
+    const command: Command = async (args, options) => {
       if (args[1] === 'api' && args[2]?.includes('/sub_issues?')) return '[]'
       calls.push(args)
+      if (args[2] === '--method') commentBodies.push(JSON.parse(options!.input!).body)
       if (args[2] !== 'list') return ''
       return JSON.stringify(
         [7, 5, 4, 3, 2, 1].map((number) => ({
@@ -265,6 +274,11 @@ test('轮询只入队新 Issue 和终态 Issue，保留运行中与未列出状�
     })
     expect(db.select().from(issues).all()).toHaveLength(7)
     expect(logs.filter((line) => line.endsWith('已入队'))).toHaveLength(1)
+    expect(calls.filter((args) => args[2] === '--method')).toEqual([
+      ['gh', 'api', '--method', 'PATCH', 'repos/a/b/issues/comments/70', '--input', '-'],
+    ])
+    expect(commentBodies[0]).toStartWith('### 进度 · ⏳ 排队中')
+    expect(rows.find((row) => row.number === 7)?.progressCommentId).toBeNull()
   } finally {
     close()
     await rm(dir, { recursive: true, force: true })

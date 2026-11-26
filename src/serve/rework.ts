@@ -6,6 +6,7 @@ import { ghEnv } from '../platform/github.ts'
 import { markComment } from './comment.ts'
 import { errorMessage } from '../runtime/errors.ts'
 import type { Command } from '../runtime/types.ts'
+import { syncProgress } from './progress.ts'
 
 type Row = typeof feedback.$inferSelect
 type Candidate = { issue: typeof issues.$inferSelect; run: typeof runs.$inferSelect }
@@ -205,5 +206,7 @@ export async function queueRework({
     } catch (error) {
       if (!signal.aborted) log(`${repo.ref} #${issue.number} 更新标签失败：${errorMessage(error)}`)
     }
+    if (issue.progressCommentId !== null)
+      await syncProgress({ db, repo, issue, command, log, signal })
   }
 }

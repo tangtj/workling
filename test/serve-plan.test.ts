@@ -161,9 +161,10 @@ test.each([false, true])('拉起拆解运行并选择默认或覆盖模型，接
         : { codex: 'default', effort: 'high' },
     })
     expect(await Bun.file(join(run.taskDir!, 'input', 'branch.md')).exists()).toBe(true)
-    expect(s.calls.find(({ args }) => args[2] === 'comment')?.options?.input).toContain(
-      `### ▶️ 第 ${continued ? 2 : 1} 轮 · 拆解 · 开始`,
-    )
+    const progress = s.calls.find(({ args }) => args[3] === 'POST')!
+    const body = JSON.parse(progress.options!.input!).body
+    expect(body).toStartWith(`### 进度 · ▶️ 第 ${continued ? 2 : 1} 轮进行中`)
+    expect(body).toContain(`| ${continued ? 2 : 1} | 拆解 | ▶️ 进行中 |`)
   } finally {
     await s.dispose()
   }
@@ -307,7 +308,10 @@ test('对账保存拆解结果并等待人工放行，放行后概览移除提�
       prUrl: null,
       prState: null,
     })
-    expect(s.db.select().from(runs).get()?.summary).toBe('先实现导出，再处理格式。')
+    expect(s.db.select().from(runs).get()).toMatchObject({
+      summary: '先实现导出，再处理格式。',
+      outcome: 'planned',
+    })
     expect(s.db.select().from(reviews).all()).toEqual([])
     expect(s.calls.some(({ args }) => args[2] === 'edit' && args.includes('workling:done'))).toBe(
       true,

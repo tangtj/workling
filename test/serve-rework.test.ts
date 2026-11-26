@@ -26,7 +26,7 @@ import { writeOutResult } from '../src/contract/out.ts'
 import { writeResult } from '../src/contract/result.ts'
 import { reconcile } from '../src/serve/reconcile.ts'
 
-test('只选择运行后当前 PR 或 Issue 的待观察反馈，并且入队一次', async () => {
+test('只选择运行后当前 PR 或 Issue 的待观察反馈，入队并更新进度一次', async () => {
   const s = await scenario()
   try {
     const issue = await s.issue(42, 'done')
@@ -37,7 +37,12 @@ test('只选择运行后当前 PR 或 Issue 的待观察反馈，并且入队一
       .get()
     s.db
       .update(issues)
-      .set({ lastRunId: run.id, prState: 'open', prUrl: 'https://github.com/a/b/pull/9' })
+      .set({
+        lastRunId: run.id,
+        prState: 'open',
+        prUrl: 'https://github.com/a/b/pull/9',
+        progressCommentId: 73,
+      })
       .where(eq(issues.id, issue.id))
       .run()
     const later = new Date(clock.getTime() + 10000)
@@ -99,6 +104,10 @@ test('只选择运行后当前 PR 或 Issue 的待观察反馈，并且入队一
       signal: new AbortController().signal,
     })
     expect(s.calls.filter(({ args }) => args.includes('--add-label'))).toHaveLength(1)
+    const progress = s.calls.filter(({ args }) => args[3] === 'PATCH')
+    expect(progress).toHaveLength(1)
+    expect(progress[0]?.args[4]).toBe('repos/a/b/issues/comments/73')
+    expect(JSON.parse(progress[0]!.options!.input!).body).toStartWith('### 进度 · ⏳ 排队中')
   } finally {
     await s.dispose()
   }
@@ -509,11 +518,11 @@ test('真实 Git：review 入队后在原 PR 分支接续并快进推送，不�
         .all()
         .every((row) => row.status === 'included' && row.runId === run.id),
     ).toBe(true)
-    const claim = s.calls.find(({ args }) => args[1] === 'issue' && args[2] === 'comment')?.options
-      ?.input
-    expect(claim).toContain('轮 · 返工 · 开始')
-    expect(claim).toContain('https://example.com/review/12')
-    expect(claim).toContain('等 11 条')
+    const progress = s.calls.find(({ args }) => args[3] === 'POST')!
+    const progressBody = JSON.parse(progress.options!.input!).body
+    expect(progressBody).toStartWith('### 进度 · ▶️ 第 2 轮进行中')
+    expect(progressBody).toContain('| 2 | 返工 | ▶️ 进行中 |')
+    expect(progressBody).not.toContain('https://example.com/review/12')
     await reconcile({ ...s.options, command, executor: fakeExecutor() })
     expect(s.db.select().from(issues).get()?.status).toBe('done')
     expect(await remote.write(['rev-parse', `refs/heads/${branch}`])).toBe(tip)
